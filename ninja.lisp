@@ -8,6 +8,8 @@
 ; ------------------------------------------
 
 (defun escape-char (c table)
+  (if (find c '(#\Return #\Linefeed #\Newline))
+    (error "Cannot escape newline for Ninja"))
   (multiple-value-bind (val found) (gethash c table)
     (if found
       val
@@ -45,7 +47,7 @@
 (defvar *escape-path-table* (make-escape-path-table))
 
 (defun make-escape-for-build-table ()
-  (let ((result (make-escape-path-table )))
+  (let ((result (make-escape-path-table)))
     (setf (gethash #\: result) "$:")
     result))
 
