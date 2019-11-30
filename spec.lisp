@@ -6,14 +6,84 @@
    :object-lists
    :targets
    :spec
-   :read-spec-file))
+   :read-spec-file
+   :environment
+   :add-definition
+   :definitions
+   :functions
+   :evaluate))
 
 (defpackage :kira
   (:export
    :compile
-   :executable))
+   :executable
+   :list
+   :quote))
+
+(defpackage :kira-user
+  (:use :kira))
 
 (in-package :spec)
+
+; --------------------------
+; An evaluation environment.
+; --------------------------
+
+(defclass environment ()
+  ((definitions
+    :reader definitions
+    :initform (make-hash-table))
+   (functions
+    :reader functions
+    :initform (make-hash-table))))
+
+(defmethod initialize-instance :after ((env environment) &key)
+  (setf (gethash 'kira:list (functions env)) 'evaluate-list)
+  (setf (gethash 'kira:quote (functions env)) 'evaluate-quote))
+
+(defmethod evaluate-list ((env environment) &rest args)
+  (loop for item in args collect (evaluate env item)))
+
+(defmethod evaluate-quote ((env environment) arg) arg)
+
+(defmethod add-definition ((env environment) (name symbol) value)
+  (if (not name)
+    (error "Variable name must not be nil"))
+  (if (not (eql (symbol-package name) (find-package :kira-user)))
+    (error "Invalid package for variable"))
+  (multiple-value-bind (old-value found) (gethash name (definitions env))
+    (if found
+      (error "Variable is already declared"))
+    (setf (gethash name (definitions env)) value)))
+
+(defmethod get-definition ((env environment) (name symbol))
+  (multiple-value-bind (value found) (gethash name (definitions env))
+    (if (not found)
+      (error "Could not find variable"))
+    value))
+
+(defmethod evaluate-function ((env environment) (form list))
+  (let* ((name (car form))
+         (args (cdr form))
+         (all-args (cons env args)))
+    (multiple-value-bind (fn found) (gethash name (functions env))
+      (if (not found)
+        (error "Could not find function"))
+      (apply fn all-args))))
+
+(defmethod evaluate ((env environment) form)
+  (cond
+    ((not form) nil)
+    ((stringp form) form)
+    ((numberp form) form)
+    ((keywordp form) form)
+    ((and
+       (symbolp form)
+       (eql (symbol-package form) (find-package :kira-user)))
+     (get-definition env form))
+    ((listp form)
+     (evaluate-function env form))
+    (t (error "Invalid value"))))
 
 ; ----------------------------------------
 ; A list of objects to build from sources.
