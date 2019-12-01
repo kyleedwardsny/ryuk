@@ -35,16 +35,19 @@
     :initform (make-hash-table))
    (functions
     :reader functions
-    :initform (make-hash-table))))
+    :initform (make-hash-table))
+   (spec
+    :reader spec
+    :initform (make-instance 'spec))))
 
 (defmethod initialize-instance :after ((env environment) &key)
-  (setf (gethash 'kira:list (functions env)) 'evaluate-list)
-  (setf (gethash 'kira:quote (functions env)) 'evaluate-quote))
+  (add-function env 'kira:list 'evaluate-list)
+  (add-function env 'kira:quote 'evaluate-quote)
+  (add-function env 'kira:compile 'evaluate-compile)
+  (add-function env 'kira:executable 'evaluate-executable))
 
-(defmethod evaluate-list ((env environment) &rest args)
-  (loop for item in args collect (evaluate env item)))
-
-(defmethod evaluate-quote ((env environment) arg) arg)
+(defmethod add-function ((env environment) (name symbol) (func symbol))
+  (setf (gethash name (functions env)) func))
 
 (defmethod add-definition ((env environment) (name symbol) value)
   (if (not name)
@@ -84,6 +87,34 @@
     ((listp form)
      (evaluate-function env form))
     (t (error "Invalid value"))))
+
+; -------------------------
+; Functions for evaluation.
+; -------------------------
+
+(defmethod evaluate-list ((env environment) &rest args)
+  (loop for item in args collect (evaluate env item)))
+
+(defmethod evaluate-quote ((env environment) arg) arg)
+
+(defmethod evaluate-compile ((env environment) name &key language)
+  (let ((parsed (make-instance 'object-list :language language)))
+    (setf (gethash name (object-lists (spec env))) parsed)
+    (add-definition env name parsed)
+
+    parsed))
+
+(defun evaluate-executable ((env environment) name &key objects)
+  (let ((parsed (make-instance 'target :name name :type :executable)))
+    (loop for obj-list in (evaluate env objects) do
+      (if (not (typep obj-list 'object-list))
+        (error "Value is not an object list"))
+      (setf (object-lists parsed) (cons obj-list (object-lists parsed))))
+
+    (setf (gethash name (targets (spec env))) parsed)
+    (add-definition env name parsed)
+
+    parsed))
 
 ; ----------------------------------------
 ; A list of objects to build from sources.
@@ -132,53 +163,17 @@
 ; ---------------------------------------
 
 (defun read-spec-file (fin)
-  (let ((spec (make-instance 'spec))
+  (let ((env (make-instance 'environment))
         (object-lists nil)
         (targets nil)
         (obj nil))
     ; Read the entire spec file
-    (let ((*package* (find-package :kira)))
-      (loop
-        (handler-case
-          (setf obj (read fin))
-          (end-of-file (e) (return)))
-        (cond 
-          ((eql (car obj) 'kira:compile)
-           (setf object-lists (cons obj object-lists)))
-          ((eql (car obj) 'kira:executable)
-           (setf targets (cons obj targets)))
-          (t (error "Invalid spec directive")))))
-
-    ; Create the object lists
-    (loop for obj-list in object-lists do
-      (multiple-value-bind (name parsed) (parse-object-list spec obj-list)
-        (setf (gethash name (slot-value spec 'spec:object-lists)) parsed)))
-
-    ; Create the targets
-    (loop for tgt in targets do
-      (multiple-value-bind (name parsed) (parse-target spec tgt)
-        (setf (gethash name (slot-value spec 'spec:targets)) parsed)))
+    (loop
+      (handler-case
+        (let ((*package* (find-package :kira-user)))
+          (setf obj (read fin)))
+        (end-of-file (e) (return)))
+      (evaluate env obj))
 
     ; Done
-    spec))
-
-(defun parse-object-list (spec obj-list)
-  (apply
-    #'(lambda (name &key language)
-      (let ((parsed (make-instance 'object-list :language language)))
-        ; TODO Parse more arguments
-
-        (values name parsed))) (cdr obj-list)))
-
-(defun parse-target (spec target)
-  (apply
-    #'(lambda (name &key objects)
-      (if (not (eql (car objects) 'list)) (error "objects must be a list"))
-      (let ((parsed (make-instance 'target :name name :type (car target))))
-        (loop for obj-name in (cdr objects) do
-          (print obj-name)
-          (multiple-value-bind (obj-list found) (gethash obj-name (object-lists spec))
-            (if (not found) (error "Unknown object list"))
-            (setf (object-lists parsed) (cons obj-list (object-lists parsed)))))
-
-        (values name parsed))) (cdr target)))
+    (spec env)))
