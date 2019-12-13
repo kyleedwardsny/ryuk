@@ -1,5 +1,6 @@
 mod lisp {
     use std::ops::{Index, IndexMut};
+    use std::collections::HashMap;
 
     /// Attempts to cast a dyn reference to its concrete type
     pub trait CastTo<T> {
@@ -83,7 +84,7 @@ mod lisp {
 
     /// A mutable arena of values
     pub trait ArenaMut<'a>: IndexMut<u32, Output = dyn Value<'a>> + Arena<'a> {
-        fn create<T: Value<'a>>(&mut self, val: T) -> u32;
+        fn create<T: 'static + Value<'a>>(&mut self, val: T) -> u32;
     }
 
     /// A statically compiled arena of values
@@ -98,6 +99,47 @@ mod lisp {
 
         fn index(&self, index: u32) -> &Self::Output {
             self.values[index as usize]
+        }
+    }
+
+    /// An arena of values that uses a HashMap to store its values
+    pub struct HashMapArena<'a> {
+        values: HashMap<u32, Box<dyn Value<'a>>>,
+        next: u32,
+    }
+
+    impl<'a> HashMapArena<'a> {
+        /// Create a new HashMapArena
+        pub fn new() -> HashMapArena<'a> {
+            HashMapArena {
+                values: HashMap::<u32, Box<dyn Value<'a>>>::new(),
+                next: 0,
+            }
+        }
+    }
+
+    impl<'a> Arena<'a> for HashMapArena<'a> { }
+
+    impl<'a> Index<u32> for HashMapArena<'a> {
+        type Output = dyn Value<'a>;
+
+        fn index(&self, index: u32) -> &Self::Output {
+            &(**self.values.get(&index).expect("Could not find value"))
+        }
+    }
+
+    impl<'a> ArenaMut<'a> for HashMapArena<'a> {
+        fn create<T: 'static + Value<'a>>(&mut self, val: T) -> u32 {
+            let index = self.next;
+            self.values.insert(index, Box::new(val));
+            self.next += 1;
+            index
+        }
+    }
+
+    impl<'a> IndexMut<u32> for HashMapArena<'a> {
+        fn index_mut(&mut self, index: u32) -> &mut Self::Output {
+            &mut (**self.values.get_mut(&index).expect("Could not find value"))
         }
     }
 }
@@ -225,5 +267,18 @@ mod test {
         };
 
         test_arena(&ARENA, 1);
+    }
+
+    #[test]
+    fn test_hashmap_arena() {
+        use lisp::ArenaMut;
+        let mut arena = lisp::HashMapArena::new();
+
+        let n = arena.create(lisp::None);
+        let s = arena.create(lisp::Symbol { sym: "sym" });
+        let c2 = arena.create(lisp::Cons { car: n, cdr: n });
+        let c1 = arena.create(lisp::Cons { car: s, cdr: c2 });
+
+        test_arena(&arena, c1);
     }
 }
