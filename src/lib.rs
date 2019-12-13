@@ -150,32 +150,20 @@ mod test {
 
     fn assert_cast_succeeds<T, F>(val: &dyn lisp::CastTo<T>, f: F) where
         F: Fn(&T) {
-        match val.cast_to() {
-            Option::Some(r) => f(r),
-            _ => panic!("cast_to() failed"),
-        }
+        f(val.cast_to().expect("cast_to() failed"))
     }
 
     fn assert_cast_fails<T>(val: &dyn lisp::CastTo<T>) {
-        match val.cast_to() {
-            Option::None => (),
-            _ => panic!("cast_to() succeeded"),
-        }
+        assert!(val.cast_to().is_none(), "cast_to() succeeded")
     }
 
     fn assert_cast_mut_succeeds<T, F>(val: &mut dyn lisp::CastToMut<T>, f: F) where
         F: Fn(&mut T) {
-        match val.cast_to_mut() {
-            Option::Some(r) => f(r),
-            _ => panic!("cast_to_mut() failed"),
-        }
+        f(val.cast_to_mut().expect("cast_to_mut() failed"))
     }
 
     fn assert_cast_mut_fails<T>(val: &mut dyn lisp::CastToMut<T>) {
-        match val.cast_to_mut() {
-            Option::None => (),
-            _ => panic!("cast_to_mut() succeeded"),
-        }
+        assert!(val.cast_to().is_none(), "cast_to_mut() succeeded")
     }
 
     #[test]
