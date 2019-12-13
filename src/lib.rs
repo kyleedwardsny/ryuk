@@ -1,4 +1,6 @@
 mod lisp {
+    use std::ops::{Index, IndexMut};
+
     /// Attempts to cast a dyn reference to its concrete type
     pub trait CastTo<T> {
         fn cast_to(&self) -> Option<&T> { Option::None }
@@ -75,6 +77,29 @@ mod lisp {
     }
 
     impl<'a> Value<'a> for Cons { }
+
+    /// An arean of values
+    pub trait Arena<'a>: Index<u32, Output = dyn Value<'a>> { }
+
+    /// A mutable arena of values
+    pub trait ArenaMut<'a>: IndexMut<u32, Output = dyn Value<'a>> + Arena<'a> {
+        fn create<T: Value<'a>>(&mut self, val: T) -> u32;
+    }
+
+    /// A statically compiled arena of values
+    pub struct ConstArena {
+        pub values: &'static [&'static dyn Value<'static>],
+    }
+
+    impl Arena<'static> for ConstArena { }
+
+    impl Index<u32> for ConstArena {
+        type Output = dyn Value<'static>;
+
+        fn index(&self, index: u32) -> &Self::Output {
+            self.values[index as usize]
+        }
+    }
 }
 
 #[cfg(test)]
@@ -150,5 +175,55 @@ mod test {
         assert_cast_mut_fails::<lisp::Symbol>(&mut cons);
         assert_cast_mut_succeeds(&mut cons, |r: &mut lisp::Cons| { r.car = 3; r.cdr = 4 });
         assert_eq!((cons.car, cons.cdr), (3, 4));
+    }
+
+    fn test_arena(arena: &dyn lisp::Arena, index: u32) {
+        let mut cons;
+        match lisp::CastTo::<lisp::Cons>::cast_to(&arena[index]) {
+            Option::Some(c) => cons = c,
+            _ => panic!("Not a cons"),
+        }
+
+        match lisp::CastTo::<lisp::Symbol>::cast_to(&arena[cons.car]) {
+            Option::Some(s) => assert_eq!(s.sym, "sym"),
+            _ => panic!("Not a symbol"),
+        }
+
+        match lisp::CastTo::<lisp::Cons>::cast_to(&arena[cons.cdr]) {
+            Option::Some(c) => cons = c,
+            _ => panic!("Not a cons"),
+        }
+
+        match lisp::CastTo::<lisp::None>::cast_to(&arena[cons.car]) {
+            Option::Some(_) => (),
+            _ => panic!("Not none"),
+        }
+
+        match lisp::CastTo::<lisp::None>::cast_to(&arena[cons.cdr]) {
+            Option::Some(_) => (),
+            _ => panic!("Not none"),
+        }
+    }
+
+    #[test]
+    fn test_const_arena() {
+        const ARENA: lisp::ConstArena = lisp::ConstArena {
+            values: &[
+                &lisp::None as &dyn lisp::Value,
+                &lisp::Cons {
+                    car: 2,
+                    cdr: 3,
+                } as &dyn lisp::Value,
+                &lisp::Symbol {
+                    sym: "sym",
+                } as &dyn lisp::Value,
+                &lisp::Cons {
+                    car: 0,
+                    cdr: 0,
+                } as &dyn lisp::Value,
+            ],
+        };
+
+        test_arena(&ARENA, 1);
     }
 }
