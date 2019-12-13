@@ -220,31 +220,11 @@ mod test {
     }
 
     fn test_arena(arena: &dyn lisp::Arena, index: u32) {
-        let mut cons;
-        match lisp::CastTo::<lisp::Cons>::cast_to(&arena[index]) {
-            Option::Some(c) => cons = c,
-            _ => panic!("Not a cons"),
-        }
-
-        match lisp::CastTo::<lisp::Symbol>::cast_to(&arena[cons.car]) {
-            Option::Some(s) => assert_eq!(s.sym, "sym"),
-            _ => panic!("Not a symbol"),
-        }
-
-        match lisp::CastTo::<lisp::Cons>::cast_to(&arena[cons.cdr]) {
-            Option::Some(c) => cons = c,
-            _ => panic!("Not a cons"),
-        }
-
-        match lisp::CastTo::<lisp::None>::cast_to(&arena[cons.car]) {
-            Option::Some(_) => (),
-            _ => panic!("Not none"),
-        }
-
-        match lisp::CastTo::<lisp::None>::cast_to(&arena[cons.cdr]) {
-            Option::Some(_) => (),
-            _ => panic!("Not none"),
-        }
+        let cons = lisp::CastTo::<lisp::Cons>::cast_to(&arena[index]).expect("Not a cons");
+        assert_eq!(lisp::CastTo::<lisp::Symbol>::cast_to(&arena[cons.car]).expect("Not a symbol").sym, "sym");
+        let cons = lisp::CastTo::<lisp::Cons>::cast_to(&arena[cons.cdr]).expect("Not a cons");
+        lisp::CastTo::<lisp::None>::cast_to(&arena[cons.car]).expect("Not none");
+        lisp::CastTo::<lisp::None>::cast_to(&arena[cons.cdr]).expect("Not none");
     }
 
     #[test]
