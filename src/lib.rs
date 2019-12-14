@@ -1,5 +1,6 @@
 mod lisp {
     use std::collections::HashMap;
+    use std::io::{Read, Result};
     use std::ops::Index;
 
     /// Optionally cast to a type
@@ -205,6 +206,92 @@ mod lisp {
             self.values.insert(index, val);
             self.next += 1;
             index
+        }
+    }
+
+    /// Read a single object from a stream
+    pub fn read(arena: &mut impl ArenaMut, reader: &mut impl Read) -> Result<u32> {
+        let mut pb = syntax::PutBack::new(reader);
+        syntax::read(arena, &mut pb)
+    }
+
+    mod syntax {
+        use std::io::{Read, Result};
+        use super::*;
+
+        pub struct PutBack<'a, R: Read> {
+            reader: &'a mut R,
+            last: Option<char>,
+        }
+
+        impl<'a, R: Read> PutBack<'a, R> {
+            pub fn new(reader: &'a mut R) -> PutBack<R> {
+                PutBack {
+                    reader,
+                    last: Option::None,
+                }
+            }
+
+            pub fn read_char(&mut self) -> Result<char> {
+                let result = match self.last {
+                    Option::Some(l) => Result::Ok(l),
+                    _ => {
+                        let mut buf = [0 as u8];
+                        match self.reader.read_exact(&mut buf) {
+                            Result::Ok(()) => Result::Ok(buf[0] as char),
+                            Result::Err(e) => Result::Err(e),
+                        }
+                    },
+                };
+
+                self.last = Option::None;
+                result
+            }
+
+            pub fn put_back(&mut self, c: char) {
+                assert!(self.last.is_none());
+                self.last = Option::Some(c);
+            }
+        }
+
+        pub fn read<R: Read>(arena: &mut impl ArenaMut, pb: &mut PutBack<R>) -> Result<u32> {
+            Result::Ok(0)
+        }
+    }
+
+    #[cfg(test)]
+    mod test {
+        use super::*;
+        use std::io::ErrorKind;
+
+        #[test]
+        fn test_put_back_none() {
+            let mut reader = "123".as_bytes();
+            let mut pb = syntax::PutBack::new(&mut reader);
+            assert_eq!(pb.read_char().expect("Failed to read"), '1');
+            assert_eq!(pb.read_char().expect("Failed to read"), '2');
+            assert_eq!(pb.read_char().expect("Failed to read"), '3');
+            assert_eq!(pb.read_char().expect_err("Successfully read").kind(), ErrorKind::UnexpectedEof);
+        }
+
+        #[test]
+        fn test_put_back_some() {
+            let mut reader = "23".as_bytes();
+            let mut pb = syntax::PutBack::new(&mut reader);
+            pb.put_back('1');
+            assert_eq!(pb.read_char().expect("Failed to read"), '1');
+            assert_eq!(pb.read_char().expect("Failed to read"), '2');
+            assert_eq!(pb.read_char().expect("Failed to read"), '3');
+            assert_eq!(pb.read_char().expect_err("Successfully read").kind(), ErrorKind::UnexpectedEof);
+        }
+
+        #[test]
+        #[should_panic]
+        fn test_put_back_error() {
+            let mut reader = "3".as_bytes();
+            let mut pb = syntax::PutBack::new(&mut reader);
+            pb.put_back('2');
+            pb.put_back('1');
         }
     }
 }
