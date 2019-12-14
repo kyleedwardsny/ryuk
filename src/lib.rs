@@ -297,29 +297,24 @@ mod lisp {
             arena: &mut impl ArenaMut,
             pb: &mut PutBack<R>,
             end: char,
-        ) -> Option<Result<u32>> {
-            if let Result::Err(e) = pb.skip_whitespace() {
-                return Option::Some(Result::Err(e));
-            }
+        ) -> Result<Option<u32>> {
+            pb.skip_whitespace()?;
 
-            match pb.read_char() {
-                Result::Ok(c) => {
-                    if c == end {
-                        return Option::None;
-                    }
-                    pb.put_back(c);
-
-                    Option::Some(read(arena, pb))
-                }
-                Result::Err(e) => Option::Some(Result::Err(e)),
+            let c = pb.read_char()?;
+            if c == end {
+                return Result::Ok(Option::None);
             }
+            pb.put_back(c);
+
+            let res = read(arena, pb)?;
+            Result::Ok(Option::Some(res))
         }
 
         fn read_list<R: Read>(arena: &mut impl ArenaMut, pb: &mut PutBack<R>) -> Result<u32> {
-            match read_delimited(arena, pb, ')') {
+            match read_delimited(arena, pb, ')')? {
                 Option::None => Result::Ok(arena.create(Box::new(None::new()))),
                 Option::Some(r) => {
-                    let car = r?;
+                    let car = r;
                     let cdr = read_list(arena, pb)?;
                     Result::Ok(arena.create(Box::new(Cons::new(car, cdr))))
                 }
