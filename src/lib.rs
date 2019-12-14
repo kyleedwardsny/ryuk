@@ -216,7 +216,7 @@ mod lisp {
     }
 
     mod syntax {
-        use std::io::{Read, Result};
+        use std::io::{Error, ErrorKind, Read, Result};
         use super::*;
 
         pub struct PutBack<'a, R: Read> {
@@ -264,8 +264,67 @@ mod lisp {
             }
         }
 
+        fn read_symbol<R: Read>(arena: &mut impl ArenaMut, pb: &mut PutBack<R>) -> Result<u32> {
+            let mut name = String::new();
+            loop {
+                match pb.read_char() {
+                    Result::Ok(c) => match c {
+                        'a'..='z' => name.push(c),
+                        _ => {
+                            pb.put_back(c);
+                            break;
+                        },
+                    },
+                    Result::Err(e) => match e.kind() {
+                        ErrorKind::UnexpectedEof => break,
+                        _ => return Result::Err(e),
+                    },
+                }
+            }
+
+            Result::Ok(arena.create(Box::new(OwnedSymbol::new(name))))
+        }
+
+        fn read_delimited<R: Read>(arena: &mut impl ArenaMut, pb: &mut PutBack<R>, end: char) -> Option<Result<u32>> {
+            if let Result::Err(e) = pb.skip_whitespace() {
+                return Option::Some(Result::Err(e));
+            }
+
+            match pb.read_char() {
+                Result::Ok(c) => {
+                    if c == end {
+                        return Option::None;
+                    }
+                    pb.put_back(c);
+
+                    Option::Some(read(arena, pb))
+                },
+                Result::Err(e) => Option::Some(Result::Err(e)),
+            }
+        }
+
+        fn read_list<R: Read>(arena: &mut impl ArenaMut, pb: &mut PutBack<R>) -> Result<u32> {
+            match read_delimited(arena, pb, ')') {
+                Option::None => Result::Ok(arena.create(Box::new(None::new()))),
+                Option::Some(r) => {
+                    let car = r?;
+                    let cdr = read_list(arena, pb)?;
+                    Result::Ok(arena.create(Box::new(Cons::new(car, cdr))))
+                }
+            }
+        }
+
         pub fn read<R: Read>(arena: &mut impl ArenaMut, pb: &mut PutBack<R>) -> Result<u32> {
-            Result::Ok(0)
+            pb.skip_whitespace()?;
+            let c = pb.read_char()?;
+            match c {
+                'a'..='z' => {
+                    pb.put_back(c);
+                    read_symbol(arena, pb)
+                },
+                '(' => read_list(arena, pb),
+                _ => Result::Err(Error::new(ErrorKind::InvalidData, format!("Invalid character: '{}'", c))),
+            }
         }
     }
 
@@ -409,5 +468,50 @@ mod test {
         let c1 = arena.create(Box::new(Cons::new(s, c2)));
 
         test_arena(&arena, c1);
+    }
+
+    #[test]
+    fn test_read_symbol() {
+        let mut arena = HashMapArena::new();
+        let mut reader = " symbol  ".as_bytes();
+
+        let r = read(&mut arena, &mut reader).expect("Failed to read");
+        let sym = cast_to_value::<SymbolValue>(&arena[r]).expect("Not a symbol");
+        assert_eq!(sym.name(), "symbol");
+    }
+
+    #[test]
+    fn test_read_none() {
+        let mut arena = HashMapArena::new();
+        let mut reader = " (  )  ".as_bytes();
+
+        let r = read(&mut arena, &mut reader).expect("Failed to read");
+        cast_to_value::<NoneValue>(&arena[r]).expect("Not None");
+    }
+
+    #[test]
+    fn test_read_list() {
+        let mut arena = HashMapArena::new();
+        let mut reader = " ( hello ( world sym) () )   ".as_bytes();
+
+        let r = read(&mut arena, &mut reader).expect("Failed to read");
+        let cons = cast_to_value::<ConsValue>(&arena[r]).expect("Not a cons");
+        let car = cast_to_value::<SymbolValue>(&arena[cons.car()]).expect("Not a symbol");
+        assert_eq!(car.name(), "hello");
+        let cdr = cast_to_value::<ConsValue>(&arena[cons.cdr()]).expect("Not a cons");
+        {
+            let car = cast_to_value::<ConsValue>(&arena[cdr.car()]).expect("Not a cons");
+            {
+                let car = cast_to_value::<SymbolValue>(&arena[car.car()]).expect("Not a symbol");
+                assert_eq!(car.name(), "world");
+            }
+            let cdr = cast_to_value::<ConsValue>(&arena[car.cdr()]).expect("Not a cons");
+            let car = cast_to_value::<SymbolValue>(&arena[cdr.car()]).expect("Not a symbol");
+            assert_eq!(car.name(), "sym");
+            cast_to_value::<NoneValue>(&arena[cdr.cdr()]).expect("Not none");
+        }
+        let cdr = cast_to_value::<ConsValue>(&arena[cdr.cdr()]).expect("Not a cons");
+        cast_to_value::<NoneValue>(&arena[cdr.car()]).expect("Not none");
+        cast_to_value::<NoneValue>(&arena[cdr.cdr()]).expect("Not none");
     }
 }
