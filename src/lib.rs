@@ -1,25 +1,24 @@
 mod lisp {
-    use std::any::Any;
     use std::collections::HashMap;
     use std::ops::Index;
 
     /// Optionally cast to a type
-    pub trait CastTo<'t, 'f: 't, T: ?Sized + 't> {
-        fn do_cast(&'f self) -> Option<&'t T> { Option::None }
+    pub trait CastTo<T: ?Sized> {
+        fn do_cast(&self) -> Option<&T> { Option::None }
     }
 
     /// A Lisp value
-    pub trait Value<'t, 'f: 't>:
-        CastTo<'t, 'f, dyn NoneValue> +
-        CastTo<'t, 'f, dyn SymbolValue> +
-        CastTo<'t, 'f, dyn ConsValue> {
+    pub trait Value:
+        CastTo<dyn NoneValue> +
+        CastTo<dyn SymbolValue> +
+        CastTo<dyn ConsValue> {
     }
 
-    /// Generic function to cast a value to another value
-    pub fn cast_to_value<'t, 'f: 't, T>(from: &'f dyn Value<'t, 'f>) -> Option<&'t T> where
-        dyn Value<'t, 'f> + 'f: CastTo<'t, 'f, T>,
-        T: ?Sized + 't {
-        CastTo::<'t, 'f, T>::do_cast(from)
+    //// Generic function to cast a value to another value
+    pub fn cast_to_value<'a, T>(from: &'a (dyn Value + 'static)) -> Option<&'a T> where
+        dyn Value: CastTo<T>,
+        T: ?Sized {
+        CastTo::<T>::do_cast(from)
     }
 
     /// No value
@@ -45,21 +44,21 @@ mod lisp {
 
     impl None {
         /// Create a None
-        pub fn new() -> None {
+        pub const fn new() -> None {
             None
         }
     }
 
     impl NoneValue for None { }
 
-    impl<'t, 'f: 't> CastTo<'t, 'f, dyn NoneValue> for None {
-        fn do_cast(&'f self) -> Option<&'t dyn NoneValue> { Option::Some(self) }
+    impl CastTo<dyn NoneValue> for None {
+        fn do_cast(&self) -> Option<&(dyn NoneValue + 'static)> { Option::Some(self) }
     }
 
-    impl<'t, 'f: 't> CastTo<'t, 'f, dyn SymbolValue> for None { }
-    impl<'t, 'f: 't> CastTo<'t, 'f, dyn ConsValue> for None { }
+    impl CastTo<dyn SymbolValue> for None { }
+    impl CastTo<dyn ConsValue> for None { }
 
-    impl<'t, 'f: 't> Value<'t, 'f> for None { }
+    impl Value for None { }
 
     /// A Lisp symbol with static lifetime
     pub struct StaticSymbol {
@@ -68,7 +67,7 @@ mod lisp {
 
     impl StaticSymbol {
         /// Create a static symbol
-        pub fn new(sym: &'static str) -> StaticSymbol {
+        pub const fn new(sym: &'static str) -> StaticSymbol {
             StaticSymbol { sym }
         }
     }
@@ -79,15 +78,15 @@ mod lisp {
         }
     }
 
-    impl<'t, 'f: 't> CastTo<'t, 'f, dyn NoneValue> for StaticSymbol { }
+    impl CastTo<dyn NoneValue> for StaticSymbol { }
 
-    impl<'t, 'f: 't> CastTo<'t, 'f, dyn SymbolValue> for StaticSymbol {
-        fn do_cast(&self) -> Option<&dyn SymbolValue> { Option::Some(self) }
+    impl CastTo<dyn SymbolValue> for StaticSymbol {
+        fn do_cast(&self) -> Option<&(dyn SymbolValue + 'static)> { Option::Some(self) }
     }
 
-    impl<'t, 'f: 't> CastTo<'t, 'f, dyn ConsValue> for StaticSymbol { }
+    impl CastTo<dyn ConsValue> for StaticSymbol { }
 
-    impl<'t, 'f: 't> Value<'t, 'f> for StaticSymbol { }
+    impl Value for StaticSymbol { }
 
     /// A Lisp symbol with ownership
     pub struct OwnedSymbol {
@@ -107,15 +106,15 @@ mod lisp {
         }
     }
 
-    impl<'t, 'f: 't> CastTo<'t, 'f, dyn NoneValue> for OwnedSymbol { }
+    impl CastTo<dyn NoneValue> for OwnedSymbol { }
 
-    impl<'t, 'f: 't> CastTo<'t, 'f, dyn SymbolValue> for OwnedSymbol {
-        fn do_cast(&self) -> Option<&dyn SymbolValue> { Option::Some(self) }
+    impl CastTo<dyn SymbolValue> for OwnedSymbol {
+        fn do_cast(&self) -> Option<&(dyn SymbolValue + 'static)> { Option::Some(self) }
     }
 
-    impl<'t, 'f: 't> CastTo<'t, 'f, dyn ConsValue> for OwnedSymbol { }
+    impl CastTo<dyn ConsValue> for OwnedSymbol { }
 
-    impl<'t, 'f: 't> Value<'t, 'f> for OwnedSymbol { }
+    impl Value for OwnedSymbol { }
 
     /// A cons value
     pub struct Cons {
@@ -124,7 +123,7 @@ mod lisp {
     }
 
     impl Cons {
-        pub fn new(car: u32, cdr: u32) -> Cons {
+        pub const fn new(car: u32, cdr: u32) -> Cons {
             Cons {
                 car,
                 cdr,
@@ -142,41 +141,41 @@ mod lisp {
         }
     }
 
-    impl<'t, 'f: 't> CastTo<'t, 'f, dyn NoneValue> for Cons { }
-    impl<'t, 'f: 't> CastTo<'t, 'f, dyn SymbolValue> for Cons { }
+    impl CastTo<dyn NoneValue> for Cons { }
+    impl CastTo<dyn SymbolValue> for Cons { }
 
-    impl<'t, 'f: 't> CastTo<'t, 'f, dyn ConsValue> for Cons {
-        fn do_cast(&self) -> Option<&dyn ConsValue> { Option::Some(self) }
+    impl CastTo<dyn ConsValue> for Cons {
+        fn do_cast(&self) -> Option<&(dyn ConsValue + 'static)> { Option::Some(self) }
     }
 
-    impl<'t, 'f: 't> Value<'t, 'f> for Cons { }
+    impl Value for Cons { }
 
     /// An arena of values
-    pub trait Arena: Index<u32, Output = dyn Any> { }
+    pub trait Arena: Index<u32, Output = dyn Value> { }
 
     /// A mutable arena of values
     pub trait ArenaMut: Arena {
-        fn create(&mut self, val: Box<dyn Any>) -> u32;
+        fn create(&mut self, val: Box<dyn Value>) -> u32;
     }
 
     /// A statically compiled arena of values
     pub struct ConstArena {
-        pub values: &'static [&'static dyn Any],
+        pub values: &'static [&'static dyn Value],
     }
 
     impl Arena for ConstArena { }
 
     impl Index<u32> for ConstArena {
-        type Output = dyn Any;
+        type Output = dyn Value;
 
-        fn index(&self, index: u32) -> &Self::Output {
+        fn index(&self, index: u32) -> &'static Self::Output {
             self.values[index as usize]
         }
     }
 
     /// An arena of values that uses a HashMap to store its values
     pub struct HashMapArena {
-        values: HashMap<u32, Box<dyn Any>>,
+        values: HashMap<u32, Box<dyn Value>>,
         next: u32,
     }
 
@@ -184,7 +183,7 @@ mod lisp {
         /// Create a new HashMapArena
         pub fn new() -> HashMapArena {
             HashMapArena {
-                values: HashMap::<u32, Box<dyn Any>>::new(),
+                values: HashMap::<u32, Box<dyn Value>>::new(),
                 next: 0,
             }
         }
@@ -193,7 +192,7 @@ mod lisp {
     impl Arena for HashMapArena { }
 
     impl Index<u32> for HashMapArena {
-        type Output = dyn Any;
+        type Output = dyn Value;
 
         fn index(&self, index: u32) -> &Self::Output {
             &(**self.values.get(&index).expect("Could not find value"))
@@ -201,7 +200,7 @@ mod lisp {
     }
 
     impl ArenaMut for HashMapArena {
-        fn create(&mut self, val: Box<dyn Any>) -> u32 {
+        fn create(&mut self, val: Box<dyn Value>) -> u32 {
             let index = self.next;
             self.values.insert(index, val);
             self.next += 1;
@@ -248,30 +247,22 @@ mod test {
         assert_eq!(c.cdr(), 2);
     }
 
-    /*fn test_arena(arena: &dyn Arena, index: u32) {
-        let cons = arena[index].downcast_ref::<dyn ConsValue>().expect("Not a cons");
-        assert_eq!(arena[cons.car].downcast_ref::<dyn SymbolValue>().expect("Not a symbol").sym, "sym");
-        let cons = arena[cons.cdr].downcast_ref::<dyn ConsValue>().expect("Not a cons");
-        arena[cons.car].downcast_ref::<dyn NoneValue>().expect("Not none");
-        arena[cons.cdr].downcast_ref::<dyn NoneValue>().expect("Not none");
+    fn test_arena(arena: &dyn Arena, index: u32) {
+        let cons = cast_to_value::<dyn ConsValue>(&arena[index]).expect("Not a cons");
+        assert_eq!(cast_to_value::<dyn SymbolValue>(&arena[cons.car()]).expect("Not a symbol").name(), "sym");
+        let cons = cast_to_value::<dyn ConsValue>(&arena[cons.cdr()]).expect("Not a cons");
+        cast_to_value::<dyn NoneValue>(&arena[cons.car()]).expect("Not none");
+        cast_to_value::<dyn NoneValue>(&arena[cons.cdr()]).expect("Not none");
     }
 
     #[test]
     fn test_const_arena() {
-        const ARENA: lisp::ConstArena = lisp::ConstArena {
+        const ARENA: ConstArena = ConstArena {
             values: &[
-                &lisp::None as &dyn lisp::Value,
-                &lisp::Cons {
-                    car: 2,
-                    cdr: 3,
-                } as &dyn lisp::Value,
-                &lisp::Symbol {
-                    sym: "sym",
-                } as &dyn lisp::Value,
-                &lisp::Cons {
-                    car: 0,
-                    cdr: 0,
-                } as &dyn lisp::Value,
+                &None::new() as &dyn Value,
+                &Cons::new(2, 3) as &dyn Value,
+                &StaticSymbol::new("sym") as &dyn Value,
+                &Cons::new(0, 0) as &dyn Value,
             ],
         };
 
@@ -280,14 +271,13 @@ mod test {
 
     #[test]
     fn test_hashmap_arena() {
-        use lisp::ArenaMut;
-        let mut arena = lisp::HashMapArena::new();
+        let mut arena = HashMapArena::new();
 
-        let n = arena.create(lisp::None);
-        let s = arena.create(lisp::Symbol { sym: "sym" });
-        let c2 = arena.create(lisp::Cons { car: n, cdr: n });
-        let c1 = arena.create(lisp::Cons { car: s, cdr: c2 });
+        let n = arena.create(Box::new(None::new()));
+        let s = arena.create(Box::new(OwnedSymbol::new("sym".to_string())));
+        let c2 = arena.create(Box::new(Cons::new(n, n)));
+        let c1 = arena.create(Box::new(Cons::new(s, c2)));
 
         test_arena(&arena, c1);
-    }*/
+    }
 }
