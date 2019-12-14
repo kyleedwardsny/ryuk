@@ -252,6 +252,16 @@ mod lisp {
                 assert!(self.last.is_none());
                 self.last = Option::Some(c);
             }
+
+            pub fn skip_whitespace(&mut self) -> Result<()> {
+                loop {
+                    let c = self.read_char()?;
+                    if c != ' ' && c != '\n' {
+                        self.put_back(c);
+                        return Result::Ok(());
+                    }
+                }
+            }
         }
 
         pub fn read<R: Read>(arena: &mut impl ArenaMut, pb: &mut PutBack<R>) -> Result<u32> {
@@ -303,6 +313,28 @@ mod lisp {
             let mut pb = syntax::PutBack::new(&mut reader);
             pb.put_back('2');
             pb.put_back('1');
+        }
+
+        #[test]
+        fn test_put_back_skip_whitespace() {
+            let mut reader = "Hell o \nworld!\n".as_bytes();
+            let mut pb = syntax::PutBack::new(&mut reader);
+            pb.skip_whitespace().expect("Failed to skip whitespace");
+            assert_eq!(pb.read_char().expect("Failed to read"), 'H');
+            pb.skip_whitespace().expect("Failed to skip whitespace");
+            assert_eq!(pb.read_char().expect("Failed to read"), 'e');
+            assert_eq!(pb.read_char().expect("Failed to read"), 'l');
+            assert_eq!(pb.read_char().expect("Failed to read"), 'l');
+            pb.skip_whitespace().expect("Failed to skip whitespace");
+            assert_eq!(pb.read_char().expect("Failed to read"), 'o');
+            pb.skip_whitespace().expect("Failed to skip whitespace");
+            assert_eq!(pb.read_char().expect("Failed to read"), 'w');
+            assert_eq!(pb.read_char().expect("Failed to read"), 'o');
+            assert_eq!(pb.read_char().expect("Failed to read"), 'r');
+            assert_eq!(pb.read_char().expect("Failed to read"), 'l');
+            assert_eq!(pb.read_char().expect("Failed to read"), 'd');
+            assert_eq!(pb.read_char().expect("Failed to read"), '!');
+            assert_eq!(pb.skip_whitespace().expect_err("Successfully read").kind(), ErrorKind::UnexpectedEof);
         }
     }
 }
