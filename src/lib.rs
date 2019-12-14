@@ -536,7 +536,7 @@ mod test {
         let mut reader = " symbol  ".as_bytes();
 
         let r = read(&mut arena, &mut reader).expect("Failed to read");
-        let sym = cast_to_value::<SymbolValue>(&arena[r]).expect("Not a symbol");
+        let sym = cast_to_value::<dyn SymbolValue>(&arena[r]).expect("Not a symbol");
         assert_eq!(sym.name(), "symbol");
     }
 
@@ -546,7 +546,7 @@ mod test {
         let mut reader = " (  )  ".as_bytes();
 
         let r = read(&mut arena, &mut reader).expect("Failed to read");
-        cast_to_value::<NoneValue>(&arena[r]).expect("Not None");
+        cast_to_value::<dyn NoneValue>(&arena[r]).expect("Not None");
     }
 
     #[test]
@@ -555,23 +555,23 @@ mod test {
         let mut reader = " ( hello ( world sym) () )   ".as_bytes();
 
         let r = read(&mut arena, &mut reader).expect("Failed to read");
-        let cons = cast_to_value::<ConsValue>(&arena[r]).expect("Not a cons");
-        let car = cast_to_value::<SymbolValue>(&arena[cons.car()]).expect("Not a symbol");
+        let cons = cast_to_value::<dyn ConsValue>(&arena[r]).expect("Not a cons");
+        let car = cast_to_value::<dyn SymbolValue>(&arena[cons.car()]).expect("Not a symbol");
         assert_eq!(car.name(), "hello");
-        let cdr = cast_to_value::<ConsValue>(&arena[cons.cdr()]).expect("Not a cons");
+        let cdr = cast_to_value::<dyn ConsValue>(&arena[cons.cdr()]).expect("Not a cons");
         {
-            let car = cast_to_value::<ConsValue>(&arena[cdr.car()]).expect("Not a cons");
+            let car = cast_to_value::<dyn ConsValue>(&arena[cdr.car()]).expect("Not a cons");
             {
-                let car = cast_to_value::<SymbolValue>(&arena[car.car()]).expect("Not a symbol");
+                let car = cast_to_value::<dyn SymbolValue>(&arena[car.car()]).expect("Not a symbol");
                 assert_eq!(car.name(), "world");
             }
-            let cdr = cast_to_value::<ConsValue>(&arena[car.cdr()]).expect("Not a cons");
-            let car = cast_to_value::<SymbolValue>(&arena[cdr.car()]).expect("Not a symbol");
+            let cdr = cast_to_value::<dyn ConsValue>(&arena[car.cdr()]).expect("Not a cons");
+            let car = cast_to_value::<dyn SymbolValue>(&arena[cdr.car()]).expect("Not a symbol");
             assert_eq!(car.name(), "sym");
-            cast_to_value::<NoneValue>(&arena[cdr.cdr()]).expect("Not none");
+            cast_to_value::<dyn NoneValue>(&arena[cdr.cdr()]).expect("Not none");
         }
-        let cdr = cast_to_value::<ConsValue>(&arena[cdr.cdr()]).expect("Not a cons");
-        cast_to_value::<NoneValue>(&arena[cdr.car()]).expect("Not none");
-        cast_to_value::<NoneValue>(&arena[cdr.cdr()]).expect("Not none");
+        let cdr = cast_to_value::<dyn ConsValue>(&arena[cdr.cdr()]).expect("Not a cons");
+        cast_to_value::<dyn NoneValue>(&arena[cdr.car()]).expect("Not none");
+        cast_to_value::<dyn NoneValue>(&arena[cdr.cdr()]).expect("Not none");
     }
 }
