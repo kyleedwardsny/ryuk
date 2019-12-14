@@ -286,6 +286,17 @@ mod lisp {
         }
 
         #[test]
+        fn test_put_back_middle() {
+            let mut reader = "13".as_bytes();
+            let mut pb = syntax::PutBack::new(&mut reader);
+            assert_eq!(pb.read_char().expect("Failed to read"), '1');
+            pb.put_back('2');
+            assert_eq!(pb.read_char().expect("Failed to read"), '2');
+            assert_eq!(pb.read_char().expect("Failed to read"), '3');
+            assert_eq!(pb.read_char().expect_err("Successfully read").kind(), ErrorKind::UnexpectedEof);
+        }
+
+        #[test]
         #[should_panic]
         fn test_put_back_error() {
             let mut reader = "3".as_bytes();
