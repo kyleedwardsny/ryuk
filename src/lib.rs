@@ -5,25 +5,28 @@ mod lisp {
 
     /// Optionally cast to a type
     pub trait CastTo<T: ?Sized> {
-        fn do_cast(&self) -> Option<&T> { Option::None }
+        fn do_cast(&self) -> Option<&T> {
+            Option::None
+        }
     }
 
     /// A Lisp value
     pub trait Value:
-        CastTo<dyn NoneValue> +
-        CastTo<dyn SymbolValue> +
-        CastTo<dyn ConsValue> {
+        CastTo<dyn NoneValue> + CastTo<dyn SymbolValue> + CastTo<dyn ConsValue>
+    {
     }
 
     //// Generic function to cast a value to another value
-    pub fn cast_to_value<'a, T>(from: &'a (dyn Value + 'static)) -> Option<&'a T> where
+    pub fn cast_to_value<'a, T>(from: &'a (dyn Value + 'static)) -> Option<&'a T>
+    where
         dyn Value: CastTo<T>,
-        T: ?Sized {
+        T: ?Sized,
+    {
         CastTo::<T>::do_cast(from)
     }
 
     /// No value
-    pub trait NoneValue { }
+    pub trait NoneValue {}
 
     /// A Lisp symbol
     pub trait SymbolValue {
@@ -50,16 +53,18 @@ mod lisp {
         }
     }
 
-    impl NoneValue for None { }
+    impl NoneValue for None {}
 
     impl CastTo<dyn NoneValue> for None {
-        fn do_cast(&self) -> Option<&(dyn NoneValue + 'static)> { Option::Some(self) }
+        fn do_cast(&self) -> Option<&(dyn NoneValue + 'static)> {
+            Option::Some(self)
+        }
     }
 
-    impl CastTo<dyn SymbolValue> for None { }
-    impl CastTo<dyn ConsValue> for None { }
+    impl CastTo<dyn SymbolValue> for None {}
+    impl CastTo<dyn ConsValue> for None {}
 
-    impl Value for None { }
+    impl Value for None {}
 
     /// A Lisp symbol with static lifetime
     pub struct StaticSymbol {
@@ -79,15 +84,17 @@ mod lisp {
         }
     }
 
-    impl CastTo<dyn NoneValue> for StaticSymbol { }
+    impl CastTo<dyn NoneValue> for StaticSymbol {}
 
     impl CastTo<dyn SymbolValue> for StaticSymbol {
-        fn do_cast(&self) -> Option<&(dyn SymbolValue + 'static)> { Option::Some(self) }
+        fn do_cast(&self) -> Option<&(dyn SymbolValue + 'static)> {
+            Option::Some(self)
+        }
     }
 
-    impl CastTo<dyn ConsValue> for StaticSymbol { }
+    impl CastTo<dyn ConsValue> for StaticSymbol {}
 
-    impl Value for StaticSymbol { }
+    impl Value for StaticSymbol {}
 
     /// A Lisp symbol with ownership
     pub struct OwnedSymbol {
@@ -107,15 +114,17 @@ mod lisp {
         }
     }
 
-    impl CastTo<dyn NoneValue> for OwnedSymbol { }
+    impl CastTo<dyn NoneValue> for OwnedSymbol {}
 
     impl CastTo<dyn SymbolValue> for OwnedSymbol {
-        fn do_cast(&self) -> Option<&(dyn SymbolValue + 'static)> { Option::Some(self) }
+        fn do_cast(&self) -> Option<&(dyn SymbolValue + 'static)> {
+            Option::Some(self)
+        }
     }
 
-    impl CastTo<dyn ConsValue> for OwnedSymbol { }
+    impl CastTo<dyn ConsValue> for OwnedSymbol {}
 
-    impl Value for OwnedSymbol { }
+    impl Value for OwnedSymbol {}
 
     /// A cons value
     pub struct Cons {
@@ -125,10 +134,7 @@ mod lisp {
 
     impl Cons {
         pub const fn new(car: u32, cdr: u32) -> Cons {
-            Cons {
-                car,
-                cdr,
-            }
+            Cons { car, cdr }
         }
     }
 
@@ -142,17 +148,19 @@ mod lisp {
         }
     }
 
-    impl CastTo<dyn NoneValue> for Cons { }
-    impl CastTo<dyn SymbolValue> for Cons { }
+    impl CastTo<dyn NoneValue> for Cons {}
+    impl CastTo<dyn SymbolValue> for Cons {}
 
     impl CastTo<dyn ConsValue> for Cons {
-        fn do_cast(&self) -> Option<&(dyn ConsValue + 'static)> { Option::Some(self) }
+        fn do_cast(&self) -> Option<&(dyn ConsValue + 'static)> {
+            Option::Some(self)
+        }
     }
 
-    impl Value for Cons { }
+    impl Value for Cons {}
 
     /// An arena of values
-    pub trait Arena: Index<u32, Output = dyn Value> { }
+    pub trait Arena: Index<u32, Output = dyn Value> {}
 
     /// A mutable arena of values
     pub trait ArenaMut: Arena {
@@ -164,7 +172,7 @@ mod lisp {
         pub values: &'static [&'static dyn Value],
     }
 
-    impl Arena for ConstArena { }
+    impl Arena for ConstArena {}
 
     impl Index<u32> for ConstArena {
         type Output = dyn Value;
@@ -190,7 +198,7 @@ mod lisp {
         }
     }
 
-    impl Arena for HashMapArena { }
+    impl Arena for HashMapArena {}
 
     impl Index<u32> for HashMapArena {
         type Output = dyn Value;
@@ -216,8 +224,8 @@ mod lisp {
     }
 
     mod syntax {
-        use std::io::{Error, ErrorKind, Read, Result};
         use super::*;
+        use std::io::{Error, ErrorKind, Read, Result};
 
         pub struct PutBack<'a, R: Read> {
             reader: &'a mut R,
@@ -241,7 +249,7 @@ mod lisp {
                             Result::Ok(()) => Result::Ok(buf[0] as char),
                             Result::Err(e) => Result::Err(e),
                         }
-                    },
+                    }
                 };
 
                 self.last = Option::None;
@@ -273,7 +281,7 @@ mod lisp {
                         _ => {
                             pb.put_back(c);
                             break;
-                        },
+                        }
                     },
                     Result::Err(e) => match e.kind() {
                         ErrorKind::UnexpectedEof => break,
@@ -285,7 +293,11 @@ mod lisp {
             Result::Ok(arena.create(Box::new(OwnedSymbol::new(name))))
         }
 
-        fn read_delimited<R: Read>(arena: &mut impl ArenaMut, pb: &mut PutBack<R>, end: char) -> Option<Result<u32>> {
+        fn read_delimited<R: Read>(
+            arena: &mut impl ArenaMut,
+            pb: &mut PutBack<R>,
+            end: char,
+        ) -> Option<Result<u32>> {
             if let Result::Err(e) = pb.skip_whitespace() {
                 return Option::Some(Result::Err(e));
             }
@@ -298,7 +310,7 @@ mod lisp {
                     pb.put_back(c);
 
                     Option::Some(read(arena, pb))
-                },
+                }
                 Result::Err(e) => Option::Some(Result::Err(e)),
             }
         }
@@ -321,9 +333,12 @@ mod lisp {
                 'a'..='z' => {
                     pb.put_back(c);
                     read_symbol(arena, pb)
-                },
+                }
                 '(' => read_list(arena, pb),
-                _ => Result::Err(Error::new(ErrorKind::InvalidData, format!("Invalid character: '{}'", c))),
+                _ => Result::Err(Error::new(
+                    ErrorKind::InvalidData,
+                    format!("Invalid character: '{}'", c),
+                )),
             }
         }
     }
@@ -340,7 +355,10 @@ mod lisp {
             assert_eq!(pb.read_char().expect("Failed to read"), '1');
             assert_eq!(pb.read_char().expect("Failed to read"), '2');
             assert_eq!(pb.read_char().expect("Failed to read"), '3');
-            assert_eq!(pb.read_char().expect_err("Successfully read").kind(), ErrorKind::UnexpectedEof);
+            assert_eq!(
+                pb.read_char().expect_err("Successfully read").kind(),
+                ErrorKind::UnexpectedEof
+            );
         }
 
         #[test]
@@ -351,7 +369,10 @@ mod lisp {
             assert_eq!(pb.read_char().expect("Failed to read"), '1');
             assert_eq!(pb.read_char().expect("Failed to read"), '2');
             assert_eq!(pb.read_char().expect("Failed to read"), '3');
-            assert_eq!(pb.read_char().expect_err("Successfully read").kind(), ErrorKind::UnexpectedEof);
+            assert_eq!(
+                pb.read_char().expect_err("Successfully read").kind(),
+                ErrorKind::UnexpectedEof
+            );
         }
 
         #[test]
@@ -362,7 +383,10 @@ mod lisp {
             pb.put_back('2');
             assert_eq!(pb.read_char().expect("Failed to read"), '2');
             assert_eq!(pb.read_char().expect("Failed to read"), '3');
-            assert_eq!(pb.read_char().expect_err("Successfully read").kind(), ErrorKind::UnexpectedEof);
+            assert_eq!(
+                pb.read_char().expect_err("Successfully read").kind(),
+                ErrorKind::UnexpectedEof
+            );
         }
 
         #[test]
@@ -393,7 +417,10 @@ mod lisp {
             assert_eq!(pb.read_char().expect("Failed to read"), 'l');
             assert_eq!(pb.read_char().expect("Failed to read"), 'd');
             assert_eq!(pb.read_char().expect("Failed to read"), '!');
-            assert_eq!(pb.skip_whitespace().expect_err("Successfully read").kind(), ErrorKind::UnexpectedEof);
+            assert_eq!(
+                pb.skip_whitespace().expect_err("Successfully read").kind(),
+                ErrorKind::UnexpectedEof
+            );
         }
     }
 }
@@ -406,31 +433,65 @@ mod test {
     fn test_none() {
         let v = None::new();
         cast_to_value::<dyn NoneValue>(&v).expect("Cast to NoneValue failed");
-        assert!(cast_to_value::<dyn SymbolValue>(&v).is_none(), "Cast to SymbolValue succeeded");
-        assert!(cast_to_value::<dyn ConsValue>(&v).is_none(), "Cast to ConsValue succeeded");
+        assert!(
+            cast_to_value::<dyn SymbolValue>(&v).is_none(),
+            "Cast to SymbolValue succeeded"
+        );
+        assert!(
+            cast_to_value::<dyn ConsValue>(&v).is_none(),
+            "Cast to ConsValue succeeded"
+        );
     }
 
     #[test]
     fn test_static_symbol() {
         let v = StaticSymbol::new("sym");
-        assert!(cast_to_value::<dyn NoneValue>(&v).is_none(), "Cast to NoneValue succeeded");
-        assert_eq!(cast_to_value::<dyn SymbolValue>(&v).expect("Cast to SymbolValue failed").name(), "sym");
-        assert!(cast_to_value::<dyn ConsValue>(&v).is_none(), "Cast to ConsValue succeeded");
+        assert!(
+            cast_to_value::<dyn NoneValue>(&v).is_none(),
+            "Cast to NoneValue succeeded"
+        );
+        assert_eq!(
+            cast_to_value::<dyn SymbolValue>(&v)
+                .expect("Cast to SymbolValue failed")
+                .name(),
+            "sym"
+        );
+        assert!(
+            cast_to_value::<dyn ConsValue>(&v).is_none(),
+            "Cast to ConsValue succeeded"
+        );
     }
 
     #[test]
     fn test_owned_symbol() {
         let v = OwnedSymbol::new("sym".to_string());
-        assert!(cast_to_value::<dyn NoneValue>(&v).is_none(), "Cast to NoneValue succeeded");
-        assert_eq!(cast_to_value::<dyn SymbolValue>(&v).expect("Cast to SymbolValue failed").name(), "sym");
-        assert!(cast_to_value::<dyn ConsValue>(&v).is_none(), "Cast to ConsValue succeeded");
+        assert!(
+            cast_to_value::<dyn NoneValue>(&v).is_none(),
+            "Cast to NoneValue succeeded"
+        );
+        assert_eq!(
+            cast_to_value::<dyn SymbolValue>(&v)
+                .expect("Cast to SymbolValue failed")
+                .name(),
+            "sym"
+        );
+        assert!(
+            cast_to_value::<dyn ConsValue>(&v).is_none(),
+            "Cast to ConsValue succeeded"
+        );
     }
 
     #[test]
     fn test_cons() {
         let v = Cons::new(1, 2);
-        assert!(cast_to_value::<dyn NoneValue>(&v).is_none(), "Cast to NoneValue succeeded");
-        assert!(cast_to_value::<dyn SymbolValue>(&v).is_none(), "Cast to SymbolValue succeeded");
+        assert!(
+            cast_to_value::<dyn NoneValue>(&v).is_none(),
+            "Cast to NoneValue succeeded"
+        );
+        assert!(
+            cast_to_value::<dyn SymbolValue>(&v).is_none(),
+            "Cast to SymbolValue succeeded"
+        );
         let c = cast_to_value::<dyn ConsValue>(&v).expect("Cast to ConsValue failed");
         assert_eq!(c.car(), 1);
         assert_eq!(c.cdr(), 2);
@@ -438,7 +499,12 @@ mod test {
 
     fn test_arena(arena: &dyn Arena, index: u32) {
         let cons = cast_to_value::<dyn ConsValue>(&arena[index]).expect("Not a cons");
-        assert_eq!(cast_to_value::<dyn SymbolValue>(&arena[cons.car()]).expect("Not a symbol").name(), "sym");
+        assert_eq!(
+            cast_to_value::<dyn SymbolValue>(&arena[cons.car()])
+                .expect("Not a symbol")
+                .name(),
+            "sym"
+        );
         let cons = cast_to_value::<dyn ConsValue>(&arena[cons.cdr()]).expect("Not a cons");
         cast_to_value::<dyn NoneValue>(&arena[cons.car()]).expect("Not none");
         cast_to_value::<dyn NoneValue>(&arena[cons.cdr()]).expect("Not none");
