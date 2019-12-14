@@ -313,8 +313,7 @@ mod lisp {
         fn read_list<R: Read>(arena: &mut impl ArenaMut, pb: &mut PutBack<R>) -> Result<u32> {
             match read_delimited(arena, pb, ')')? {
                 Option::None => Result::Ok(arena.create(Box::new(None::new()))),
-                Option::Some(r) => {
-                    let car = r;
+                Option::Some(car) => {
                     let cdr = read_list(arena, pb)?;
                     Result::Ok(arena.create(Box::new(Cons::new(car, cdr))))
                 }
