@@ -562,7 +562,8 @@ mod test {
         {
             let car = cast_to_value::<dyn ConsValue>(&arena[cdr.car()]).expect("Not a cons");
             {
-                let car = cast_to_value::<dyn SymbolValue>(&arena[car.car()]).expect("Not a symbol");
+                let car =
+                    cast_to_value::<dyn SymbolValue>(&arena[car.car()]).expect("Not a symbol");
                 assert_eq!(car.name(), "world");
             }
             let cdr = cast_to_value::<dyn ConsValue>(&arena[car.cdr()]).expect("Not a cons");
