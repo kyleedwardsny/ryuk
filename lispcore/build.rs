@@ -1,11 +1,12 @@
 use std::fs::read_to_string;
 use std::process::exit;
-use syn::{Ident, Item};
+use syn::{Ident, Item, TraitItem};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 struct ParseData {
     cast_to_trait: Option<Ident>,
+    cast_to_fn: Option<Ident>,
     value_trait: Option<Ident>,
     value_cast_traits: Vec<Ident>,
 }
@@ -32,13 +33,13 @@ fn check_option_some<'o, T>(name: &str, opt: &'o Option<T>) -> Result<&'o T> {
     }
 }
 
-fn try_set_trait(name: &str, t: &mut Option<Ident>, ident: &Ident) -> Result<()> {
-    if t.is_some() {
+fn try_set_option(name: &str, i: &mut Option<Ident>, ident: &Ident) -> Result<()> {
+    if i.is_some() {
         return Result::Err(Box::new(Error {
             message: format!("{} has already been used", name),
         }));
     }
-    *t = Option::Some(ident.clone());
+    *i = Option::Some(ident.clone());
     Result::Ok(())
 }
 
@@ -55,19 +56,42 @@ fn parse_items(parse_data: &mut ParseData, items: impl IntoIterator<Item = Item>
                         let s = &a.path.segments[0];
                         let name = s.ident.to_string();
                         match &*name {
-                            "cast_to_trait" => try_set_trait(
+                            "cast_to_trait" => try_set_option(
                                 "cast_to_trait",
                                 &mut parse_data.cast_to_trait,
                                 &t.ident,
                             )?,
-                            "value_trait" => {
-                                try_set_trait("value_trait", &mut parse_data.value_trait, &t.ident)?
-                            }
+                            "value_trait" => try_set_option(
+                                "value_trait",
+                                &mut parse_data.value_trait,
+                                &t.ident,
+                            )?,
                             "value_cast_trait" => {
                                 parse_data.value_cast_traits.push(t.ident.clone())
                             }
                             _ => (),
                         }
+                    }
+                }
+                for i in t.items {
+                    match i {
+                        TraitItem::Method(m) => {
+                            for a in m.attrs {
+                                if a.path.segments.len() == 1 {
+                                    let s = &a.path.segments[0];
+                                    let name = s.ident.to_string();
+                                    match &*name {
+                                        "cast_to_fn" => try_set_option(
+                                            "cast_to_fn",
+                                            &mut parse_data.cast_to_fn,
+                                            &m.sig.ident,
+                                        )?,
+                                        _ => (),
+                                    }
+                                }
+                            }
+                        }
+                        _ => (),
                     }
                 }
             }
@@ -89,12 +113,14 @@ fn parse_file(filename: &str) -> Result<()> {
 
     let mut parse_data = ParseData {
         cast_to_trait: Option::None,
+        cast_to_fn: Option::None,
         value_trait: Option::None,
         value_cast_traits: Vec::new(),
     };
     parse_items(&mut parse_data, f.items)?;
 
     let cast_to_trait = check_option_some("cast_to_trait", &parse_data.cast_to_trait)?;
+    let cast_to_fn = check_option_some("cast_to_fn", &parse_data.cast_to_fn)?;
     let value_trait = check_option_some("value_trait", &parse_data.value_trait)?;
 
     let mut first = true;
@@ -108,6 +134,7 @@ fn parse_file(filename: &str) -> Result<()> {
     }
 
     write_env_var("RYUK_CAST_TO_TRAIT", &cast_to_trait.to_string());
+    write_env_var("RYUK_CAST_TO_FN", &cast_to_fn.to_string());
     write_env_var("RYUK_VALUE_TRAIT", &value_trait.to_string());
     write_env_var("RYUK_VALUE_CAST_TRAITS", &value_cast_traits);
 

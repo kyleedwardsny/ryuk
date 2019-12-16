@@ -7,9 +7,8 @@ mod lisp {
     /// Optionally cast to a type
     #[cast_to_trait]
     pub trait CastTo<T: ?Sized> {
-        fn do_cast(&self) -> Option<&T> {
-            Option::None
-        }
+        #[cast_to_fn]
+        fn do_cast(&self) -> Option<&T>;
     }
 
     /// A Lisp value
@@ -47,6 +46,7 @@ mod lisp {
     }
 
     /// A unit struct for no value
+    #[value_type(NoneValue)]
     pub struct None;
 
     impl None {
@@ -58,18 +58,8 @@ mod lisp {
 
     impl NoneValue for None {}
 
-    impl CastTo<dyn NoneValue> for None {
-        fn do_cast(&self) -> Option<&(dyn NoneValue + 'static)> {
-            Option::Some(self)
-        }
-    }
-
-    impl CastTo<dyn SymbolValue> for None {}
-    impl CastTo<dyn ConsValue> for None {}
-
-    impl Value for None {}
-
     /// A Lisp symbol with static lifetime
+    #[value_type(SymbolValue)]
     pub struct StaticSymbol {
         sym: &'static str,
     }
@@ -87,19 +77,8 @@ mod lisp {
         }
     }
 
-    impl CastTo<dyn NoneValue> for StaticSymbol {}
-
-    impl CastTo<dyn SymbolValue> for StaticSymbol {
-        fn do_cast(&self) -> Option<&(dyn SymbolValue + 'static)> {
-            Option::Some(self)
-        }
-    }
-
-    impl CastTo<dyn ConsValue> for StaticSymbol {}
-
-    impl Value for StaticSymbol {}
-
     /// A Lisp symbol with ownership
+    #[value_type(SymbolValue)]
     pub struct OwnedSymbol {
         sym: String,
     }
@@ -117,19 +96,8 @@ mod lisp {
         }
     }
 
-    impl CastTo<dyn NoneValue> for OwnedSymbol {}
-
-    impl CastTo<dyn SymbolValue> for OwnedSymbol {
-        fn do_cast(&self) -> Option<&(dyn SymbolValue + 'static)> {
-            Option::Some(self)
-        }
-    }
-
-    impl CastTo<dyn ConsValue> for OwnedSymbol {}
-
-    impl Value for OwnedSymbol {}
-
     /// A cons value
+    #[value_type(ConsValue)]
     pub struct Cons {
         car: u32,
         cdr: u32,
@@ -150,17 +118,6 @@ mod lisp {
             self.cdr
         }
     }
-
-    impl CastTo<dyn NoneValue> for Cons {}
-    impl CastTo<dyn SymbolValue> for Cons {}
-
-    impl CastTo<dyn ConsValue> for Cons {
-        fn do_cast(&self) -> Option<&(dyn ConsValue + 'static)> {
-            Option::Some(self)
-        }
-    }
-
-    impl Value for Cons {}
 
     /// An arena of values
     pub trait Arena: Index<u32, Output = dyn Value> {}
