@@ -45,6 +45,13 @@ mod lisp {
         fn cdr(&self) -> u32;
     }
 
+    /// A boolean value
+    #[value_cast_trait]
+    pub trait BoolValue {
+        /// Get the boolean value
+        fn value(&self) -> bool;
+    }
+
     /// A unit struct for no value
     #[value_type(NoneValue)]
     pub struct None;
@@ -116,6 +123,24 @@ mod lisp {
 
         fn cdr(&self) -> u32 {
             self.cdr
+        }
+    }
+
+    /// A boolean value
+    #[value_type(BoolValue)]
+    pub struct Bool {
+        value: bool,
+    }
+
+    impl Bool {
+        pub const fn new(value: bool) -> Bool {
+            Bool { value }
+        }
+    }
+
+    impl BoolValue for Bool {
+        fn value(&self) -> bool {
+            self.value
         }
     }
 
@@ -414,6 +439,10 @@ mod test {
             cast_to_value::<dyn ConsValue>(&v).is_none(),
             "Cast to ConsValue succeeded"
         );
+        assert!(
+            cast_to_value::<dyn BoolValue>(&v).is_none(),
+            "Cast to BoolValue succeeded"
+        );
     }
 
     #[test]
@@ -433,6 +462,10 @@ mod test {
             cast_to_value::<dyn ConsValue>(&v).is_none(),
             "Cast to ConsValue succeeded"
         );
+        assert!(
+            cast_to_value::<dyn BoolValue>(&v).is_none(),
+            "Cast to BoolValue succeeded"
+        );
     }
 
     #[test]
@@ -449,6 +482,32 @@ mod test {
         let c = cast_to_value::<dyn ConsValue>(&v).expect("Cast to ConsValue failed");
         assert_eq!(c.car(), 1);
         assert_eq!(c.cdr(), 2);
+        assert!(
+            cast_to_value::<dyn BoolValue>(&v).is_none(),
+            "Cast to BoolValue succeeded"
+        );
+    }
+
+    #[test]
+    fn test_bool() {
+        let v = Bool::new(true);
+        assert!(
+            cast_to_value::<dyn NoneValue>(&v).is_none(),
+            "Cast to NoneValue succeeded"
+        );
+        assert!(
+            cast_to_value::<dyn SymbolValue>(&v).is_none(),
+            "Cast to SymbolValue succeeded"
+        );
+        assert!(
+            cast_to_value::<dyn ConsValue>(&v).is_none(),
+            "Cast to ConsValue succeeded"
+        );
+        let b = cast_to_value::<dyn BoolValue>(&v).expect("Cast to BoolValue failed");
+        assert_eq!(b.value(), true);
+        let v = Bool::new(false);
+        let b = cast_to_value::<dyn BoolValue>(&v).expect("Cast to BoolValue failed");
+        assert_eq!(b.value(), false);
     }
 
     fn test_arena(arena: &dyn Arena, index: u32) {
@@ -458,6 +517,13 @@ mod test {
                 .expect("Not a symbol")
                 .name(),
             "sym"
+        );
+        let cons = cast_to_value::<dyn ConsValue>(&arena[cons.cdr()]).expect("Not a cons");
+        assert_eq!(
+            cast_to_value::<dyn BoolValue>(&arena[cons.car()])
+                .expect("Not a bool")
+                .value(),
+            true
         );
         let cons = cast_to_value::<dyn ConsValue>(&arena[cons.cdr()]).expect("Not a cons");
         cast_to_value::<dyn NoneValue>(&arena[cons.car()]).expect("Not none");
@@ -471,6 +537,8 @@ mod test {
                 &None::new() as &dyn Value,
                 &Cons::new(2, 3) as &dyn Value,
                 &StaticSymbol::new("sym") as &dyn Value,
+                &Cons::new(4, 5) as &dyn Value,
+                &Bool::new(true) as &dyn Value,
                 &Cons::new(0, 0) as &dyn Value,
             ],
         };
@@ -484,7 +552,9 @@ mod test {
 
         let n = arena.create(Box::new(None::new()));
         let s = arena.create(Box::new(OwnedSymbol::new("sym".to_string())));
-        let c2 = arena.create(Box::new(Cons::new(n, n)));
+        let b = arena.create(Box::new(Bool::new(true)));
+        let c3 = arena.create(Box::new(Cons::new(n, n)));
+        let c2 = arena.create(Box::new(Cons::new(b, c3)));
         let c1 = arena.create(Box::new(Cons::new(s, c2)));
 
         test_arena(&arena, c1);
