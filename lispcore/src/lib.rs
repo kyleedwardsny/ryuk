@@ -255,27 +255,31 @@ mod lisp {
                     }
                 }
             }
+
+            pub fn read_name(&mut self) -> Result<String> {
+                let mut name = String::new();
+                loop {
+                    match self.read_char() {
+                        Result::Ok(c) => match c {
+                            'a'..='z' => name.push(c),
+                            _ => {
+                                self.put_back(c);
+                                break;
+                            }
+                        },
+                        Result::Err(e) => match e.kind() {
+                            ErrorKind::UnexpectedEof => break,
+                            _ => return Result::Err(e),
+                        },
+                    }
+                }
+
+                Result::Ok(name)
+            }
         }
 
         fn read_symbol<R: Read>(arena: &mut impl ArenaMut, pb: &mut PutBack<R>) -> Result<u32> {
-            let mut name = String::new();
-            loop {
-                match pb.read_char() {
-                    Result::Ok(c) => match c {
-                        'a'..='z' => name.push(c),
-                        _ => {
-                            pb.put_back(c);
-                            break;
-                        }
-                    },
-                    Result::Err(e) => match e.kind() {
-                        ErrorKind::UnexpectedEof => break,
-                        _ => return Result::Err(e),
-                    },
-                }
-            }
-
-            Result::Ok(arena.create(Box::new(OwnedSymbol::new(name))))
+            Result::Ok(arena.create(Box::new(OwnedSymbol::new(pb.read_name()?))))
         }
 
         fn read_delimited<R: Read>(
