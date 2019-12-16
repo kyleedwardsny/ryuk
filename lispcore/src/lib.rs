@@ -15,7 +15,7 @@ mod lisp {
     #[value_trait]
     pub trait Value {}
 
-    //// Generic function to cast a value to another value
+    /// Generic function to cast a value to another value
     pub fn cast_to_value<'a, T>(from: &'a (dyn Value + 'static)) -> Option<&'a T>
     where
         dyn Value: CastTo<T>,
