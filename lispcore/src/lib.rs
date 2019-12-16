@@ -309,6 +309,28 @@ mod lisp {
             }
         }
 
+        fn read_macro<R: Read>(arena: &mut impl ArenaMut, pb: &mut PutBack<R>) -> Result<u32> {
+            let c = pb.read_char()?;
+            match c {
+                'a'..='z' => {
+                    pb.put_back(c);
+                    let name = pb.read_name()?;
+                    match &*name {
+                        "t" => Result::Ok(arena.create(Box::new(Bool::new(true)))),
+                        "f" => Result::Ok(arena.create(Box::new(Bool::new(false)))),
+                        _ => Result::Err(Error::new(
+                            ErrorKind::InvalidData,
+                            format!("Invalid macro expression: '{}'", name),
+                        )),
+                    }
+                }
+                _ => Result::Err(Error::new(
+                    ErrorKind::InvalidData,
+                    format!("Invalid macro character: '{}'", c),
+                )),
+            }
+        }
+
         pub fn read<R: Read>(arena: &mut impl ArenaMut, pb: &mut PutBack<R>) -> Result<u32> {
             pb.skip_whitespace()?;
             let c = pb.read_char()?;
@@ -318,6 +340,7 @@ mod lisp {
                     read_symbol(arena, pb)
                 }
                 '(' => read_list(arena, pb),
+                '#' => read_macro(arena, pb),
                 _ => Result::Err(Error::new(
                     ErrorKind::InvalidData,
                     format!("Invalid character: '{}'", c),
@@ -608,5 +631,18 @@ mod test {
         let cdr = cast_to_value::<dyn ConsValue>(&arena[cdr.cdr()]).expect("Not a cons");
         cast_to_value::<dyn NoneValue>(&arena[cdr.car()]).expect("Not none");
         cast_to_value::<dyn NoneValue>(&arena[cdr.cdr()]).expect("Not none");
+    }
+
+    #[test]
+    fn test_read_bool() {
+        let mut arena = HashMapArena::new();
+        let mut reader = " #t\n#f  ".as_bytes();
+
+        let r = read(&mut arena, &mut reader).expect("Failed to read");
+        let b = cast_to_value::<dyn BoolValue>(&arena[r]).expect("Not a bool");
+        assert_eq!(b.value(), true);
+        let r = read(&mut arena, &mut reader).expect("Failed to read");
+        let b = cast_to_value::<dyn BoolValue>(&arena[r]).expect("Not a bool");
+        assert_eq!(b.value(), false);
     }
 }
