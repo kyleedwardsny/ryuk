@@ -1,9 +1,11 @@
 mod lisp {
+    use macros::*;
     use std::collections::HashMap;
     use std::io::{Read, Result};
     use std::ops::Index;
 
     /// Optionally cast to a type
+    #[cast_to_trait]
     pub trait CastTo<T: ?Sized> {
         fn do_cast(&self) -> Option<&T> {
             Option::None
@@ -11,10 +13,8 @@ mod lisp {
     }
 
     /// A Lisp value
-    pub trait Value:
-        CastTo<dyn NoneValue> + CastTo<dyn SymbolValue> + CastTo<dyn ConsValue>
-    {
-    }
+    #[value_trait]
+    pub trait Value {}
 
     //// Generic function to cast a value to another value
     pub fn cast_to_value<'a, T>(from: &'a (dyn Value + 'static)) -> Option<&'a T>
@@ -26,15 +26,18 @@ mod lisp {
     }
 
     /// No value
+    #[value_cast_trait]
     pub trait NoneValue {}
 
     /// A Lisp symbol
+    #[value_cast_trait]
     pub trait SymbolValue {
         /// Get the name of the symbol
         fn name(&self) -> &str;
     }
 
     /// A cons value that references two other values in an arena
+    #[value_cast_trait]
     pub trait ConsValue {
         /// Get the car of the cons
         fn car(&self) -> u32;
