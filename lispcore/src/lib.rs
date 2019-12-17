@@ -88,19 +88,39 @@ impl Deref for ValueRef {
     }
 }
 
-pub trait LispRead {
-    fn read_value(&mut self) -> Result<Value>;
+pub trait LispValues<'a> {
+    type Iter: Iterator<Item = Result<Value>> + 'a;
+
+    fn lisp_values(&'a mut self) -> Self::Iter;
 }
 
-impl<R: BufRead> LispRead for R {
-    fn read_value(&mut self) -> Result<Value> {
-        match syntax::read_impl(self)? {
-            syntax::ReadImplResult::Value(v) => Result::Ok(v),
-            syntax::ReadImplResult::InvalidToken(t) => Result::Err(Error::new(
-                ErrorKind::InvalidToken,
-                format!("Invalid token: '{}'", t),
-            )),
+pub struct BufReadLispIterator<'a, R: BufRead> {
+    reader: &'a mut R,
+}
+
+impl<'a, R: BufRead + 'a> Iterator for BufReadLispIterator<'a, R> {
+    type Item = Result<Value>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match syntax::read_impl(self.reader) {
+            Result::Ok(r) => match r {
+                syntax::ReadImplResult::Value(v) => Option::Some(Result::Ok(v)),
+                syntax::ReadImplResult::InvalidToken(t) => Option::Some(Result::Err(Error::new(
+                    ErrorKind::InvalidToken,
+                    format!("Invalid token: '{}'", t),
+                ))),
+                syntax::ReadImplResult::EndOfFile => Option::None,
+            },
+            Result::Err(e) => Option::Some(Result::Err(e)),
         }
+    }
+}
+
+impl<'a, R: BufRead + 'a> LispValues<'a> for R {
+    type Iter = BufReadLispIterator<'a, R>;
+
+    fn lisp_values(&'a mut self) -> Self::Iter {
+        BufReadLispIterator { reader: self }
     }
 }
 
@@ -154,6 +174,10 @@ mod syntax {
                     ReadImplResult::InvalidToken(t) => {
                         Result::Ok(ReadDelimitedResult::InvalidToken(t))
                     }
+                    ReadImplResult::EndOfFile => Result::Err(Error::new(
+                        ErrorKind::EndOfFile,
+                        "End of file reached".to_string(),
+                    )),
                 }
             }
         } else {
@@ -265,6 +289,7 @@ mod syntax {
     pub enum ReadImplResult {
         Value(Value),
         InvalidToken(String),
+        EndOfFile,
     }
 
     pub fn read_impl(reader: &mut impl BufRead) -> Result<ReadImplResult> {
@@ -294,10 +319,7 @@ mod syntax {
                 ))
             }
         } else {
-            Result::Err(Error::new(
-                ErrorKind::EndOfFile,
-                "End of file reached".to_string(),
-            ))
+            Result::Ok(ReadImplResult::EndOfFile)
         }
     }
 }
@@ -309,47 +331,50 @@ mod tests {
     #[test]
     fn test_read_symbol() {
         let mut s = b"sym sym2\nsym3  \n   sym4" as &[u8];
+        let mut i = s.lisp_values();
         assert_eq!(
-            s.read_value().unwrap(),
+            i.next().unwrap().unwrap(),
             Value::Symbol(ValueSymbol {
                 name: Cow::Borrowed("sym")
             })
         );
         assert_eq!(
-            s.read_value().unwrap(),
+            i.next().unwrap().unwrap(),
             Value::Symbol(ValueSymbol {
                 name: Cow::Borrowed("sym2")
             })
         );
         assert_eq!(
-            s.read_value().unwrap(),
+            i.next().unwrap().unwrap(),
             Value::Symbol(ValueSymbol {
                 name: Cow::Borrowed("sym3")
             })
         );
         assert_eq!(
-            s.read_value().unwrap(),
+            i.next().unwrap().unwrap(),
             Value::Symbol(ValueSymbol {
                 name: Cow::Borrowed("sym4")
             })
         );
-        assert_eq!(s.read_value().unwrap_err().kind, ErrorKind::EndOfFile);
+        assert!(i.next().is_none());
     }
 
     #[test]
     fn test_read_bool() {
         let mut s = b"#t #f\n#t  " as &[u8];
-        assert_eq!(s.read_value().unwrap(), Value::Bool(true));
-        assert_eq!(s.read_value().unwrap(), Value::Bool(false));
-        assert_eq!(s.read_value().unwrap(), Value::Bool(true));
-        assert_eq!(s.read_value().unwrap_err().kind, ErrorKind::EndOfFile);
+        let mut i = s.lisp_values();
+        assert_eq!(i.next().unwrap().unwrap(), Value::Bool(true));
+        assert_eq!(i.next().unwrap().unwrap(), Value::Bool(false));
+        assert_eq!(i.next().unwrap().unwrap(), Value::Bool(true));
+        assert!(i.next().is_none());
     }
 
     #[test]
     fn test_read_list() {
-        let mut s = b"(s1 s2 s3)(s4\n s5 s6 ) ( s7 () s8) (#t . #f) ( s9 . s10 s11" as &[u8];
+        let mut s = b"(s1 s2 s3)(s4\n s5 s6 ) ( s7 () s8) (#t . #f) ( s9 . s10 s11 (a" as &[u8];
+        let mut i = s.lisp_values();
         assert_eq!(
-            s.read_value().unwrap(),
+            i.next().unwrap().unwrap(),
             Value::Cons(ValueCons {
                 car: ValueRef::Static(&Value::Symbol(ValueSymbol {
                     name: Cow::Borrowed("s1")
@@ -368,7 +393,7 @@ mod tests {
             })
         );
         assert_eq!(
-            s.read_value().unwrap(),
+            i.next().unwrap().unwrap(),
             Value::Cons(ValueCons {
                 car: ValueRef::Static(&Value::Symbol(ValueSymbol {
                     name: Cow::Borrowed("s4")
@@ -387,7 +412,7 @@ mod tests {
             })
         );
         assert_eq!(
-            s.read_value().unwrap(),
+            i.next().unwrap().unwrap(),
             Value::Cons(ValueCons {
                 car: ValueRef::Static(&Value::Symbol(ValueSymbol {
                     name: Cow::Borrowed("s7")
@@ -404,13 +429,14 @@ mod tests {
             })
         );
         assert_eq!(
-            s.read_value().unwrap(),
+            i.next().unwrap().unwrap(),
             Value::Cons(ValueCons {
                 car: ValueRef::Static(&Value::Bool(true)),
                 cdr: ValueRef::Static(&Value::Bool(false)),
             })
         );
-        assert_eq!(s.read_value().unwrap_err().kind, ErrorKind::InvalidToken);
-        assert_eq!(s.read_value().unwrap_err().kind, ErrorKind::EndOfFile);
+        assert_eq!(i.next().unwrap().unwrap_err().kind, ErrorKind::InvalidToken);
+        assert_eq!(i.next().unwrap().unwrap_err().kind, ErrorKind::EndOfFile);
+        assert!(i.next().is_none());
     }
 }
