@@ -328,7 +328,7 @@ mod tests {
 
     #[test]
     fn test_read_list() {
-        let mut s = b"(s1 s2 s3)(s4\n s5 s6 ) ( s7 () s8)" as &[u8];
+        let mut s = b"(s1 s2 s3)(s4\n s5 s6 ) ( s7 () s8) (#t #f)" as &[u8];
         assert_eq!(
             s.read_value().unwrap(),
             Value::Cons(ValueCons {
@@ -381,6 +381,16 @@ mod tests {
                         })),
                         cdr: ValueRef::Static(&Value::Nil),
                     })),
+                })),
+            })
+        );
+        assert_eq!(
+            s.read_value().unwrap(),
+            Value::Cons(ValueCons {
+                car: ValueRef::Static(&Value::Bool(true)),
+                cdr: ValueRef::Static(&Value::Cons(ValueCons {
+                    car: ValueRef::Static(&Value::Bool(false)),
+                    cdr: ValueRef::Static(&Value::Nil),
                 })),
             })
         );
