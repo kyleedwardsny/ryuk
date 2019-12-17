@@ -95,20 +95,13 @@ pub trait LispRead {
 impl<R: BufRead> LispRead for R {
     fn read_value(&mut self) -> Result<Value> {
         match read_impl(self)? {
-            ReadResult::Value(v) => Result::Ok(v),
-            ReadResult::EndDelimiter => panic!("This shouldn't happen"),
-            ReadResult::InvalidToken(t) => Result::Err(Error::new(
+            ReadImplResult::Value(v) => Result::Ok(v),
+            ReadImplResult::InvalidToken(t) => Result::Err(Error::new(
                 ErrorKind::InvalidToken,
                 format!("Invalid token: '{}'", t),
             )),
         }
     }
-}
-
-enum ReadResult {
-    InvalidToken(String),
-    EndDelimiter,
-    Value(Value),
 }
 
 fn is_token_char(c: char) -> bool {
@@ -139,15 +132,26 @@ fn skip_whitespace(reader: &mut impl BufRead) -> Result<()> {
     }
 }
 
-fn read_delimited(reader: &mut impl BufRead, delimiter: char) -> Result<ReadResult> {
+enum ReadDelimitedResult {
+    Value(Value),
+    EndDelimiter,
+}
+
+fn read_delimited(reader: &mut impl BufRead, delimiter: char) -> Result<ReadDelimitedResult> {
     skip_whitespace(reader)?;
     let buf = reader.fill_buf()?;
     if buf.len() > 0 {
         if buf[0] as char == delimiter {
             reader.consume(1);
-            Result::Ok(ReadResult::EndDelimiter)
+            Result::Ok(ReadDelimitedResult::EndDelimiter)
         } else {
-            read_impl(reader)
+            match read_impl(reader)? {
+                ReadImplResult::Value(v) => Result::Ok(ReadDelimitedResult::Value(v)),
+                ReadImplResult::InvalidToken(t) => Result::Err(Error::new(
+                    ErrorKind::InvalidToken,
+                    format!("Invalid token: '{}'", t),
+                )),
+            }
         }
     } else {
         Result::Err(Error::new(
@@ -159,19 +163,20 @@ fn read_delimited(reader: &mut impl BufRead, delimiter: char) -> Result<ReadResu
 
 fn read_list(reader: &mut impl BufRead) -> Result<Value> {
     match read_delimited(reader, ')')? {
-        ReadResult::InvalidToken(s) => Result::Err(Error::new(
-            ErrorKind::InvalidToken,
-            format!("Invalid token: '{}'", s),
-        )),
-        ReadResult::EndDelimiter => Result::Ok(Value::Nil),
-        ReadResult::Value(v) => Result::Ok(Value::Cons(ValueCons {
+        ReadDelimitedResult::Value(v) => Result::Ok(Value::Cons(ValueCons {
             car: ValueRef::Owned(Rc::new(v)),
             cdr: ValueRef::Owned(Rc::new(read_list(reader)?)),
         })),
+        ReadDelimitedResult::EndDelimiter => Result::Ok(Value::Nil),
     }
 }
 
-fn read_token(reader: &mut impl BufRead) -> Result<ReadResult> {
+enum ReadTokenResult {
+    ValidToken(String),
+    InvalidToken(String),
+}
+
+fn read_token(reader: &mut impl BufRead) -> Result<ReadTokenResult> {
     let mut token = String::new();
 
     loop {
@@ -204,24 +209,34 @@ fn read_token(reader: &mut impl BufRead) -> Result<ReadResult> {
     }
 
     Result::Ok(if valid {
-        ReadResult::Value(Value::Symbol(ValueSymbol {
-            name: Cow::Owned(token),
-        }))
+        ReadTokenResult::ValidToken(token)
     } else {
-        ReadResult::InvalidToken(token)
+        ReadTokenResult::InvalidToken(token)
     })
 }
 
-fn read_impl(reader: &mut impl BufRead) -> Result<ReadResult> {
+enum ReadImplResult {
+    Value(Value),
+    InvalidToken(String),
+}
+
+fn read_impl(reader: &mut impl BufRead) -> Result<ReadImplResult> {
     skip_whitespace(reader)?;
     let buf = reader.fill_buf()?;
     if buf.len() > 0 {
         let c = buf[0] as char;
         if c == '(' {
             reader.consume(1);
-            Result::Ok(ReadResult::Value(read_list(reader)?))
+            Result::Ok(ReadImplResult::Value(read_list(reader)?))
         } else if is_token_char(c) {
-            read_token(reader)
+            match read_token(reader)? {
+                ReadTokenResult::ValidToken(t) => {
+                    Result::Ok(ReadImplResult::Value(Value::Symbol(ValueSymbol {
+                        name: Cow::Owned(t),
+                    })))
+                }
+                ReadTokenResult::InvalidToken(t) => Result::Ok(ReadImplResult::InvalidToken(t)),
+            }
         } else {
             Result::Err(Error::new(
                 ErrorKind::InvalidCharacter,
