@@ -439,4 +439,15 @@ mod tests {
         assert_eq!(i.next().unwrap().unwrap_err().kind, ErrorKind::EndOfFile);
         assert!(i.next().is_none());
     }
+
+    #[test]
+    fn test_iterator() {
+        let mut s = b"() () ()" as &[u8];
+        let mut num = 0;
+        for v in s.lisp_values() {
+            num += 1;
+            assert_eq!(v.unwrap(), Value::Nil);
+        }
+        assert_eq!(num, 3);
+    }
 }
