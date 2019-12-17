@@ -174,6 +174,31 @@ mod syntax {
         }
     }
 
+    fn read_macro(reader: &mut impl BufRead) -> Result<Value> {
+        let buf = reader.fill_buf()?;
+        if buf.len() > 0 {
+            match read_token(reader)? {
+                ReadTokenResult::ValidToken(t) => match &*t {
+                    "t" => Result::Ok(Value::Bool(true)),
+                    "f" => Result::Ok(Value::Bool(false)),
+                    _ => Result::Err(Error::new(
+                        ErrorKind::InvalidToken,
+                        format!("Invalid macro: '{}'", t),
+                    )),
+                },
+                ReadTokenResult::InvalidToken(t) => Result::Err(Error::new(
+                    ErrorKind::InvalidToken,
+                    format!("Invalid token: '{}'", t),
+                )),
+            }
+        } else {
+            Result::Err(Error::new(
+                ErrorKind::EndOfFile,
+                "End of file reached".to_string(),
+            ))
+        }
+    }
+
     enum ReadTokenResult {
         ValidToken(String),
         InvalidToken(String),
@@ -231,6 +256,9 @@ mod syntax {
             if c == '(' {
                 reader.consume(1);
                 Result::Ok(ReadImplResult::Value(read_list(reader)?))
+            } else if c == '#' {
+                reader.consume(1);
+                Result::Ok(ReadImplResult::Value(read_macro(reader)?))
             } else if is_token_char(c) {
                 match read_token(reader)? {
                     ReadTokenResult::ValidToken(t) => {
@@ -286,6 +314,15 @@ mod tests {
                 name: Cow::Borrowed("sym4")
             })
         );
+        assert_eq!(s.read_value().unwrap_err().kind, ErrorKind::EndOfFile);
+    }
+
+    #[test]
+    fn test_read_bool() {
+        let mut s = b"#t #f\n#t  " as &[u8];
+        assert_eq!(s.read_value().unwrap(), Value::Bool(true));
+        assert_eq!(s.read_value().unwrap(), Value::Bool(false));
+        assert_eq!(s.read_value().unwrap(), Value::Bool(true));
         assert_eq!(s.read_value().unwrap_err().kind, ErrorKind::EndOfFile);
     }
 
@@ -347,5 +384,6 @@ mod tests {
                 })),
             })
         );
+        assert_eq!(s.read_value().unwrap_err().kind, ErrorKind::EndOfFile);
     }
 }
