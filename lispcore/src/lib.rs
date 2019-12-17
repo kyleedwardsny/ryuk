@@ -108,7 +108,7 @@ mod syntax {
     use super::*;
 
     fn is_token_char(c: char) -> bool {
-        if let 'a'..='z' | '0'..='9' = c {
+        if let 'a'..='z' | '0'..='9' | '.' = c {
             true
         } else {
             false
@@ -137,6 +137,7 @@ mod syntax {
 
     enum ReadDelimitedResult {
         Value(Value),
+        InvalidToken(String),
         EndDelimiter,
     }
 
@@ -150,10 +151,9 @@ mod syntax {
             } else {
                 match read_impl(reader)? {
                     ReadImplResult::Value(v) => Result::Ok(ReadDelimitedResult::Value(v)),
-                    ReadImplResult::InvalidToken(t) => Result::Err(Error::new(
-                        ErrorKind::InvalidToken,
-                        format!("Invalid token: '{}'", t),
-                    )),
+                    ReadImplResult::InvalidToken(t) => {
+                        Result::Ok(ReadDelimitedResult::InvalidToken(t))
+                    }
                 }
             }
         } else {
@@ -170,6 +170,25 @@ mod syntax {
                 car: ValueRef::Owned(Rc::new(v)),
                 cdr: ValueRef::Owned(Rc::new(read_list(reader)?)),
             })),
+            ReadDelimitedResult::InvalidToken(t) => match &*t {
+                "." => match read_delimited(reader, ')')? {
+                    ReadDelimitedResult::Value(cdr) => match read_delimited(reader, ')')? {
+                        ReadDelimitedResult::EndDelimiter => Result::Ok(cdr),
+                        _ => Result::Err(Error::new(
+                            ErrorKind::InvalidToken,
+                            "Expected ')', got something else",
+                        )),
+                    },
+                    _ => Result::Err(Error::new(
+                        ErrorKind::InvalidToken,
+                        "Expected value, got something else",
+                    )),
+                },
+                _ => Result::Err(Error::new(
+                    ErrorKind::InvalidToken,
+                    format!("Invalid token: '{}'", t),
+                )),
+            },
             ReadDelimitedResult::EndDelimiter => Result::Ok(Value::Nil),
         }
     }
@@ -328,7 +347,7 @@ mod tests {
 
     #[test]
     fn test_read_list() {
-        let mut s = b"(s1 s2 s3)(s4\n s5 s6 ) ( s7 () s8) (#t #f)" as &[u8];
+        let mut s = b"(s1 s2 s3)(s4\n s5 s6 ) ( s7 () s8) (#t . #f)" as &[u8];
         assert_eq!(
             s.read_value().unwrap(),
             Value::Cons(ValueCons {
@@ -388,10 +407,7 @@ mod tests {
             s.read_value().unwrap(),
             Value::Cons(ValueCons {
                 car: ValueRef::Static(&Value::Bool(true)),
-                cdr: ValueRef::Static(&Value::Cons(ValueCons {
-                    car: ValueRef::Static(&Value::Bool(false)),
-                    cdr: ValueRef::Static(&Value::Nil),
-                })),
+                cdr: ValueRef::Static(&Value::Bool(false)),
             })
         );
         assert_eq!(s.read_value().unwrap_err().kind, ErrorKind::EndOfFile);
