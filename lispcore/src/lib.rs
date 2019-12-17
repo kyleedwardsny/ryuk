@@ -347,7 +347,7 @@ mod tests {
 
     #[test]
     fn test_read_list() {
-        let mut s = b"(s1 s2 s3)(s4\n s5 s6 ) ( s7 () s8) (#t . #f)" as &[u8];
+        let mut s = b"(s1 s2 s3)(s4\n s5 s6 ) ( s7 () s8) (#t . #f) ( s9 . s10 s11" as &[u8];
         assert_eq!(
             s.read_value().unwrap(),
             Value::Cons(ValueCons {
@@ -410,6 +410,7 @@ mod tests {
                 cdr: ValueRef::Static(&Value::Bool(false)),
             })
         );
+        assert_eq!(s.read_value().unwrap_err().kind, ErrorKind::InvalidToken);
         assert_eq!(s.read_value().unwrap_err().kind, ErrorKind::EndOfFile);
     }
 }
