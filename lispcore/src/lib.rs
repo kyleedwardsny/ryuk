@@ -94,9 +94,9 @@ pub trait LispRead {
 
 impl<R: BufRead> LispRead for R {
     fn read_value(&mut self) -> Result<Value> {
-        match read_impl(self)? {
-            ReadImplResult::Value(v) => Result::Ok(v),
-            ReadImplResult::InvalidToken(t) => Result::Err(Error::new(
+        match syntax::read_impl(self)? {
+            syntax::ReadImplResult::Value(v) => Result::Ok(v),
+            syntax::ReadImplResult::InvalidToken(t) => Result::Err(Error::new(
                 ErrorKind::InvalidToken,
                 format!("Invalid token: '{}'", t),
             )),
@@ -104,150 +104,154 @@ impl<R: BufRead> LispRead for R {
     }
 }
 
-fn is_token_char(c: char) -> bool {
-    if let 'a'..='z' | '0'..='9' = c {
-        true
-    } else {
-        false
-    }
-}
+mod syntax {
+    use super::*;
 
-fn skip_whitespace(reader: &mut impl BufRead) -> Result<()> {
-    loop {
-        let mut num = 0;
-        let buf = reader.fill_buf()?;
-        if buf.len() == 0 {
-            return Result::Ok(());
+    fn is_token_char(c: char) -> bool {
+        if let 'a'..='z' | '0'..='9' = c {
+            true
+        } else {
+            false
         }
-        for b in buf {
-            let c = *b as char;
-            if c == ' ' || c == '\n' {
-                num += 1;
-            } else {
-                reader.consume(num);
+    }
+
+    fn skip_whitespace(reader: &mut impl BufRead) -> Result<()> {
+        loop {
+            let mut num = 0;
+            let buf = reader.fill_buf()?;
+            if buf.len() == 0 {
                 return Result::Ok(());
             }
-        }
-        reader.consume(num);
-    }
-}
-
-enum ReadDelimitedResult {
-    Value(Value),
-    EndDelimiter,
-}
-
-fn read_delimited(reader: &mut impl BufRead, delimiter: char) -> Result<ReadDelimitedResult> {
-    skip_whitespace(reader)?;
-    let buf = reader.fill_buf()?;
-    if buf.len() > 0 {
-        if buf[0] as char == delimiter {
-            reader.consume(1);
-            Result::Ok(ReadDelimitedResult::EndDelimiter)
-        } else {
-            match read_impl(reader)? {
-                ReadImplResult::Value(v) => Result::Ok(ReadDelimitedResult::Value(v)),
-                ReadImplResult::InvalidToken(t) => Result::Err(Error::new(
-                    ErrorKind::InvalidToken,
-                    format!("Invalid token: '{}'", t),
-                )),
-            }
-        }
-    } else {
-        Result::Err(Error::new(
-            ErrorKind::EndOfFile,
-            "End of file reached".to_string(),
-        ))
-    }
-}
-
-fn read_list(reader: &mut impl BufRead) -> Result<Value> {
-    match read_delimited(reader, ')')? {
-        ReadDelimitedResult::Value(v) => Result::Ok(Value::Cons(ValueCons {
-            car: ValueRef::Owned(Rc::new(v)),
-            cdr: ValueRef::Owned(Rc::new(read_list(reader)?)),
-        })),
-        ReadDelimitedResult::EndDelimiter => Result::Ok(Value::Nil),
-    }
-}
-
-enum ReadTokenResult {
-    ValidToken(String),
-    InvalidToken(String),
-}
-
-fn read_token(reader: &mut impl BufRead) -> Result<ReadTokenResult> {
-    let mut token = String::new();
-
-    loop {
-        let buf = reader.fill_buf()?;
-        let mut num = 0;
-        let mut done = true;
-        for b in buf {
-            let c = *b as char;
-            done = false;
-            if is_token_char(c) {
-                num += 1;
-                token.push(c);
-            } else {
-                done = true;
-                break;
-            }
-        }
-        reader.consume(num);
-        if done {
-            break;
-        }
-    }
-
-    let mut valid = false;
-    for c in token.chars() {
-        if c != '.' {
-            valid = true;
-            break;
-        }
-    }
-
-    Result::Ok(if valid {
-        ReadTokenResult::ValidToken(token)
-    } else {
-        ReadTokenResult::InvalidToken(token)
-    })
-}
-
-enum ReadImplResult {
-    Value(Value),
-    InvalidToken(String),
-}
-
-fn read_impl(reader: &mut impl BufRead) -> Result<ReadImplResult> {
-    skip_whitespace(reader)?;
-    let buf = reader.fill_buf()?;
-    if buf.len() > 0 {
-        let c = buf[0] as char;
-        if c == '(' {
-            reader.consume(1);
-            Result::Ok(ReadImplResult::Value(read_list(reader)?))
-        } else if is_token_char(c) {
-            match read_token(reader)? {
-                ReadTokenResult::ValidToken(t) => {
-                    Result::Ok(ReadImplResult::Value(Value::Symbol(ValueSymbol {
-                        name: Cow::Owned(t),
-                    })))
+            for b in buf {
+                let c = *b as char;
+                if c == ' ' || c == '\n' {
+                    num += 1;
+                } else {
+                    reader.consume(num);
+                    return Result::Ok(());
                 }
-                ReadTokenResult::InvalidToken(t) => Result::Ok(ReadImplResult::InvalidToken(t)),
+            }
+            reader.consume(num);
+        }
+    }
+
+    enum ReadDelimitedResult {
+        Value(Value),
+        EndDelimiter,
+    }
+
+    fn read_delimited(reader: &mut impl BufRead, delimiter: char) -> Result<ReadDelimitedResult> {
+        skip_whitespace(reader)?;
+        let buf = reader.fill_buf()?;
+        if buf.len() > 0 {
+            if buf[0] as char == delimiter {
+                reader.consume(1);
+                Result::Ok(ReadDelimitedResult::EndDelimiter)
+            } else {
+                match read_impl(reader)? {
+                    ReadImplResult::Value(v) => Result::Ok(ReadDelimitedResult::Value(v)),
+                    ReadImplResult::InvalidToken(t) => Result::Err(Error::new(
+                        ErrorKind::InvalidToken,
+                        format!("Invalid token: '{}'", t),
+                    )),
+                }
             }
         } else {
             Result::Err(Error::new(
-                ErrorKind::InvalidCharacter,
-                format!("Invalid character: '{}'", c),
+                ErrorKind::EndOfFile,
+                "End of file reached".to_string(),
             ))
         }
-    } else {
-        Result::Err(Error::new(
-            ErrorKind::EndOfFile,
-            "End of file reached".to_string(),
-        ))
+    }
+
+    fn read_list(reader: &mut impl BufRead) -> Result<Value> {
+        match read_delimited(reader, ')')? {
+            ReadDelimitedResult::Value(v) => Result::Ok(Value::Cons(ValueCons {
+                car: ValueRef::Owned(Rc::new(v)),
+                cdr: ValueRef::Owned(Rc::new(read_list(reader)?)),
+            })),
+            ReadDelimitedResult::EndDelimiter => Result::Ok(Value::Nil),
+        }
+    }
+
+    enum ReadTokenResult {
+        ValidToken(String),
+        InvalidToken(String),
+    }
+
+    fn read_token(reader: &mut impl BufRead) -> Result<ReadTokenResult> {
+        let mut token = String::new();
+
+        loop {
+            let buf = reader.fill_buf()?;
+            let mut num = 0;
+            let mut done = true;
+            for b in buf {
+                let c = *b as char;
+                done = false;
+                if is_token_char(c) {
+                    num += 1;
+                    token.push(c);
+                } else {
+                    done = true;
+                    break;
+                }
+            }
+            reader.consume(num);
+            if done {
+                break;
+            }
+        }
+
+        let mut valid = false;
+        for c in token.chars() {
+            if c != '.' {
+                valid = true;
+                break;
+            }
+        }
+
+        Result::Ok(if valid {
+            ReadTokenResult::ValidToken(token)
+        } else {
+            ReadTokenResult::InvalidToken(token)
+        })
+    }
+
+    pub enum ReadImplResult {
+        Value(Value),
+        InvalidToken(String),
+    }
+
+    pub fn read_impl(reader: &mut impl BufRead) -> Result<ReadImplResult> {
+        skip_whitespace(reader)?;
+        let buf = reader.fill_buf()?;
+        if buf.len() > 0 {
+            let c = buf[0] as char;
+            if c == '(' {
+                reader.consume(1);
+                Result::Ok(ReadImplResult::Value(read_list(reader)?))
+            } else if is_token_char(c) {
+                match read_token(reader)? {
+                    ReadTokenResult::ValidToken(t) => {
+                        Result::Ok(ReadImplResult::Value(Value::Symbol(ValueSymbol {
+                            name: Cow::Owned(t),
+                        })))
+                    }
+                    ReadTokenResult::InvalidToken(t) => Result::Ok(ReadImplResult::InvalidToken(t)),
+                }
+            } else {
+                Result::Err(Error::new(
+                    ErrorKind::InvalidCharacter,
+                    format!("Invalid character: '{}'", c),
+                ))
+            }
+        } else {
+            Result::Err(Error::new(
+                ErrorKind::EndOfFile,
+                "End of file reached".to_string(),
+            ))
+        }
     }
 }
 
