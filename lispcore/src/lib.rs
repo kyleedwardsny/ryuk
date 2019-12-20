@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 use std::fmt::Formatter;
-use std::io::BufRead;
+use std::iter::Peekable;
 use std::ops::Deref;
 use std::rc::Rc;
 
@@ -88,21 +88,21 @@ impl Deref for ValueRef {
     }
 }
 
-pub trait LispValues<'a> {
-    type Iter: Iterator<Item = Result<Value>> + 'a;
+pub trait LispValues {
+    type Iter: Iterator<Item = Result<Value>>;
 
-    fn lisp_values(&'a mut self) -> Self::Iter;
+    fn lisp_values(self) -> Self::Iter;
 }
 
-pub struct BufReadLispIterator<'a, R: BufRead> {
-    reader: &'a mut R,
+pub struct PeekableCharLispIterator<I: Iterator<Item = char>> {
+    reader: Peekable<I>,
 }
 
-impl<'a, R: BufRead + 'a> Iterator for BufReadLispIterator<'a, R> {
+impl<I: Iterator<Item = char>> Iterator for PeekableCharLispIterator<I> {
     type Item = Result<Value>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match syntax::read_impl(self.reader) {
+        match syntax::read_impl(&mut self.reader) {
             Result::Ok(r) => match r {
                 syntax::ReadImplResult::Value(v) => Option::Some(Result::Ok(v)),
                 syntax::ReadImplResult::InvalidToken(t) => Option::Some(Result::Err(Error::new(
@@ -116,11 +116,11 @@ impl<'a, R: BufRead + 'a> Iterator for BufReadLispIterator<'a, R> {
     }
 }
 
-impl<'a, R: BufRead + 'a> LispValues<'a> for R {
-    type Iter = BufReadLispIterator<'a, R>;
+impl<I: Iterator<Item = char>> LispValues for Peekable<I> {
+    type Iter = PeekableCharLispIterator<I>;
 
-    fn lisp_values(&'a mut self) -> Self::Iter {
-        BufReadLispIterator { reader: self }
+    fn lisp_values(self) -> Self::Iter {
+        PeekableCharLispIterator { reader: self }
     }
 }
 
@@ -135,24 +135,15 @@ mod syntax {
         }
     }
 
-    fn skip_whitespace(reader: &mut impl BufRead) -> Result<()> {
-        loop {
-            let mut num = 0;
-            let buf = reader.fill_buf()?;
-            if buf.len() == 0 {
-                return Result::Ok(());
+    fn skip_whitespace<I: Iterator<Item = char>>(peekable: &mut Peekable<I>) -> Result<()> {
+        while let Option::Some(c) = peekable.peek() {
+            if *c == ' ' || *c == '\n' {
+                peekable.next();
+            } else {
+                break;
             }
-            for b in buf {
-                let c = *b as char;
-                if c == ' ' || c == '\n' {
-                    num += 1;
-                } else {
-                    reader.consume(num);
-                    return Result::Ok(());
-                }
-            }
-            reader.consume(num);
         }
+        Result::Ok(())
     }
 
     enum ReadDelimitedResult {
@@ -161,15 +152,17 @@ mod syntax {
         EndDelimiter,
     }
 
-    fn read_delimited(reader: &mut impl BufRead, delimiter: char) -> Result<ReadDelimitedResult> {
-        skip_whitespace(reader)?;
-        let buf = reader.fill_buf()?;
-        if buf.len() > 0 {
-            if buf[0] as char == delimiter {
-                reader.consume(1);
+    fn read_delimited<I: Iterator<Item = char>>(
+        peekable: &mut Peekable<I>,
+        delimiter: char,
+    ) -> Result<ReadDelimitedResult> {
+        skip_whitespace(peekable)?;
+        if let Option::Some(c) = peekable.peek() {
+            if *c == delimiter {
+                peekable.next();
                 Result::Ok(ReadDelimitedResult::EndDelimiter)
             } else {
-                match read_impl(reader)? {
+                match read_impl(peekable)? {
                     ReadImplResult::Value(v) => Result::Ok(ReadDelimitedResult::Value(v)),
                     ReadImplResult::InvalidToken(t) => {
                         Result::Ok(ReadDelimitedResult::InvalidToken(t))
@@ -188,15 +181,15 @@ mod syntax {
         }
     }
 
-    fn read_list(reader: &mut impl BufRead) -> Result<Value> {
-        match read_delimited(reader, ')')? {
+    fn read_list<I: Iterator<Item = char>>(peekable: &mut Peekable<I>) -> Result<Value> {
+        match read_delimited(peekable, ')')? {
             ReadDelimitedResult::Value(v) => Result::Ok(Value::Cons(ValueCons {
                 car: ValueRef::Owned(Rc::new(v)),
-                cdr: ValueRef::Owned(Rc::new(read_list(reader)?)),
+                cdr: ValueRef::Owned(Rc::new(read_list(peekable)?)),
             })),
             ReadDelimitedResult::InvalidToken(t) => match &*t {
-                "." => match read_delimited(reader, ')')? {
-                    ReadDelimitedResult::Value(cdr) => match read_delimited(reader, ')')? {
+                "." => match read_delimited(peekable, ')')? {
+                    ReadDelimitedResult::Value(cdr) => match read_delimited(peekable, ')')? {
                         ReadDelimitedResult::EndDelimiter => Result::Ok(cdr),
                         _ => Result::Err(Error::new(
                             ErrorKind::InvalidToken,
@@ -217,10 +210,9 @@ mod syntax {
         }
     }
 
-    fn read_macro(reader: &mut impl BufRead) -> Result<Value> {
-        let buf = reader.fill_buf()?;
-        if buf.len() > 0 {
-            match read_token(reader)? {
+    fn read_macro<I: Iterator<Item = char>>(peekable: &mut Peekable<I>) -> Result<Value> {
+        if let Option::Some(_) = peekable.peek() {
+            match read_token(peekable)? {
                 ReadTokenResult::ValidToken(t) => match &*t {
                     "t" => Result::Ok(Value::Bool(true)),
                     "f" => Result::Ok(Value::Bool(false)),
@@ -247,34 +239,19 @@ mod syntax {
         InvalidToken(String),
     }
 
-    fn read_token(reader: &mut impl BufRead) -> Result<ReadTokenResult> {
+    fn read_token<I: Iterator<Item = char>>(peekable: &mut Peekable<I>) -> Result<ReadTokenResult> {
         let mut token = String::new();
 
-        loop {
-            let buf = reader.fill_buf()?;
-            let mut num = 0;
-            let mut done = true;
-            for b in buf {
-                let c = *b as char;
-                done = false;
-                if is_token_char(c) {
-                    num += 1;
-                    token.push(c);
-                } else {
-                    done = true;
-                    break;
-                }
-            }
-            reader.consume(num);
-            if done {
-                break;
-            }
-        }
-
         let mut valid = false;
-        for c in token.chars() {
-            if c != '.' {
-                valid = true;
+        while let Option::Some(c) = peekable.peek() {
+            let c = *c;
+            if is_token_char(c) {
+                peekable.next();
+                token.push(c);
+                if c != '.' {
+                    valid = true;
+                }
+            } else {
                 break;
             }
         }
@@ -292,19 +269,19 @@ mod syntax {
         EndOfFile,
     }
 
-    pub fn read_impl(reader: &mut impl BufRead) -> Result<ReadImplResult> {
-        skip_whitespace(reader)?;
-        let buf = reader.fill_buf()?;
-        if buf.len() > 0 {
-            let c = buf[0] as char;
-            if c == '(' {
-                reader.consume(1);
-                Result::Ok(ReadImplResult::Value(read_list(reader)?))
-            } else if c == '#' {
-                reader.consume(1);
-                Result::Ok(ReadImplResult::Value(read_macro(reader)?))
-            } else if is_token_char(c) {
-                match read_token(reader)? {
+    pub fn read_impl<I: Iterator<Item = char>>(
+        peekable: &mut Peekable<I>,
+    ) -> Result<ReadImplResult> {
+        skip_whitespace(peekable)?;
+        if let Option::Some(c) = peekable.peek() {
+            if *c == '(' {
+                peekable.next();
+                Result::Ok(ReadImplResult::Value(read_list(peekable)?))
+            } else if *c == '#' {
+                peekable.next();
+                Result::Ok(ReadImplResult::Value(read_macro(peekable)?))
+            } else if is_token_char(*c) {
+                match read_token(peekable)? {
                     ReadTokenResult::ValidToken(t) => {
                         Result::Ok(ReadImplResult::Value(Value::Symbol(ValueSymbol {
                             name: Cow::Owned(t),
@@ -330,8 +307,8 @@ mod tests {
 
     #[test]
     fn test_read_symbol() {
-        let mut s = b"sym sym2\nsym3  \n   sym4" as &[u8];
-        let mut i = s.lisp_values();
+        let s = "sym sym2\nsym3  \n   sym4";
+        let mut i = s.chars().peekable().lisp_values();
         assert_eq!(
             i.next().unwrap().unwrap(),
             Value::Symbol(ValueSymbol {
@@ -361,8 +338,8 @@ mod tests {
 
     #[test]
     fn test_read_bool() {
-        let mut s = b"#t #f\n#t  " as &[u8];
-        let mut i = s.lisp_values();
+        let s = "#t #f\n#t  ";
+        let mut i = s.chars().peekable().lisp_values();
         assert_eq!(i.next().unwrap().unwrap(), Value::Bool(true));
         assert_eq!(i.next().unwrap().unwrap(), Value::Bool(false));
         assert_eq!(i.next().unwrap().unwrap(), Value::Bool(true));
@@ -371,8 +348,8 @@ mod tests {
 
     #[test]
     fn test_read_list() {
-        let mut s = b"(s1 s2 s3)(s4\n s5 s6 ) ( s7 () s8) (#t . #f) ( s9 . s10 s11 (a" as &[u8];
-        let mut i = s.lisp_values();
+        let s = "(s1 s2 s3)(s4\n s5 s6 ) ( s7 () s8) (#t . #f) ( s9 . s10 s11 (a";
+        let mut i = s.chars().peekable().lisp_values();
         assert_eq!(
             i.next().unwrap().unwrap(),
             Value::Cons(ValueCons {
@@ -442,9 +419,9 @@ mod tests {
 
     #[test]
     fn test_iterator() {
-        let mut s = b"() () ()" as &[u8];
+        let s = "() () ()";
         let mut num = 0;
-        for v in s.lisp_values() {
+        for v in s.chars().peekable().lisp_values() {
             num += 1;
             assert_eq!(v.unwrap(), Value::Nil);
         }
