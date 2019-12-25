@@ -1,8 +1,12 @@
-use std::borrow::Cow;
+use std::borrow::{Cow, ToOwned};
 use std::fmt::Formatter;
 use std::iter::Peekable;
-use std::ops::Deref;
 use std::rc::Rc;
+
+// Workaround for a bug in rustc. See
+// https://github.com/rust-lang/rust/issues/47032.
+#[derive(Debug)]
+pub struct SizedHolder<T>(T);
 
 #[derive(Debug)]
 pub struct Error {
@@ -53,13 +57,13 @@ pub struct ValueSymbol {
 
 #[derive(Debug)]
 pub struct ValueCons {
-    pub car: ValueRef,
-    pub cdr: ValueRef,
+    pub car: SizedHolder<Cow<'static, Value>>,
+    pub cdr: SizedHolder<Cow<'static, Value>>,
 }
 
 impl PartialEq for ValueCons {
     fn eq(&self, other: &Self) -> bool {
-        *self.car == *other.car && *self.cdr == *other.cdr
+        *self.car.0 == *other.car.0 && *self.cdr.0 == *other.cdr.0
     }
 }
 
@@ -71,20 +75,21 @@ pub enum Value {
     Bool(bool),
 }
 
-#[derive(Debug)]
-pub enum ValueRef {
-    Static(&'static Value),
-    Owned(Rc<Value>),
-}
+impl ToOwned for Value {
+    type Owned = Rc<Value>;
 
-impl Deref for ValueRef {
-    type Target = Value;
-
-    fn deref(&self) -> &Self::Target {
-        match self {
-            ValueRef::Static(v) => v,
-            ValueRef::Owned(v) => &*v,
-        }
+    fn to_owned(&self) -> Self::Owned {
+        Rc::new(match self {
+            Value::Nil => Value::Nil,
+            Value::Symbol(ValueSymbol { name }) => {
+                Value::Symbol(ValueSymbol { name: name.clone() })
+            }
+            Value::Cons(ValueCons { car, cdr }) => Value::Cons(ValueCons {
+                car: SizedHolder(car.0.clone()),
+                cdr: SizedHolder(cdr.0.clone()),
+            }),
+            Value::Bool(b) => Value::Bool(*b),
+        })
     }
 }
 
@@ -184,8 +189,8 @@ mod syntax {
     fn read_list<I: Iterator<Item = char>>(peekable: &mut Peekable<I>) -> Result<Value> {
         match read_delimited(peekable, ')')? {
             ReadDelimitedResult::Value(v) => Result::Ok(Value::Cons(ValueCons {
-                car: ValueRef::Owned(Rc::new(v)),
-                cdr: ValueRef::Owned(Rc::new(read_list(peekable)?)),
+                car: SizedHolder(Cow::<Value>::Owned(Rc::new(v))),
+                cdr: SizedHolder(Cow::<Value>::Owned(Rc::new(read_list(peekable)?))),
             })),
             ReadDelimitedResult::InvalidToken(t) => match &*t {
                 "." => match read_delimited(peekable, ')')? {
@@ -353,63 +358,63 @@ mod tests {
         assert_eq!(
             i.next().unwrap().unwrap(),
             Value::Cons(ValueCons {
-                car: ValueRef::Static(&Value::Symbol(ValueSymbol {
+                car: SizedHolder(Cow::Borrowed(&Value::Symbol(ValueSymbol {
                     name: Cow::Borrowed("s1")
-                })),
-                cdr: ValueRef::Static(&Value::Cons(ValueCons {
-                    car: ValueRef::Static(&Value::Symbol(ValueSymbol {
+                }))),
+                cdr: SizedHolder(Cow::Borrowed(&Value::Cons(ValueCons {
+                    car: SizedHolder(Cow::Borrowed(&Value::Symbol(ValueSymbol {
                         name: Cow::Borrowed("s2")
-                    })),
-                    cdr: ValueRef::Static(&Value::Cons(ValueCons {
-                        car: ValueRef::Static(&Value::Symbol(ValueSymbol {
+                    }))),
+                    cdr: SizedHolder(Cow::Borrowed(&Value::Cons(ValueCons {
+                        car: SizedHolder(Cow::Borrowed(&Value::Symbol(ValueSymbol {
                             name: Cow::Borrowed("s3")
-                        })),
-                        cdr: ValueRef::Static(&Value::Nil),
-                    })),
-                })),
+                        }))),
+                        cdr: SizedHolder(Cow::Borrowed(&Value::Nil)),
+                    }))),
+                }))),
             })
         );
         assert_eq!(
             i.next().unwrap().unwrap(),
             Value::Cons(ValueCons {
-                car: ValueRef::Static(&Value::Symbol(ValueSymbol {
+                car: SizedHolder(Cow::Borrowed(&Value::Symbol(ValueSymbol {
                     name: Cow::Borrowed("s4")
-                })),
-                cdr: ValueRef::Static(&Value::Cons(ValueCons {
-                    car: ValueRef::Static(&Value::Symbol(ValueSymbol {
+                }))),
+                cdr: SizedHolder(Cow::Borrowed(&Value::Cons(ValueCons {
+                    car: SizedHolder(Cow::Borrowed(&Value::Symbol(ValueSymbol {
                         name: Cow::Borrowed("s5")
-                    })),
-                    cdr: ValueRef::Static(&Value::Cons(ValueCons {
-                        car: ValueRef::Static(&Value::Symbol(ValueSymbol {
+                    }))),
+                    cdr: SizedHolder(Cow::Borrowed(&Value::Cons(ValueCons {
+                        car: SizedHolder(Cow::Borrowed(&Value::Symbol(ValueSymbol {
                             name: Cow::Borrowed("s6")
-                        })),
-                        cdr: ValueRef::Static(&Value::Nil),
-                    })),
-                })),
+                        }))),
+                        cdr: SizedHolder(Cow::Borrowed(&Value::Nil)),
+                    }))),
+                }))),
             })
         );
         assert_eq!(
             i.next().unwrap().unwrap(),
             Value::Cons(ValueCons {
-                car: ValueRef::Static(&Value::Symbol(ValueSymbol {
+                car: SizedHolder(Cow::Borrowed(&Value::Symbol(ValueSymbol {
                     name: Cow::Borrowed("s7")
-                })),
-                cdr: ValueRef::Static(&Value::Cons(ValueCons {
-                    car: ValueRef::Static(&Value::Nil),
-                    cdr: ValueRef::Static(&Value::Cons(ValueCons {
-                        car: ValueRef::Static(&Value::Symbol(ValueSymbol {
+                }))),
+                cdr: SizedHolder(Cow::Borrowed(&Value::Cons(ValueCons {
+                    car: SizedHolder(Cow::Borrowed(&Value::Nil)),
+                    cdr: SizedHolder(Cow::Borrowed(&Value::Cons(ValueCons {
+                        car: SizedHolder(Cow::Borrowed(&Value::Symbol(ValueSymbol {
                             name: Cow::Borrowed("s8")
-                        })),
-                        cdr: ValueRef::Static(&Value::Nil),
-                    })),
-                })),
+                        }))),
+                        cdr: SizedHolder(Cow::Borrowed(&Value::Nil)),
+                    }))),
+                }))),
             })
         );
         assert_eq!(
             i.next().unwrap().unwrap(),
             Value::Cons(ValueCons {
-                car: ValueRef::Static(&Value::Bool(true)),
-                cdr: ValueRef::Static(&Value::Bool(false)),
+                car: SizedHolder(Cow::Borrowed(&Value::Bool(true))),
+                cdr: SizedHolder(Cow::Borrowed(&Value::Bool(false))),
             })
         );
         assert_eq!(i.next().unwrap().unwrap_err().kind, ErrorKind::InvalidToken);
