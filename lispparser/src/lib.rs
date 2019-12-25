@@ -259,10 +259,10 @@ mod tests {
     fn test_read_symbol() {
         let s = "sym sym2\nsym3  \n   sym4";
         let mut i = s.chars().peekable().lisp_values();
-        assert_eq!(i.next().unwrap().unwrap(), sym!("sym"),);
-        assert_eq!(i.next().unwrap().unwrap(), sym!("sym2"),);
-        assert_eq!(i.next().unwrap().unwrap(), sym!("sym3"),);
-        assert_eq!(i.next().unwrap().unwrap(), sym!("sym4"),);
+        assert_eq!(i.next().unwrap().unwrap(), sym!("sym"));
+        assert_eq!(i.next().unwrap().unwrap(), sym!("sym2"));
+        assert_eq!(i.next().unwrap().unwrap(), sym!("sym3"));
+        assert_eq!(i.next().unwrap().unwrap(), sym!("sym4"));
         assert!(i.next().is_none());
     }
 
@@ -270,9 +270,9 @@ mod tests {
     fn test_read_bool() {
         let s = "#t #f\n#t  ";
         let mut i = s.chars().peekable().lisp_values();
-        assert_eq!(i.next().unwrap().unwrap(), bool!(true),);
-        assert_eq!(i.next().unwrap().unwrap(), bool!(false),);
-        assert_eq!(i.next().unwrap().unwrap(), bool!(true),);
+        assert_eq!(i.next().unwrap().unwrap(), bool!(true));
+        assert_eq!(i.next().unwrap().unwrap(), bool!(false));
+        assert_eq!(i.next().unwrap().unwrap(), bool!(true));
         assert!(i.next().is_none());
     }
 
@@ -282,17 +282,17 @@ mod tests {
         let mut i = s.chars().peekable().lisp_values();
         assert_eq!(
             i.next().unwrap().unwrap(),
-            list!(sym!("s1"), sym!("s2"), sym!("s3")),
+            list!(sym!("s1"), sym!("s2"), sym!("s3"))
         );
         assert_eq!(
             i.next().unwrap().unwrap(),
-            list!(sym!("s4"), sym!("s5"), sym!("s6")),
+            list!(sym!("s4"), sym!("s5"), sym!("s6"))
         );
         assert_eq!(
             i.next().unwrap().unwrap(),
-            list!(sym!("s7"), nil!(), sym!("s8")),
+            list!(sym!("s7"), nil!(), sym!("s8"))
         );
-        assert_eq!(i.next().unwrap().unwrap(), cons!(bool!(true), bool!(false)),);
+        assert_eq!(i.next().unwrap().unwrap(), cons!(bool!(true), bool!(false)));
         assert_eq!(
             i.next().unwrap().unwrap_err().kind,
             crate::ErrorKind::InvalidToken
