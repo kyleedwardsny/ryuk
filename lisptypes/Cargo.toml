@@ -1,5 +1,5 @@
 [package]
-name = "ryuk_lispcore"
+name = "ryuk-lisptypes"
 version = "0.1.0"
 authors = ["Kyle Edwards <kyleedwardsny@gmail.com>"]
 edition = "2018"
