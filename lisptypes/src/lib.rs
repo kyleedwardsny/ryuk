@@ -185,9 +185,9 @@ macro_rules! nil {
 #[macro_export]
 macro_rules! sym {
     ($name:literal) => {
-        $crate::ValueRef::Borrowed(&$crate::Value::Symbol($crate::ValueSymbol(Cow::Borrowed(
-            $name,
-        ))))
+        $crate::ValueRef::Borrowed(&$crate::Value::Symbol($crate::ValueSymbol(
+            ::std::borrow::Cow::Borrowed($name),
+        )))
     };
 }
 
@@ -217,13 +217,11 @@ macro_rules! list {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn test_nil_macro() {
         let nil = nil!();
         match nil {
-            Cow::Borrowed(v) => assert_eq!(*v, Value::Nil),
+            std::borrow::Cow::Borrowed(v) => assert_eq!(*v, super::Value::Nil),
             _ => panic!("Expected a borrowed Value"),
         }
     }
@@ -232,9 +230,9 @@ mod tests {
     fn test_sym_macro() {
         let sym = sym!("sym");
         match sym {
-            Cow::Borrowed(v) => match v {
-                Value::Symbol(s) => match s.0 {
-                    Cow::Borrowed(name) => assert_eq!(name, "sym"),
+            std::borrow::Cow::Borrowed(v) => match v {
+                super::Value::Symbol(s) => match s.0 {
+                    std::borrow::Cow::Borrowed(name) => assert_eq!(name, "sym"),
                     _ => panic!("Expected a borrowed str"),
                 },
                 _ => panic!("Expected a Value::Symbol"),
@@ -247,17 +245,19 @@ mod tests {
     fn test_cons_macro() {
         let cons = cons!(sym!("sym"), nil!());
         match cons {
-            Cow::Owned(v) => match &*v {
-                Value::Cons(c) => {
+            std::borrow::Cow::Owned(v) => match &*v {
+                super::Value::Cons(c) => {
                     match c.car {
-                        SizedHolder(Cow::Borrowed(car)) => match car {
-                            Value::Symbol(s) => assert_eq!(s.0, "sym"),
+                        super::SizedHolder(std::borrow::Cow::Borrowed(car)) => match car {
+                            super::Value::Symbol(s) => assert_eq!(s.0, "sym"),
                             _ => panic!("Expected a Value::Symbol"),
                         },
                         _ => panic!("Expected a borrowed Value"),
                     }
                     match c.cdr {
-                        SizedHolder(Cow::Borrowed(cdr)) => assert_eq!(*cdr, Value::Nil),
+                        super::SizedHolder(std::borrow::Cow::Borrowed(cdr)) => {
+                            assert_eq!(*cdr, super::Value::Nil)
+                        }
                         _ => panic!("Expected a borrowed Value"),
                     }
                 }
@@ -271,16 +271,16 @@ mod tests {
     fn test_bool_macro() {
         let b = bool!(true);
         match b {
-            Cow::Borrowed(v) => match &*v {
-                Value::Bool(b) => assert_eq!(b.0, true),
+            std::borrow::Cow::Borrowed(v) => match &*v {
+                super::Value::Bool(b) => assert_eq!(b.0, true),
                 _ => panic!("Expected a Value::Bool"),
             },
             _ => panic!("Expected a borrowed Value"),
         }
         let b = bool!(false);
         match b {
-            Cow::Borrowed(v) => match &*v {
-                Value::Bool(b) => assert_eq!(b.0, false),
+            std::borrow::Cow::Borrowed(v) => match &*v {
+                super::Value::Bool(b) => assert_eq!(b.0, false),
                 _ => panic!("Expected a Value::Bool"),
             },
             _ => panic!("Expected a borrowed Value"),
@@ -291,23 +291,25 @@ mod tests {
     fn test_list_macro() {
         let l = list!();
         match l {
-            Cow::Borrowed(v) => assert_eq!(*v, Value::Nil),
+            std::borrow::Cow::Borrowed(v) => assert_eq!(*v, super::Value::Nil),
             _ => panic!("Expected a borrowed Value"),
         }
 
         let l = list!(sym!("sym1"));
         match l {
-            Cow::Owned(v) => match &*v {
-                Value::Cons(c) => {
+            std::borrow::Cow::Owned(v) => match &*v {
+                super::Value::Cons(c) => {
                     match c.car {
-                        SizedHolder(Cow::Borrowed(car)) => match car {
-                            Value::Symbol(s) => assert_eq!(s.0, "sym1"),
+                        super::SizedHolder(std::borrow::Cow::Borrowed(car)) => match car {
+                            super::Value::Symbol(s) => assert_eq!(s.0, "sym1"),
                             _ => panic!("Expected a Value::Symbol"),
                         },
                         _ => panic!("Expected a borrowed Value"),
                     }
                     match c.cdr {
-                        SizedHolder(Cow::Borrowed(cdr)) => assert_eq!(*cdr, Value::Nil),
+                        super::SizedHolder(std::borrow::Cow::Borrowed(cdr)) => {
+                            assert_eq!(*cdr, super::Value::Nil)
+                        }
                         _ => panic!("Expected a borrowed Value"),
                     }
                 }
@@ -318,27 +320,31 @@ mod tests {
 
         let l = list!(sym!("sym1"), sym!("sym2"));
         match l {
-            Cow::Owned(v) => match &*v {
-                Value::Cons(c) => {
+            std::borrow::Cow::Owned(v) => match &*v {
+                super::Value::Cons(c) => {
                     match c.car {
-                        SizedHolder(Cow::Borrowed(car)) => match &*car {
-                            Value::Symbol(s) => assert_eq!(s.0, "sym1"),
+                        super::SizedHolder(std::borrow::Cow::Borrowed(car)) => match &*car {
+                            super::Value::Symbol(s) => assert_eq!(s.0, "sym1"),
                             _ => panic!("Expected a Value::Symbol"),
                         },
                         _ => panic!("Expected a borrowed Value"),
                     }
                     match &c.cdr {
-                        SizedHolder(Cow::Owned(cdr)) => match &**cdr {
-                            Value::Cons(c) => {
+                        super::SizedHolder(std::borrow::Cow::Owned(cdr)) => match &**cdr {
+                            super::Value::Cons(c) => {
                                 match c.car {
-                                    SizedHolder(Cow::Borrowed(car)) => match &*car {
-                                        Value::Symbol(s) => assert_eq!(s.0, "sym2"),
-                                        _ => panic!("Expected a Value::Symbol"),
-                                    },
+                                    super::SizedHolder(std::borrow::Cow::Borrowed(car)) => {
+                                        match &*car {
+                                            super::Value::Symbol(s) => assert_eq!(s.0, "sym2"),
+                                            _ => panic!("Expected a Value::Symbol"),
+                                        }
+                                    }
                                     _ => panic!("Expected a borrowed Value"),
                                 }
                                 match c.cdr {
-                                    SizedHolder(Cow::Borrowed(cdr)) => assert_eq!(*cdr, Value::Nil),
+                                    super::SizedHolder(std::borrow::Cow::Borrowed(cdr)) => {
+                                        assert_eq!(*cdr, super::Value::Nil)
+                                    }
                                     _ => panic!("Expected a borrowed Value"),
                                 }
                             }
@@ -354,44 +360,52 @@ mod tests {
 
         let l = list!(sym!("sym1"), sym!("sym2"), sym!("sym3"));
         match l {
-            Cow::Owned(v) => match &*v {
-                Value::Cons(c) => {
+            std::borrow::Cow::Owned(v) => match &*v {
+                super::Value::Cons(c) => {
                     match c.car {
-                        SizedHolder(Cow::Borrowed(car)) => match &*car {
-                            Value::Symbol(s) => assert_eq!(s.0, "sym1"),
+                        super::SizedHolder(std::borrow::Cow::Borrowed(car)) => match &*car {
+                            super::Value::Symbol(s) => assert_eq!(s.0, "sym1"),
                             _ => panic!("Expected a Value::Symbol"),
                         },
                         _ => panic!("Expected a borrowed Value"),
                     }
                     match &c.cdr {
-                        SizedHolder(Cow::Owned(cdr)) => match &**cdr {
-                            Value::Cons(c) => {
+                        super::SizedHolder(std::borrow::Cow::Owned(cdr)) => match &**cdr {
+                            super::Value::Cons(c) => {
                                 match c.car {
-                                    SizedHolder(Cow::Borrowed(car)) => match &*car {
-                                        Value::Symbol(s) => assert_eq!(s.0, "sym2"),
-                                        _ => panic!("Expected a Value::Symbol"),
-                                    },
+                                    super::SizedHolder(std::borrow::Cow::Borrowed(car)) => {
+                                        match &*car {
+                                            super::Value::Symbol(s) => assert_eq!(s.0, "sym2"),
+                                            _ => panic!("Expected a Value::Symbol"),
+                                        }
+                                    }
                                     _ => panic!("Expected a borrowed Value"),
                                 }
                                 match &c.cdr {
-                                    SizedHolder(Cow::Owned(cdr)) => match &**cdr {
-                                        Value::Cons(c) => {
-                                            match c.car {
-                                                SizedHolder(Cow::Borrowed(car)) => match &*car {
-                                                    Value::Symbol(s) => assert_eq!(s.0, "sym3"),
-                                                    _ => panic!("Expected a Value::Symbol"),
-                                                },
-                                                _ => panic!("Expected a borrowed Value"),
-                                            }
-                                            match c.cdr {
-                                                SizedHolder(Cow::Borrowed(cdr)) => {
-                                                    assert_eq!(*cdr, Value::Nil)
+                                    super::SizedHolder(std::borrow::Cow::Owned(cdr)) => {
+                                        match &**cdr {
+                                            super::Value::Cons(c) => {
+                                                match c.car {
+                                                    super::SizedHolder(
+                                                        std::borrow::Cow::Borrowed(car),
+                                                    ) => match &*car {
+                                                        super::Value::Symbol(s) => {
+                                                            assert_eq!(s.0, "sym3")
+                                                        }
+                                                        _ => panic!("Expected a Value::Symbol"),
+                                                    },
+                                                    _ => panic!("Expected a borrowed Value"),
                                                 }
-                                                _ => panic!("Expected a borrowed Value"),
+                                                match c.cdr {
+                                                    super::SizedHolder(
+                                                        std::borrow::Cow::Borrowed(cdr),
+                                                    ) => assert_eq!(*cdr, super::Value::Nil),
+                                                    _ => panic!("Expected a borrowed Value"),
+                                                }
                                             }
+                                            _ => panic!("Expected a Value::Cons"),
                                         }
-                                        _ => panic!("Expected a Value::Cons"),
-                                    },
+                                    }
                                     _ => panic!("Expected an owned Value"),
                                 }
                             }
