@@ -259,22 +259,10 @@ mod tests {
     fn test_read_symbol() {
         let s = "sym sym2\nsym3  \n   sym4";
         let mut i = s.chars().peekable().lisp_values();
-        assert_eq!(
-            i.next().unwrap().unwrap(),
-            ValueRef::Borrowed(&Value::Symbol(ValueSymbol(Cow::Borrowed("sym"))))
-        );
-        assert_eq!(
-            i.next().unwrap().unwrap(),
-            ValueRef::Borrowed(&Value::Symbol(ValueSymbol(Cow::Borrowed("sym2"))))
-        );
-        assert_eq!(
-            i.next().unwrap().unwrap(),
-            ValueRef::Borrowed(&Value::Symbol(ValueSymbol(Cow::Borrowed("sym3"))))
-        );
-        assert_eq!(
-            i.next().unwrap().unwrap(),
-            ValueRef::Borrowed(&Value::Symbol(ValueSymbol(Cow::Borrowed("sym4"))))
-        );
+        assert_eq!(i.next().unwrap().unwrap(), sym!("sym"),);
+        assert_eq!(i.next().unwrap().unwrap(), sym!("sym2"),);
+        assert_eq!(i.next().unwrap().unwrap(), sym!("sym3"),);
+        assert_eq!(i.next().unwrap().unwrap(), sym!("sym4"),);
         assert!(i.next().is_none());
     }
 
@@ -282,18 +270,9 @@ mod tests {
     fn test_read_bool() {
         let s = "#t #f\n#t  ";
         let mut i = s.chars().peekable().lisp_values();
-        assert_eq!(
-            i.next().unwrap().unwrap(),
-            ValueRef::Borrowed(&Value::Bool(ValueBool(true)))
-        );
-        assert_eq!(
-            i.next().unwrap().unwrap(),
-            ValueRef::Borrowed(&Value::Bool(ValueBool(false)))
-        );
-        assert_eq!(
-            i.next().unwrap().unwrap(),
-            ValueRef::Borrowed(&Value::Bool(ValueBool(true)))
-        );
+        assert_eq!(i.next().unwrap().unwrap(), bool!(true),);
+        assert_eq!(i.next().unwrap().unwrap(), bool!(false),);
+        assert_eq!(i.next().unwrap().unwrap(), bool!(true),);
         assert!(i.next().is_none());
     }
 
@@ -303,66 +282,17 @@ mod tests {
         let mut i = s.chars().peekable().lisp_values();
         assert_eq!(
             i.next().unwrap().unwrap(),
-            ValueRef::Borrowed(&Value::Cons(ValueCons {
-                car: SizedHolder(Cow::Borrowed(&Value::Symbol(ValueSymbol(Cow::Borrowed(
-                    "s1"
-                ))))),
-                cdr: SizedHolder(Cow::Borrowed(&Value::Cons(ValueCons {
-                    car: SizedHolder(Cow::Borrowed(&Value::Symbol(ValueSymbol(Cow::Borrowed(
-                        "s2"
-                    ))))),
-                    cdr: SizedHolder(Cow::Borrowed(&Value::Cons(ValueCons {
-                        car: SizedHolder(Cow::Borrowed(&Value::Symbol(ValueSymbol(
-                            Cow::Borrowed("s3")
-                        )))),
-                        cdr: SizedHolder(Cow::Borrowed(&Value::Nil)),
-                    }))),
-                }))),
-            }))
+            list!(sym!("s1"), sym!("s2"), sym!("s3")),
         );
         assert_eq!(
             i.next().unwrap().unwrap(),
-            ValueRef::Borrowed(&Value::Cons(ValueCons {
-                car: SizedHolder(Cow::Borrowed(&Value::Symbol(ValueSymbol(Cow::Borrowed(
-                    "s4"
-                ))))),
-                cdr: SizedHolder(Cow::Borrowed(&Value::Cons(ValueCons {
-                    car: SizedHolder(Cow::Borrowed(&Value::Symbol(ValueSymbol(Cow::Borrowed(
-                        "s5"
-                    ))))),
-                    cdr: SizedHolder(Cow::Borrowed(&Value::Cons(ValueCons {
-                        car: SizedHolder(Cow::Borrowed(&Value::Symbol(ValueSymbol(
-                            Cow::Borrowed("s6")
-                        )))),
-                        cdr: SizedHolder(Cow::Borrowed(&Value::Nil)),
-                    }))),
-                }))),
-            }))
+            list!(sym!("s4"), sym!("s5"), sym!("s6")),
         );
         assert_eq!(
             i.next().unwrap().unwrap(),
-            ValueRef::Borrowed(&Value::Cons(ValueCons {
-                car: SizedHolder(Cow::Borrowed(&Value::Symbol(ValueSymbol(Cow::Borrowed(
-                    "s7"
-                ))))),
-                cdr: SizedHolder(Cow::Borrowed(&Value::Cons(ValueCons {
-                    car: SizedHolder(Cow::Borrowed(&Value::Nil)),
-                    cdr: SizedHolder(Cow::Borrowed(&Value::Cons(ValueCons {
-                        car: SizedHolder(Cow::Borrowed(&Value::Symbol(ValueSymbol(
-                            Cow::Borrowed("s8")
-                        )))),
-                        cdr: SizedHolder(Cow::Borrowed(&Value::Nil)),
-                    }))),
-                }))),
-            }))
+            list!(sym!("s7"), nil!(), sym!("s8")),
         );
-        assert_eq!(
-            i.next().unwrap().unwrap(),
-            ValueRef::Borrowed(&Value::Cons(ValueCons {
-                car: SizedHolder(Cow::Borrowed(&Value::Bool(ValueBool(true)))),
-                cdr: SizedHolder(Cow::Borrowed(&Value::Bool(ValueBool(false)))),
-            }))
-        );
+        assert_eq!(i.next().unwrap().unwrap(), cons!(bool!(true), bool!(false)),);
         assert_eq!(
             i.next().unwrap().unwrap_err().kind,
             crate::ErrorKind::InvalidToken
@@ -380,7 +310,7 @@ mod tests {
         let mut num = 0;
         for v in s.chars().peekable().lisp_values() {
             num += 1;
-            assert_eq!(v.unwrap(), ValueRef::Borrowed(&Value::Nil));
+            assert_eq!(v.unwrap(), nil!());
         }
         assert_eq!(num, 3);
     }
