@@ -208,6 +208,13 @@ macro_rules! bool {
     };
 }
 
+#[macro_export]
+macro_rules! list {
+    () => { nil!() };
+    ($e:expr) => { cons!($e, nil!()) };
+    ($e:expr, $($es:expr),+) => { cons!($e, list!($($es),*)) };
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -275,6 +282,125 @@ mod tests {
             Cow::Borrowed(v) => match &*v {
                 Value::Bool(b) => assert_eq!(b.0, false),
                 _ => panic!("Expected a Value::Bool"),
+            },
+            _ => panic!("Expected a borrowed Value"),
+        }
+    }
+
+    #[test]
+    fn test_list_macro() {
+        let l = list!();
+        match l {
+            Cow::Borrowed(v) => assert_eq!(*v, Value::Nil),
+            _ => panic!("Expected a borrowed Value"),
+        }
+
+        let l = list!(sym!("sym1"));
+        match l {
+            Cow::Owned(v) => match &*v {
+                Value::Cons(c) => {
+                    match c.car {
+                        SizedHolder(Cow::Borrowed(car)) => match car {
+                            Value::Symbol(s) => assert_eq!(s.0, "sym1"),
+                            _ => panic!("Expected a Value::Symbol"),
+                        },
+                        _ => panic!("Expected a borrowed Value"),
+                    }
+                    match c.cdr {
+                        SizedHolder(Cow::Borrowed(cdr)) => assert_eq!(*cdr, Value::Nil),
+                        _ => panic!("Expected a borrowed Value"),
+                    }
+                }
+                _ => panic!("Expected a Value::Cons"),
+            },
+            _ => panic!("Expected a borrowed Value"),
+        }
+
+        let l = list!(sym!("sym1"), sym!("sym2"));
+        match l {
+            Cow::Owned(v) => match &*v {
+                Value::Cons(c) => {
+                    match c.car {
+                        SizedHolder(Cow::Borrowed(car)) => match &*car {
+                            Value::Symbol(s) => assert_eq!(s.0, "sym1"),
+                            _ => panic!("Expected a Value::Symbol"),
+                        },
+                        _ => panic!("Expected a borrowed Value"),
+                    }
+                    match &c.cdr {
+                        SizedHolder(Cow::Owned(cdr)) => match &**cdr {
+                            Value::Cons(c) => {
+                                match c.car {
+                                    SizedHolder(Cow::Borrowed(car)) => match &*car {
+                                        Value::Symbol(s) => assert_eq!(s.0, "sym2"),
+                                        _ => panic!("Expected a Value::Symbol"),
+                                    },
+                                    _ => panic!("Expected a borrowed Value"),
+                                }
+                                match c.cdr {
+                                    SizedHolder(Cow::Borrowed(cdr)) => assert_eq!(*cdr, Value::Nil),
+                                    _ => panic!("Expected a borrowed Value"),
+                                }
+                            }
+                            _ => panic!("Expected a Value::Cons"),
+                        },
+                        _ => panic!("Expected an owned Value"),
+                    }
+                }
+                _ => panic!("Expected a Value::Cons"),
+            },
+            _ => panic!("Expected a borrowed Value"),
+        }
+
+        let l = list!(sym!("sym1"), sym!("sym2"), sym!("sym3"));
+        match l {
+            Cow::Owned(v) => match &*v {
+                Value::Cons(c) => {
+                    match c.car {
+                        SizedHolder(Cow::Borrowed(car)) => match &*car {
+                            Value::Symbol(s) => assert_eq!(s.0, "sym1"),
+                            _ => panic!("Expected a Value::Symbol"),
+                        },
+                        _ => panic!("Expected a borrowed Value"),
+                    }
+                    match &c.cdr {
+                        SizedHolder(Cow::Owned(cdr)) => match &**cdr {
+                            Value::Cons(c) => {
+                                match c.car {
+                                    SizedHolder(Cow::Borrowed(car)) => match &*car {
+                                        Value::Symbol(s) => assert_eq!(s.0, "sym2"),
+                                        _ => panic!("Expected a Value::Symbol"),
+                                    },
+                                    _ => panic!("Expected a borrowed Value"),
+                                }
+                                match &c.cdr {
+                                    SizedHolder(Cow::Owned(cdr)) => match &**cdr {
+                                        Value::Cons(c) => {
+                                            match c.car {
+                                                SizedHolder(Cow::Borrowed(car)) => match &*car {
+                                                    Value::Symbol(s) => assert_eq!(s.0, "sym3"),
+                                                    _ => panic!("Expected a Value::Symbol"),
+                                                },
+                                                _ => panic!("Expected a borrowed Value"),
+                                            }
+                                            match c.cdr {
+                                                SizedHolder(Cow::Borrowed(cdr)) => {
+                                                    assert_eq!(*cdr, Value::Nil)
+                                                }
+                                                _ => panic!("Expected a borrowed Value"),
+                                            }
+                                        }
+                                        _ => panic!("Expected a Value::Cons"),
+                                    },
+                                    _ => panic!("Expected an owned Value"),
+                                }
+                            }
+                            _ => panic!("Expected a Value::Cons"),
+                        },
+                        _ => panic!("Expected an owned Value"),
+                    }
+                }
+                _ => panic!("Expected a Value::Cons"),
             },
             _ => panic!("Expected a borrowed Value"),
         }
