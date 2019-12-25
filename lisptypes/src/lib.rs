@@ -174,3 +174,109 @@ impl TryFrom<ValueRef> for ValueBool {
         }
     }
 }
+
+#[macro_export]
+macro_rules! nil {
+    () => {
+        $crate::ValueRef::Borrowed(&$crate::Value::Nil)
+    };
+}
+
+#[macro_export]
+macro_rules! sym {
+    ($name:literal) => {
+        $crate::ValueRef::Borrowed(&$crate::Value::Symbol($crate::ValueSymbol(Cow::Borrowed(
+            $name,
+        ))))
+    };
+}
+
+#[macro_export]
+macro_rules! cons {
+    ($car:expr, $cdr:expr) => {
+        $crate::ValueRef::Owned(::std::rc::Rc::new($crate::Value::Cons($crate::ValueCons {
+            car: $crate::SizedHolder($car),
+            cdr: $crate::SizedHolder($cdr),
+        })))
+    };
+}
+
+#[macro_export]
+macro_rules! bool {
+    ($b:literal) => {
+        $crate::ValueRef::Borrowed(&$crate::Value::Bool($crate::ValueBool($b)))
+    };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_nil_macro() {
+        let nil = nil!();
+        match nil {
+            Cow::Borrowed(v) => assert_eq!(*v, Value::Nil),
+            _ => panic!("Expected a borrowed Value"),
+        }
+    }
+
+    #[test]
+    fn test_sym_macro() {
+        let sym = sym!("sym");
+        match sym {
+            Cow::Borrowed(v) => match v {
+                Value::Symbol(s) => match s.0 {
+                    Cow::Borrowed(name) => assert_eq!(name, "sym"),
+                    _ => panic!("Expected a borrowed str"),
+                },
+                _ => panic!("Expected a Value::Symbol"),
+            },
+            _ => panic!("Expected a borrowed Value"),
+        }
+    }
+
+    #[test]
+    fn test_cons_macro() {
+        let cons = cons!(sym!("sym"), nil!());
+        match cons {
+            Cow::Owned(v) => match &*v {
+                Value::Cons(c) => {
+                    match c.car {
+                        SizedHolder(Cow::Borrowed(car)) => match car {
+                            Value::Symbol(s) => assert_eq!(s.0, "sym"),
+                            _ => panic!("Expected a Value::Symbol"),
+                        },
+                        _ => panic!("Expected a borrowed Value"),
+                    }
+                    match c.cdr {
+                        SizedHolder(Cow::Borrowed(cdr)) => assert_eq!(*cdr, Value::Nil),
+                        _ => panic!("Expected a borrowed Value"),
+                    }
+                }
+                _ => panic!("Expected a Value::Cons"),
+            },
+            _ => panic!("Expected an owned Value"),
+        }
+    }
+
+    #[test]
+    fn test_bool_macro() {
+        let b = bool!(true);
+        match b {
+            Cow::Borrowed(v) => match &*v {
+                Value::Bool(b) => assert_eq!(b.0, true),
+                _ => panic!("Expected a Value::Bool"),
+            },
+            _ => panic!("Expected a borrowed Value"),
+        }
+        let b = bool!(false);
+        match b {
+            Cow::Borrowed(v) => match &*v {
+                Value::Bool(b) => assert_eq!(b.0, false),
+                _ => panic!("Expected a Value::Bool"),
+            },
+            _ => panic!("Expected a borrowed Value"),
+        }
+    }
+}
