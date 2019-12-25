@@ -83,7 +83,7 @@ impl<I: Iterator<Item = char>> LispValues for Peekable<I> {
 }
 
 fn is_token_char(c: char) -> bool {
-    if let 'a'..='z' | '0'..='9' | '.' = c {
+    if let 'a'..='z' | '0'..='9' | '.' | '#' = c {
         true
     } else {
         false
@@ -273,6 +273,17 @@ mod tests {
         assert_eq!(i.next().unwrap().unwrap(), bool!(true));
         assert_eq!(i.next().unwrap().unwrap(), bool!(false));
         assert_eq!(i.next().unwrap().unwrap(), bool!(true));
+        assert!(i.next().is_none());
+    }
+
+    #[test]
+    fn test_read_invalid_macro() {
+        let s = "#t#f  ";
+        let mut i = s.chars().peekable().lisp_values();
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            crate::ErrorKind::InvalidToken
+        );
         assert!(i.next().is_none());
     }
 
