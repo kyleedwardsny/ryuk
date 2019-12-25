@@ -169,8 +169,8 @@ fn read_macro<I: Iterator<Item = char>>(peekable: &mut Peekable<I>) -> Result<Va
     if let Option::Some(_) = peekable.peek() {
         match read_token(peekable)? {
             ReadTokenResult::ValidToken(t) => match &*t {
-                "t" => Result::Ok(ValueRef::Borrowed(&Value::Bool(true))),
-                "f" => Result::Ok(ValueRef::Borrowed(&Value::Bool(false))),
+                "t" => Result::Ok(ValueRef::Borrowed(&Value::Bool(ValueBool(true)))),
+                "f" => Result::Ok(ValueRef::Borrowed(&Value::Bool(ValueBool(false)))),
                 _ => Result::Err(Error::new(
                     ErrorKind::InvalidToken,
                     format!("Invalid macro: '{}'", t),
@@ -284,15 +284,15 @@ mod tests {
         let mut i = s.chars().peekable().lisp_values();
         assert_eq!(
             i.next().unwrap().unwrap(),
-            ValueRef::Borrowed(&Value::Bool(true))
+            ValueRef::Borrowed(&Value::Bool(ValueBool(true)))
         );
         assert_eq!(
             i.next().unwrap().unwrap(),
-            ValueRef::Borrowed(&Value::Bool(false))
+            ValueRef::Borrowed(&Value::Bool(ValueBool(false)))
         );
         assert_eq!(
             i.next().unwrap().unwrap(),
-            ValueRef::Borrowed(&Value::Bool(true))
+            ValueRef::Borrowed(&Value::Bool(ValueBool(true)))
         );
         assert!(i.next().is_none());
     }
@@ -359,12 +359,18 @@ mod tests {
         assert_eq!(
             i.next().unwrap().unwrap(),
             ValueRef::Borrowed(&Value::Cons(ValueCons {
-                car: SizedHolder(Cow::Borrowed(&Value::Bool(true))),
-                cdr: SizedHolder(Cow::Borrowed(&Value::Bool(false))),
+                car: SizedHolder(Cow::Borrowed(&Value::Bool(ValueBool(true)))),
+                cdr: SizedHolder(Cow::Borrowed(&Value::Bool(ValueBool(false)))),
             }))
         );
-        assert_eq!(i.next().unwrap().unwrap_err().kind, ErrorKind::InvalidToken);
-        assert_eq!(i.next().unwrap().unwrap_err().kind, ErrorKind::EndOfFile);
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            crate::ErrorKind::InvalidToken
+        );
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            crate::ErrorKind::EndOfFile
+        );
         assert!(i.next().is_none());
     }
 
