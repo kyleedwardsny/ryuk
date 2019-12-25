@@ -57,8 +57,8 @@ pub struct ValueSymbol {
 
 #[derive(Debug)]
 pub struct ValueCons {
-    pub car: SizedHolder<Cow<'static, Value>>,
-    pub cdr: SizedHolder<Cow<'static, Value>>,
+    pub car: SizedHolder<ValueRef>,
+    pub cdr: SizedHolder<ValueRef>,
 }
 
 impl PartialEq for ValueCons {
@@ -92,6 +92,8 @@ impl ToOwned for Value {
         })
     }
 }
+
+pub type ValueRef = Cow<'static, Value>;
 
 pub trait LispValues {
     type Iter: Iterator<Item = Result<Value>>;
@@ -189,8 +191,8 @@ mod syntax {
     fn read_list<I: Iterator<Item = char>>(peekable: &mut Peekable<I>) -> Result<Value> {
         match read_delimited(peekable, ')')? {
             ReadDelimitedResult::Value(v) => Result::Ok(Value::Cons(ValueCons {
-                car: SizedHolder(Cow::<Value>::Owned(Rc::new(v))),
-                cdr: SizedHolder(Cow::<Value>::Owned(Rc::new(read_list(peekable)?))),
+                car: SizedHolder(ValueRef::Owned(Rc::new(v))),
+                cdr: SizedHolder(ValueRef::Owned(Rc::new(read_list(peekable)?))),
             })),
             ReadDelimitedResult::InvalidToken(t) => match &*t {
                 "." => match read_delimited(peekable, ')')? {
