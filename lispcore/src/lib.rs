@@ -96,7 +96,7 @@ impl ToOwned for Value {
 pub type ValueRef = Cow<'static, Value>;
 
 pub trait LispValues {
-    type Iter: Iterator<Item = Result<Value>>;
+    type Iter: Iterator<Item = Result<ValueRef>>;
 
     fn lisp_values(self) -> Self::Iter;
 }
@@ -106,7 +106,7 @@ pub struct PeekableCharLispIterator<I: Iterator<Item = char>> {
 }
 
 impl<I: Iterator<Item = char>> Iterator for PeekableCharLispIterator<I> {
-    type Item = Result<Value>;
+    type Item = Result<ValueRef>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match syntax::read_impl(&mut self.reader) {
@@ -154,7 +154,7 @@ mod syntax {
     }
 
     enum ReadDelimitedResult {
-        Value(Value),
+        Value(ValueRef),
         InvalidToken(String),
         EndDelimiter,
     }
@@ -188,12 +188,14 @@ mod syntax {
         }
     }
 
-    fn read_list<I: Iterator<Item = char>>(peekable: &mut Peekable<I>) -> Result<Value> {
+    fn read_list<I: Iterator<Item = char>>(peekable: &mut Peekable<I>) -> Result<ValueRef> {
         match read_delimited(peekable, ')')? {
-            ReadDelimitedResult::Value(v) => Result::Ok(Value::Cons(ValueCons {
-                car: SizedHolder(ValueRef::Owned(Rc::new(v))),
-                cdr: SizedHolder(ValueRef::Owned(Rc::new(read_list(peekable)?))),
-            })),
+            ReadDelimitedResult::Value(v) => {
+                Result::Ok(ValueRef::Owned(Rc::new(Value::Cons(ValueCons {
+                    car: SizedHolder(v),
+                    cdr: SizedHolder(read_list(peekable)?),
+                }))))
+            }
             ReadDelimitedResult::InvalidToken(t) => match &*t {
                 "." => match read_delimited(peekable, ')')? {
                     ReadDelimitedResult::Value(cdr) => match read_delimited(peekable, ')')? {
@@ -213,16 +215,16 @@ mod syntax {
                     format!("Invalid token: '{}'", t),
                 )),
             },
-            ReadDelimitedResult::EndDelimiter => Result::Ok(Value::Nil),
+            ReadDelimitedResult::EndDelimiter => Result::Ok(ValueRef::Borrowed(&Value::Nil)),
         }
     }
 
-    fn read_macro<I: Iterator<Item = char>>(peekable: &mut Peekable<I>) -> Result<Value> {
+    fn read_macro<I: Iterator<Item = char>>(peekable: &mut Peekable<I>) -> Result<ValueRef> {
         if let Option::Some(_) = peekable.peek() {
             match read_token(peekable)? {
                 ReadTokenResult::ValidToken(t) => match &*t {
-                    "t" => Result::Ok(Value::Bool(true)),
-                    "f" => Result::Ok(Value::Bool(false)),
+                    "t" => Result::Ok(ValueRef::Borrowed(&Value::Bool(true))),
+                    "f" => Result::Ok(ValueRef::Borrowed(&Value::Bool(false))),
                     _ => Result::Err(Error::new(
                         ErrorKind::InvalidToken,
                         format!("Invalid macro: '{}'", t),
@@ -271,7 +273,7 @@ mod syntax {
     }
 
     pub enum ReadImplResult {
-        Value(Value),
+        Value(ValueRef),
         InvalidToken(String),
         EndOfFile,
     }
@@ -289,11 +291,11 @@ mod syntax {
                 Result::Ok(ReadImplResult::Value(read_macro(peekable)?))
             } else if is_token_char(*c) {
                 match read_token(peekable)? {
-                    ReadTokenResult::ValidToken(t) => {
-                        Result::Ok(ReadImplResult::Value(Value::Symbol(ValueSymbol {
+                    ReadTokenResult::ValidToken(t) => Result::Ok(ReadImplResult::Value(
+                        ValueRef::Owned(Rc::new(Value::Symbol(ValueSymbol {
                             name: Cow::Owned(t),
-                        })))
-                    }
+                        }))),
+                    )),
                     ReadTokenResult::InvalidToken(t) => Result::Ok(ReadImplResult::InvalidToken(t)),
                 }
             } else {
@@ -318,27 +320,27 @@ mod tests {
         let mut i = s.chars().peekable().lisp_values();
         assert_eq!(
             i.next().unwrap().unwrap(),
-            Value::Symbol(ValueSymbol {
+            ValueRef::Borrowed(&Value::Symbol(ValueSymbol {
                 name: Cow::Borrowed("sym")
-            })
+            }))
         );
         assert_eq!(
             i.next().unwrap().unwrap(),
-            Value::Symbol(ValueSymbol {
+            ValueRef::Borrowed(&Value::Symbol(ValueSymbol {
                 name: Cow::Borrowed("sym2")
-            })
+            }))
         );
         assert_eq!(
             i.next().unwrap().unwrap(),
-            Value::Symbol(ValueSymbol {
+            ValueRef::Borrowed(&Value::Symbol(ValueSymbol {
                 name: Cow::Borrowed("sym3")
-            })
+            }))
         );
         assert_eq!(
             i.next().unwrap().unwrap(),
-            Value::Symbol(ValueSymbol {
+            ValueRef::Borrowed(&Value::Symbol(ValueSymbol {
                 name: Cow::Borrowed("sym4")
-            })
+            }))
         );
         assert!(i.next().is_none());
     }
@@ -347,9 +349,18 @@ mod tests {
     fn test_read_bool() {
         let s = "#t #f\n#t  ";
         let mut i = s.chars().peekable().lisp_values();
-        assert_eq!(i.next().unwrap().unwrap(), Value::Bool(true));
-        assert_eq!(i.next().unwrap().unwrap(), Value::Bool(false));
-        assert_eq!(i.next().unwrap().unwrap(), Value::Bool(true));
+        assert_eq!(
+            i.next().unwrap().unwrap(),
+            ValueRef::Borrowed(&Value::Bool(true))
+        );
+        assert_eq!(
+            i.next().unwrap().unwrap(),
+            ValueRef::Borrowed(&Value::Bool(false))
+        );
+        assert_eq!(
+            i.next().unwrap().unwrap(),
+            ValueRef::Borrowed(&Value::Bool(true))
+        );
         assert!(i.next().is_none());
     }
 
@@ -359,7 +370,7 @@ mod tests {
         let mut i = s.chars().peekable().lisp_values();
         assert_eq!(
             i.next().unwrap().unwrap(),
-            Value::Cons(ValueCons {
+            ValueRef::Borrowed(&Value::Cons(ValueCons {
                 car: SizedHolder(Cow::Borrowed(&Value::Symbol(ValueSymbol {
                     name: Cow::Borrowed("s1")
                 }))),
@@ -374,11 +385,11 @@ mod tests {
                         cdr: SizedHolder(Cow::Borrowed(&Value::Nil)),
                     }))),
                 }))),
-            })
+            }))
         );
         assert_eq!(
             i.next().unwrap().unwrap(),
-            Value::Cons(ValueCons {
+            ValueRef::Borrowed(&Value::Cons(ValueCons {
                 car: SizedHolder(Cow::Borrowed(&Value::Symbol(ValueSymbol {
                     name: Cow::Borrowed("s4")
                 }))),
@@ -393,11 +404,11 @@ mod tests {
                         cdr: SizedHolder(Cow::Borrowed(&Value::Nil)),
                     }))),
                 }))),
-            })
+            }))
         );
         assert_eq!(
             i.next().unwrap().unwrap(),
-            Value::Cons(ValueCons {
+            ValueRef::Borrowed(&Value::Cons(ValueCons {
                 car: SizedHolder(Cow::Borrowed(&Value::Symbol(ValueSymbol {
                     name: Cow::Borrowed("s7")
                 }))),
@@ -410,14 +421,14 @@ mod tests {
                         cdr: SizedHolder(Cow::Borrowed(&Value::Nil)),
                     }))),
                 }))),
-            })
+            }))
         );
         assert_eq!(
             i.next().unwrap().unwrap(),
-            Value::Cons(ValueCons {
+            ValueRef::Borrowed(&Value::Cons(ValueCons {
                 car: SizedHolder(Cow::Borrowed(&Value::Bool(true))),
                 cdr: SizedHolder(Cow::Borrowed(&Value::Bool(false))),
-            })
+            }))
         );
         assert_eq!(i.next().unwrap().unwrap_err().kind, ErrorKind::InvalidToken);
         assert_eq!(i.next().unwrap().unwrap_err().kind, ErrorKind::EndOfFile);
@@ -430,7 +441,7 @@ mod tests {
         let mut num = 0;
         for v in s.chars().peekable().lisp_values() {
             num += 1;
-            assert_eq!(v.unwrap(), Value::Nil);
+            assert_eq!(v.unwrap(), ValueRef::Borrowed(&Value::Nil));
         }
         assert_eq!(num, 3);
     }
