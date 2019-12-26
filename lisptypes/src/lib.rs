@@ -119,48 +119,73 @@ where
     }
 }
 
-pub type ValueStatic = Value<ValueStaticRef, &'static str>;
-
 #[derive(Debug)]
-pub struct ValueStaticRef(pub &'static ValueStatic);
+pub struct ValueRef<'a, S>(pub &'a Value<ValueRef<'a, S>, S>)
+where
+    S: Deref<Target = str>;
 
-impl Deref for ValueStaticRef {
-    type Target = Value<ValueStaticRef, &'static str>;
+impl<'a, S> Deref for ValueRef<'a, S>
+where
+    S: Deref<Target = str>,
+{
+    type Target = Value<ValueRef<'a, S>, S>;
 
     fn deref(&self) -> &Self::Target {
         self.0
     }
 }
 
+impl<'a, S1, V2, S2> PartialEq<V2> for ValueRef<'a, S1>
+where
+    S1: Deref<Target = str>,
+    V2: Deref<Target = Value<V2, S2>>,
+    S2: Deref<Target = str>,
+{
+    fn eq(&self, rhs: &V2) -> bool {
+        **self == **rhs
+    }
+}
+
+pub type ValueStatic = Value<ValueStaticRef, &'static str>;
+
+pub type ValueStaticRef = ValueRef<'static, &'static str>;
+
 #[macro_export]
 macro_rules! nil {
-    () => {
-        $crate::ValueStaticRef(&$crate::Value::Nil)
-    };
+    () => {{
+        const N: $crate::ValueStaticRef = $crate::ValueRef(&$crate::Value::Nil);
+        N
+    }};
 }
 
 #[macro_export]
 macro_rules! sym {
-    ($name:expr) => {
-        $crate::ValueStaticRef(&$crate::Value::Symbol($crate::ValueSymbol($name)))
-    };
+    ($name:expr) => {{
+        const S: $crate::ValueStaticRef =
+            $crate::ValueRef(&$crate::Value::Symbol($crate::ValueSymbol($name)));
+        S
+    }};
 }
 
 #[macro_export]
 macro_rules! cons {
-    ($car:expr, $cdr:expr) => {
-        $crate::ValueStaticRef(&$crate::Value::Cons($crate::ValueCons {
-            car: $car,
-            cdr: $cdr,
-        }))
-    };
+    ($car:expr, $cdr:expr) => {{
+        const C: $crate::ValueStaticRef =
+            $crate::ValueRef(&$crate::Value::Cons($crate::ValueCons {
+                car: $car,
+                cdr: $cdr,
+            }));
+        C
+    }};
 }
 
 #[macro_export]
 macro_rules! bool {
-    ($b:expr) => {
-        $crate::ValueStaticRef(&$crate::Value::Bool($crate::ValueBool($b)))
-    };
+    ($b:expr) => {{
+        const B: $crate::ValueStaticRef =
+            $crate::ValueRef(&$crate::Value::Bool($crate::ValueBool($b)));
+        B
+    }};
 }
 
 #[macro_export]
@@ -283,5 +308,37 @@ mod tests {
             }
             _ => panic!("Expected a Value::Cons"),
         }
+    }
+
+    #[test]
+    fn test_eq() {
+        assert_eq!(nil!(), nil!());
+        assert_ne!(nil!(), sym!("sym"));
+
+        assert_eq!(sym!("sym"), sym!("sym"));
+        assert_eq!(
+            sym!("sym"),
+            super::ValueRef(&super::Value::<super::ValueRef<String>, String>::Symbol(
+                super::ValueSymbol("sym".to_string())
+            ))
+        );
+        assert_ne!(sym!("sym1"), sym!("sym2"));
+        assert_ne!(
+            sym!("sym1"),
+            super::ValueRef(&super::Value::<super::ValueRef<String>, String>::Symbol(
+                super::ValueSymbol("sym2".to_string())
+            ))
+        );
+        assert_ne!(sym!("sym"), nil!());
+
+        assert_eq!(cons!(sym!("sym"), nil!()), cons!(sym!("sym"), nil!()));
+        assert_ne!(cons!(sym!("sym1"), nil!()), cons!(sym!("sym2"), nil!()));
+        assert_ne!(cons!(sym!("sym"), nil!()), cons!(nil!(), nil!()));
+        assert_ne!(cons!(sym!("sym"), nil!()), cons!(sym!("sym"), sym!("sym")));
+        assert_ne!(cons!(sym!("sym"), nil!()), nil!());
+
+        assert_eq!(bool!(true), bool!(true));
+        assert_ne!(bool!(true), bool!(false));
+        assert_ne!(bool!(true), nil!());
     }
 }
