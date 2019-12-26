@@ -135,17 +135,6 @@ where
     }
 }
 
-impl<'a, S1, V2, S2> PartialEq<V2> for ValueRef<'a, S1>
-where
-    S1: Deref<Target = str>,
-    V2: Deref<Target = Value<V2, S2>>,
-    S2: Deref<Target = str>,
-{
-    fn eq(&self, rhs: &V2) -> bool {
-        **self == **rhs
-    }
-}
-
 pub type ValueStatic = Value<ValueStaticRef, &'static str>;
 
 pub type ValueStaticRef = ValueRef<'static, &'static str>;
@@ -153,7 +142,7 @@ pub type ValueStaticRef = ValueRef<'static, &'static str>;
 #[macro_export]
 macro_rules! nil {
     () => {{
-        const N: $crate::ValueStaticRef = $crate::ValueRef(&$crate::Value::Nil);
+        const N: &$crate::ValueStatic = &$crate::Value::Nil;
         N
     }};
 }
@@ -161,8 +150,7 @@ macro_rules! nil {
 #[macro_export]
 macro_rules! sym {
     ($name:expr) => {{
-        const S: $crate::ValueStaticRef =
-            $crate::ValueRef(&$crate::Value::Symbol($crate::ValueSymbol($name)));
+        const S: &$crate::ValueStatic = &$crate::Value::Symbol($crate::ValueSymbol($name));
         S
     }};
 }
@@ -170,11 +158,10 @@ macro_rules! sym {
 #[macro_export]
 macro_rules! cons {
     ($car:expr, $cdr:expr) => {{
-        const C: $crate::ValueStaticRef =
-            $crate::ValueRef(&$crate::Value::Cons($crate::ValueCons {
-                car: $car,
-                cdr: $cdr,
-            }));
+        const C: &$crate::ValueStatic = &$crate::Value::Cons($crate::ValueCons {
+            car: $crate::ValueRef($car),
+            cdr: $crate::ValueRef($cdr),
+        });
         C
     }};
 }
@@ -182,8 +169,7 @@ macro_rules! cons {
 #[macro_export]
 macro_rules! bool {
     ($b:expr) => {{
-        const B: $crate::ValueStaticRef =
-            $crate::ValueRef(&$crate::Value::Bool($crate::ValueBool($b)));
+        const B: &$crate::ValueStatic = &$crate::Value::Bool($crate::ValueBool($b));
         B
     }};
 }
@@ -199,13 +185,13 @@ macro_rules! list {
 mod tests {
     #[test]
     fn test_nil_macro() {
-        const NIL: super::ValueStaticRef = nil!();
+        const NIL: &super::ValueStatic = nil!();
         assert_eq!(*NIL, super::ValueStatic::Nil);
     }
 
     #[test]
     fn test_sym_macro() {
-        const SYM: super::ValueStaticRef = sym!("sym");
+        const SYM: &super::ValueStatic = sym!("sym");
         match &*SYM {
             super::Value::Symbol(s) => assert_eq!(s.0, "sym"),
             _ => panic!("Expected a Value::Symbol"),
@@ -214,7 +200,7 @@ mod tests {
 
     #[test]
     fn test_cons_macro() {
-        const CONS: super::ValueStaticRef = cons!(sym!("sym"), nil!());
+        const CONS: &super::ValueStatic = cons!(sym!("sym"), nil!());
         match &*CONS {
             super::Value::Cons(c) => {
                 match &*c.car {
@@ -229,12 +215,12 @@ mod tests {
 
     #[test]
     fn test_bool_macro() {
-        const B1: super::ValueStaticRef = bool!(true);
+        const B1: &super::ValueStatic = bool!(true);
         match &*B1 {
             super::Value::Bool(b) => assert_eq!(b.0, true),
             _ => panic!("Expected a Value::Bool"),
         }
-        const B2: super::ValueStaticRef = bool!(false);
+        const B2: &super::ValueStatic = bool!(false);
         match &*B2 {
             super::Value::Bool(b) => assert_eq!(b.0, false),
             _ => panic!("Expected a Value::Bool"),
@@ -243,10 +229,10 @@ mod tests {
 
     #[test]
     fn test_list_macro() {
-        const LIST1: super::ValueStaticRef = list!();
+        const LIST1: &super::ValueStatic = list!();
         assert_eq!(*LIST1, super::ValueStatic::Nil);
 
-        const LIST2: super::ValueStaticRef = list!(sym!("sym1"));
+        const LIST2: &super::ValueStatic = list!(sym!("sym1"));
         match &*LIST2 {
             super::Value::Cons(c) => {
                 match &*c.car {
@@ -258,7 +244,7 @@ mod tests {
             _ => panic!("Expected a Value::Cons"),
         }
 
-        const LIST3: super::ValueStaticRef = list!(sym!("sym1"), sym!("sym2"));
+        const LIST3: &super::ValueStatic = list!(sym!("sym1"), sym!("sym2"));
         match &*LIST3 {
             super::Value::Cons(c) => {
                 match &*c.car {
@@ -279,7 +265,7 @@ mod tests {
             _ => panic!("Expected a Value::Cons"),
         }
 
-        const LIST4: super::ValueStaticRef = list!(sym!("sym1"), sym!("sym2"), sym!("sym3"));
+        const LIST4: &super::ValueStatic = list!(sym!("sym1"), sym!("sym2"), sym!("sym3"));
         match &*LIST4 {
             super::Value::Cons(c) => {
                 match &*c.car {
@@ -318,15 +304,15 @@ mod tests {
         assert_eq!(sym!("sym"), sym!("sym"));
         assert_eq!(
             sym!("sym"),
-            super::ValueRef(&super::Value::<super::ValueRef<String>, String>::Symbol(
-                super::ValueSymbol("sym".to_string())
+            &super::Value::<super::ValueRef<String>, String>::Symbol(super::ValueSymbol(
+                "sym".to_string()
             ))
         );
         assert_ne!(sym!("sym1"), sym!("sym2"));
         assert_ne!(
             sym!("sym1"),
-            super::ValueRef(&super::Value::<super::ValueRef<String>, String>::Symbol(
-                super::ValueSymbol("sym2".to_string())
+            &super::Value::<super::ValueRef<String>, String>::Symbol(super::ValueSymbol(
+                "sym2".to_string()
             ))
         );
         assert_ne!(sym!("sym"), nil!());
