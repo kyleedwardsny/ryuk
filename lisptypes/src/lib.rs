@@ -69,12 +69,19 @@ where
     }
 }
 
-#[derive(Copy, Debug, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct ValueBool(pub bool);
 
-impl Clone for ValueBool {
-    fn clone(&self) -> ValueBool {
-        ValueBool(self.0)
+#[derive(Debug)]
+pub struct ValueString<S: Deref<Target = str>>(pub S);
+
+impl<S1, S2> PartialEq<ValueString<S2>> for ValueString<S1>
+where
+    S1: Deref<Target = str>,
+    S2: Deref<Target = str>,
+{
+    fn eq(&self, rhs: &ValueString<S2>) -> bool {
+        *self.0 == *rhs.0
     }
 }
 
@@ -88,6 +95,7 @@ where
     Symbol(ValueSymbol<S>),
     Cons(ValueCons<V, S>),
     Bool(ValueBool),
+    String(ValueString<S>),
 }
 
 impl<V1, S1, V2, S2> PartialEq<Value<V2, S2>> for Value<V1, S1>
@@ -113,6 +121,10 @@ where
             },
             Value::Bool(b1) => match rhs {
                 Value::Bool(b2) => *b1 == *b2,
+                _ => false,
+            },
+            Value::String(s1) => match rhs {
+                Value::String(s2) => *s1 == *s2,
                 _ => false,
             },
         }
@@ -175,6 +187,14 @@ macro_rules! bool {
 }
 
 #[macro_export]
+macro_rules! str {
+    ($s:expr) => {{
+        const S: &$crate::ValueStatic = &$crate::Value::String($crate::ValueString($s));
+        S
+    }};
+}
+
+#[macro_export]
 macro_rules! list {
     () => { nil!() };
     ($e:expr) => { cons!($e, nil!()) };
@@ -224,6 +244,15 @@ mod tests {
         match &*B2 {
             super::Value::Bool(b) => assert_eq!(b.0, false),
             _ => panic!("Expected a Value::Bool"),
+        }
+    }
+
+    #[test]
+    fn test_str_macro() {
+        const S: &super::ValueStatic = str!("str");
+        match &*S {
+            super::Value::String(s) => assert_eq!(s.0, "str"),
+            _ => panic!("Expected a Value::String"),
         }
     }
 
@@ -315,6 +344,7 @@ mod tests {
                 "sym2".to_string()
             ))
         );
+        assert_ne!(sym!("sym"), str!("sym"));
         assert_ne!(sym!("sym"), nil!());
 
         assert_eq!(cons!(sym!("sym"), nil!()), cons!(sym!("sym"), nil!()));
@@ -326,5 +356,22 @@ mod tests {
         assert_eq!(bool!(true), bool!(true));
         assert_ne!(bool!(true), bool!(false));
         assert_ne!(bool!(true), nil!());
+
+        assert_eq!(str!("str"), str!("str"));
+        assert_eq!(
+            str!("str"),
+            &super::Value::<super::ValueRef<String>, String>::String(super::ValueString(
+                "str".to_string()
+            ))
+        );
+        assert_ne!(str!("str1"), str!("str2"));
+        assert_ne!(
+            str!("str1"),
+            &super::Value::<super::ValueRef<String>, String>::String(super::ValueString(
+                "str2".to_string()
+            ))
+        );
+        assert_ne!(str!("str"), sym!("str"));
+        assert_ne!(str!("str"), nil!());
     }
 }
