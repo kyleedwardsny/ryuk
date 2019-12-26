@@ -324,32 +324,52 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::rc::Rc;
+
+    #[derive(Debug)]
+    struct ValueRcRef(ValueRc);
+
+    type ValueRc = Rc<Value<ValueRcRef, String>>;
+
+    impl Deref for ValueRcRef {
+        type Target = Value<ValueRcRef, String>;
+
+        fn deref(&self) -> &Self::Target {
+            &*self.0
+        }
+    }
+
+    impl From<Value<ValueRcRef, String>> for ValueRcRef {
+        fn from(v: Value<ValueRcRef, String>) -> ValueRcRef {
+            ValueRcRef(Rc::from(v))
+        }
+    }
 
     #[test]
     fn test_read_symbol() {
         let s = "sym sym2\nsym3  \n   sym4";
-        let mut i = s.chars().peekable().lisp_values();
-        assert_eq!(i.next().unwrap().unwrap(), sym!("sym"));
-        assert_eq!(i.next().unwrap().unwrap(), sym!("sym2"));
-        assert_eq!(i.next().unwrap().unwrap(), sym!("sym3"));
-        assert_eq!(i.next().unwrap().unwrap(), sym!("sym4"));
+        let mut i = LispValues::<ValueRcRef, String>::lisp_values(s.chars().peekable());
+        assert_eq!(*i.next().unwrap().unwrap(), *sym!("sym"));
+        assert_eq!(*i.next().unwrap().unwrap(), *sym!("sym2"));
+        assert_eq!(*i.next().unwrap().unwrap(), *sym!("sym3"));
+        assert_eq!(*i.next().unwrap().unwrap(), *sym!("sym4"));
         assert!(i.next().is_none());
     }
 
     #[test]
     fn test_read_bool() {
         let s = "#t #f\n#t  ";
-        let mut i = s.chars().peekable().lisp_values();
-        assert_eq!(i.next().unwrap().unwrap(), bool!(true));
-        assert_eq!(i.next().unwrap().unwrap(), bool!(false));
-        assert_eq!(i.next().unwrap().unwrap(), bool!(true));
+        let mut i = LispValues::<ValueRcRef, String>::lisp_values(s.chars().peekable());
+        assert_eq!(*i.next().unwrap().unwrap(), *bool!(true));
+        assert_eq!(*i.next().unwrap().unwrap(), *bool!(false));
+        assert_eq!(*i.next().unwrap().unwrap(), *bool!(true));
         assert!(i.next().is_none());
     }
 
     #[test]
     fn test_read_invalid_macro() {
         let s = "#t#f  ";
-        let mut i = s.chars().peekable().lisp_values();
+        let mut i = LispValues::<ValueRcRef, String>::lisp_values(s.chars().peekable());
         assert_eq!(
             i.next().unwrap().unwrap_err().kind,
             crate::ErrorKind::InvalidToken
@@ -360,20 +380,23 @@ mod tests {
     #[test]
     fn test_read_list() {
         let s = "(s1 s2 s3)(s4\n s5 s6 ) ( s7 () s8) (#t . #f) ( s9 . s10 s11 (a";
-        let mut i = s.chars().peekable().lisp_values();
+        let mut i = LispValues::<ValueRcRef, String>::lisp_values(s.chars().peekable());
         assert_eq!(
-            i.next().unwrap().unwrap(),
-            list!(sym!("s1"), sym!("s2"), sym!("s3"))
+            *i.next().unwrap().unwrap(),
+            *list!(sym!("s1"), sym!("s2"), sym!("s3"))
         );
         assert_eq!(
-            i.next().unwrap().unwrap(),
-            list!(sym!("s4"), sym!("s5"), sym!("s6"))
+            *i.next().unwrap().unwrap(),
+            *list!(sym!("s4"), sym!("s5"), sym!("s6"))
         );
         assert_eq!(
-            i.next().unwrap().unwrap(),
-            list!(sym!("s7"), nil!(), sym!("s8"))
+            *i.next().unwrap().unwrap(),
+            *list!(sym!("s7"), nil!(), sym!("s8"))
         );
-        assert_eq!(i.next().unwrap().unwrap(), cons!(bool!(true), bool!(false)));
+        assert_eq!(
+            *i.next().unwrap().unwrap(),
+            *cons!(bool!(true), bool!(false))
+        );
         assert_eq!(
             i.next().unwrap().unwrap_err().kind,
             crate::ErrorKind::InvalidToken
@@ -389,9 +412,9 @@ mod tests {
     fn test_iterator() {
         let s = "() () ()";
         let mut num = 0;
-        for v in s.chars().peekable().lisp_values() {
+        for v in LispValues::<ValueRcRef, String>::lisp_values(s.chars().peekable()) {
             num += 1;
-            assert_eq!(v.unwrap(), nil!());
+            assert_eq!(*v.unwrap(), *nil!());
         }
         assert_eq!(num, 3);
     }
