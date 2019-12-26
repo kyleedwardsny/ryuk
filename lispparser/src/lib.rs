@@ -62,7 +62,6 @@ where
     S: Deref<Target = str>,
     I: Iterator<Item = char>,
     Value<V, S>: Into<V>,
-    ValueStaticRef: Into<V>,
     String: Into<S>,
 {
     reader: Peekable<I>,
@@ -76,7 +75,6 @@ where
     S: Deref<Target = str>,
     I: Iterator<Item = char>,
     Value<V, S>: Into<V>,
-    ValueStaticRef: Into<V>,
     String: Into<S>,
 {
     type Item = Result<V>;
@@ -102,7 +100,6 @@ where
     S: Deref<Target = str>,
     I: Iterator<Item = char>,
     Value<V, S>: Into<V>,
-    ValueStaticRef: Into<V>,
     String: Into<S>,
 {
     type Iter = PeekableCharLispIterator<V, S, I>;
@@ -154,7 +151,6 @@ where
     S: Deref<Target = str>,
     I: Iterator<Item = char>,
     Value<V, S>: Into<V>,
-    ValueStaticRef: Into<V>,
     String: Into<S>,
 {
     skip_whitespace(peekable)?;
@@ -186,7 +182,6 @@ where
     S: Deref<Target = str>,
     I: Iterator<Item = char>,
     Value<V, S>: Into<V>,
-    ValueStaticRef: Into<V>,
     String: Into<S>,
 {
     match read_delimited(peekable, ')')? {
@@ -218,7 +213,7 @@ where
                 format!("Invalid token: '{}'", t),
             )),
         },
-        ReadDelimitedResult::EndDelimiter => Result::Ok(nil!().into()),
+        ReadDelimitedResult::EndDelimiter => Result::Ok(Value::Nil.into()),
     }
 }
 
@@ -228,14 +223,13 @@ where
     S: Deref<Target = str>,
     I: Iterator<Item = char>,
     Value<V, S>: Into<V>,
-    ValueStaticRef: Into<V>,
     String: Into<S>,
 {
     if let Option::Some(_) = peekable.peek() {
         match read_token(peekable)? {
             ReadTokenResult::ValidToken(t) => match &*t {
-                "t" => Result::Ok(bool!(true).into()),
-                "f" => Result::Ok(bool!(false).into()),
+                "t" => Result::Ok(Value::Bool(ValueBool(true)).into()),
+                "f" => Result::Ok(Value::Bool(ValueBool(false)).into()),
                 _ => Result::Err(Error::new(
                     ErrorKind::InvalidToken,
                     format!("Invalid macro: '{}'", t),
@@ -299,7 +293,6 @@ where
     S: Deref<Target = str>,
     I: Iterator<Item = char>,
     Value<V, S>: Into<V>,
-    ValueStaticRef: Into<V>,
     String: Into<S>,
 {
     skip_whitespace(peekable)?;
