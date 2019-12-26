@@ -420,7 +420,7 @@ mod tests {
 
     #[test]
     fn test_read_list() {
-        let s = "(s1 s2 s3)(s4\n s5 s6 ) ( s7 () s8) (#t . #f) ( s9 . s10 s11 (a";
+        let s = "(s1 s2 s3)(s4\n s5 s6 ) ( s7 () \"s8\") (#t . #f) ( s9 . s10 s11 (a";
         let mut i = LispValues::<ValueRcRef, String>::lisp_values(s.chars().peekable());
         assert_eq!(
             *i.next().unwrap().unwrap(),
@@ -432,7 +432,7 @@ mod tests {
         );
         assert_eq!(
             *i.next().unwrap().unwrap(),
-            *list!(sym!("s7"), nil!(), sym!("s8"))
+            *list!(sym!("s7"), nil!(), str!("s8"))
         );
         assert_eq!(
             *i.next().unwrap().unwrap(),
