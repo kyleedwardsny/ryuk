@@ -114,7 +114,7 @@ where
 }
 
 fn is_token_char(c: char) -> bool {
-    if let 'a'..='z' | '0'..='9' | '.' | '#' = c {
+    if let 'a'..='z' | 'A'..='Z' | '0'..='9' | '.' | '#' = c {
         true
     } else {
         false
@@ -333,7 +333,7 @@ where
         } else if is_token_char(*c) {
             match read_token(peekable)? {
                 ReadTokenResult::ValidToken(t) => Result::Ok(ReadImplResult::Value(
-                    Value::Symbol(ValueSymbol(t.into())).into(),
+                    Value::Symbol(ValueSymbol(t.to_lowercase().into())).into(),
                 )),
                 ReadTokenResult::InvalidToken(t) => Result::Ok(ReadImplResult::InvalidToken(t)),
             }
@@ -374,7 +374,7 @@ mod tests {
 
     #[test]
     fn test_read_symbol() {
-        let s = "sym sym2\nsym3  \n   sym4";
+        let s = "sym SYM2\nSym3  \n   sym4";
         let mut i = LispValues::<ValueRcRef, String>::lisp_values(s.chars().peekable());
         assert_eq!(*i.next().unwrap().unwrap(), *sym!("sym"));
         assert_eq!(*i.next().unwrap().unwrap(), *sym!("sym2"));
@@ -395,8 +395,16 @@ mod tests {
 
     #[test]
     fn test_read_invalid_macro() {
-        let s = "#t#f  ";
+        let s = "#T #F #t#f  ";
         let mut i = LispValues::<ValueRcRef, String>::lisp_values(s.chars().peekable());
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            crate::ErrorKind::InvalidToken
+        );
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            crate::ErrorKind::InvalidToken
+        );
         assert_eq!(
             i.next().unwrap().unwrap_err().kind,
             crate::ErrorKind::InvalidToken
