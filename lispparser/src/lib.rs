@@ -217,6 +217,28 @@ where
     }
 }
 
+fn read_string<I>(peekable: &mut Peekable<I>, end: char) -> Result<String>
+where
+    I: Iterator<Item = char>,
+{
+    let mut result = String::new();
+    let mut backslash = false;
+    for c in peekable {
+        if backslash {
+            result.push(c);
+            backslash = false;
+        } else if c == end {
+            return Result::Ok(result);
+        } else if c == '\\' {
+            backslash = true;
+        } else {
+            result.push(c);
+        }
+    }
+
+    Result::Err(Error::new(ErrorKind::EndOfFile, "End of file reached"))
+}
+
 fn read_macro<V, S, I>(peekable: &mut Peekable<I>) -> Result<V>
 where
     V: Deref<Target = Value<V, S>>,
@@ -303,6 +325,11 @@ where
         } else if *c == '#' {
             peekable.next();
             Result::Ok(ReadImplResult::Value(read_macro(peekable)?))
+        } else if *c == '"' {
+            peekable.next();
+            Result::Ok(ReadImplResult::Value(
+                Value::String(ValueString(read_string(peekable, '"')?.into())).into(),
+            ))
         } else if is_token_char(*c) {
             match read_token(peekable)? {
                 ReadTokenResult::ValidToken(t) => Result::Ok(ReadImplResult::Value(
@@ -373,6 +400,20 @@ mod tests {
         assert_eq!(
             i.next().unwrap().unwrap_err().kind,
             crate::ErrorKind::InvalidToken
+        );
+        assert!(i.next().is_none());
+    }
+
+    #[test]
+    fn test_read_string() {
+        let s = "\"a\"  \"b \\\"\" \"\\n\nc\"  \"d";
+        let mut i = LispValues::<ValueRcRef, String>::lisp_values(s.chars().peekable());
+        assert_eq!(*i.next().unwrap().unwrap(), *str!("a"));
+        assert_eq!(*i.next().unwrap().unwrap(), *str!("b \""));
+        assert_eq!(*i.next().unwrap().unwrap(), *str!("n\nc"));
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            crate::ErrorKind::EndOfFile
         );
         assert!(i.next().is_none());
     }
