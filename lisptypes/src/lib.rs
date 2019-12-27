@@ -1,4 +1,4 @@
-use std::fmt::Formatter;
+use std::fmt::{Debug, Formatter};
 use std::ops::Deref;
 
 #[derive(Debug)]
@@ -28,11 +28,16 @@ impl std::error::Error for Error {}
 
 impl std::fmt::Display for Error {
     fn fmt(&self, formatter: &mut Formatter) -> std::result::Result<(), std::fmt::Error> {
-        self.error.fmt(formatter)
+        std::fmt::Display::fmt(&self.error, formatter)
     }
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
+
+pub trait ValueTypes {
+    type ValueRef: Deref<Target = Value<Self>> + Debug;
+    type StringRef: Deref<Target = str>;
+}
 
 #[derive(Debug)]
 pub struct ValueSymbol<S: Deref<Target = str>>(pub S);
@@ -48,23 +53,20 @@ where
 }
 
 #[derive(Debug)]
-pub struct ValueCons<V, S>
+pub struct ValueCons<T>
 where
-    V: Deref<Target = Value<V, S>>,
-    S: Deref<Target = str>,
+    T: ValueTypes + ?Sized,
 {
-    pub car: V,
-    pub cdr: V,
+    pub car: T::ValueRef,
+    pub cdr: T::ValueRef,
 }
 
-impl<V1, S1, V2, S2> PartialEq<ValueCons<V2, S2>> for ValueCons<V1, S1>
+impl<T1, T2> PartialEq<ValueCons<T2>> for ValueCons<T1>
 where
-    V1: Deref<Target = Value<V1, S1>>,
-    S1: Deref<Target = str>,
-    V2: Deref<Target = Value<V2, S2>>,
-    S2: Deref<Target = str>,
+    T1: ValueTypes,
+    T2: ValueTypes,
 {
-    fn eq(&self, other: &ValueCons<V2, S2>) -> bool {
+    fn eq(&self, other: &ValueCons<T2>) -> bool {
         *self.car == *other.car && *self.cdr == *other.cdr
     }
 }
@@ -86,26 +88,23 @@ where
 }
 
 #[derive(Debug)]
-pub enum Value<V, S>
+pub enum Value<T>
 where
-    V: Deref<Target = Value<V, S>>,
-    S: Deref<Target = str>,
+    T: ValueTypes + ?Sized,
 {
     Nil,
-    Symbol(ValueSymbol<S>),
-    Cons(ValueCons<V, S>),
+    Symbol(ValueSymbol<T::StringRef>),
+    Cons(ValueCons<T>),
     Bool(ValueBool),
-    String(ValueString<S>),
+    String(ValueString<T::StringRef>),
 }
 
-impl<V1, S1, V2, S2> PartialEq<Value<V2, S2>> for Value<V1, S1>
+impl<T1, T2> PartialEq<Value<T2>> for Value<T1>
 where
-    V1: Deref<Target = Value<V1, S1>>,
-    S1: Deref<Target = str>,
-    V2: Deref<Target = Value<V2, S2>>,
-    S2: Deref<Target = str>,
+    T1: ValueTypes,
+    T2: ValueTypes,
 {
-    fn eq(&self, rhs: &Value<V2, S2>) -> bool {
+    fn eq(&self, rhs: &Value<T2>) -> bool {
         match self {
             Value::Nil => match rhs {
                 Value::Nil => true,
@@ -132,29 +131,17 @@ where
 }
 
 #[derive(Debug)]
-pub struct ValueRef<'a, S>(pub &'a Value<ValueRef<'a, S>, S>)
-where
-    S: Deref<Target = str>;
+pub struct ValueTypesStatic;
 
-impl<'a, S> Deref for ValueRef<'a, S>
-where
-    S: Deref<Target = str>,
-{
-    type Target = Value<ValueRef<'a, S>, S>;
-
-    fn deref(&self) -> &Self::Target {
-        self.0
-    }
+impl ValueTypes for ValueTypesStatic {
+    type ValueRef = &'static Value<Self>;
+    type StringRef = &'static str;
 }
-
-pub type ValueStatic = Value<ValueStaticRef, &'static str>;
-
-pub type ValueStaticRef = ValueRef<'static, &'static str>;
 
 #[macro_export]
 macro_rules! nil {
     () => {{
-        const N: &$crate::ValueStatic = &$crate::Value::Nil;
+        const N: &$crate::Value<$crate::ValueTypesStatic> = &$crate::Value::Nil;
         N
     }};
 }
@@ -162,7 +149,8 @@ macro_rules! nil {
 #[macro_export]
 macro_rules! sym {
     ($name:expr) => {{
-        const S: &$crate::ValueStatic = &$crate::Value::Symbol($crate::ValueSymbol($name));
+        const S: &$crate::Value<$crate::ValueTypesStatic> =
+            &$crate::Value::Symbol($crate::ValueSymbol($name));
         S
     }};
 }
@@ -170,10 +158,11 @@ macro_rules! sym {
 #[macro_export]
 macro_rules! cons {
     ($car:expr, $cdr:expr) => {{
-        const C: &$crate::ValueStatic = &$crate::Value::Cons($crate::ValueCons {
-            car: $crate::ValueRef($car),
-            cdr: $crate::ValueRef($cdr),
-        });
+        const C: &$crate::Value<$crate::ValueTypesStatic> =
+            &$crate::Value::Cons($crate::ValueCons {
+                car: $car,
+                cdr: $cdr,
+            });
         C
     }};
 }
@@ -181,7 +170,8 @@ macro_rules! cons {
 #[macro_export]
 macro_rules! bool {
     ($b:expr) => {{
-        const B: &$crate::ValueStatic = &$crate::Value::Bool($crate::ValueBool($b));
+        const B: &$crate::Value<$crate::ValueTypesStatic> =
+            &$crate::Value::Bool($crate::ValueBool($b));
         B
     }};
 }
@@ -189,7 +179,8 @@ macro_rules! bool {
 #[macro_export]
 macro_rules! str {
     ($s:expr) => {{
-        const S: &$crate::ValueStatic = &$crate::Value::String($crate::ValueString($s));
+        const S: &$crate::Value<$crate::ValueTypesStatic> =
+            &$crate::Value::String($crate::ValueString($s));
         S
     }};
 }
@@ -205,13 +196,13 @@ macro_rules! list {
 mod tests {
     #[test]
     fn test_nil_macro() {
-        const NIL: &super::ValueStatic = nil!();
-        assert_eq!(*NIL, super::ValueStatic::Nil);
+        const NIL: &super::Value<super::ValueTypesStatic> = nil!();
+        assert_eq!(*NIL, super::Value::<super::ValueTypesStatic>::Nil);
     }
 
     #[test]
     fn test_sym_macro() {
-        const SYM: &super::ValueStatic = sym!("sym");
+        const SYM: &super::Value<super::ValueTypesStatic> = sym!("sym");
         match &*SYM {
             super::Value::Symbol(s) => assert_eq!(s.0, "sym"),
             _ => panic!("Expected a Value::Symbol"),
@@ -220,14 +211,14 @@ mod tests {
 
     #[test]
     fn test_cons_macro() {
-        const CONS: &super::ValueStatic = cons!(sym!("sym"), nil!());
+        const CONS: &super::Value<super::ValueTypesStatic> = cons!(sym!("sym"), nil!());
         match &*CONS {
             super::Value::Cons(c) => {
                 match &*c.car {
                     super::Value::Symbol(s) => assert_eq!(s.0, "sym"),
                     _ => panic!("Expected a Value::Symbol"),
                 }
-                assert_eq!(*c.cdr, super::ValueStatic::Nil);
+                assert_eq!(*c.cdr, super::Value::<super::ValueTypesStatic>::Nil);
             }
             _ => panic!("Expected a Value::Cons"),
         }
@@ -235,12 +226,12 @@ mod tests {
 
     #[test]
     fn test_bool_macro() {
-        const B1: &super::ValueStatic = bool!(true);
+        const B1: &super::Value<super::ValueTypesStatic> = bool!(true);
         match &*B1 {
             super::Value::Bool(b) => assert_eq!(b.0, true),
             _ => panic!("Expected a Value::Bool"),
         }
-        const B2: &super::ValueStatic = bool!(false);
+        const B2: &super::Value<super::ValueTypesStatic> = bool!(false);
         match &*B2 {
             super::Value::Bool(b) => assert_eq!(b.0, false),
             _ => panic!("Expected a Value::Bool"),
@@ -249,7 +240,7 @@ mod tests {
 
     #[test]
     fn test_str_macro() {
-        const S: &super::ValueStatic = str!("str");
+        const S: &super::Value<super::ValueTypesStatic> = str!("str");
         match &*S {
             super::Value::String(s) => assert_eq!(s.0, "str"),
             _ => panic!("Expected a Value::String"),
@@ -258,22 +249,22 @@ mod tests {
 
     #[test]
     fn test_list_macro() {
-        const LIST1: &super::ValueStatic = list!();
-        assert_eq!(*LIST1, super::ValueStatic::Nil);
+        const LIST1: &super::Value<super::ValueTypesStatic> = list!();
+        assert_eq!(*LIST1, super::Value::<super::ValueTypesStatic>::Nil);
 
-        const LIST2: &super::ValueStatic = list!(sym!("sym1"));
+        const LIST2: &super::Value<super::ValueTypesStatic> = list!(sym!("sym1"));
         match &*LIST2 {
             super::Value::Cons(c) => {
                 match &*c.car {
                     super::Value::Symbol(s) => assert_eq!(s.0, "sym1"),
                     _ => panic!("Expected a Value::Symbol"),
                 }
-                assert_eq!(*c.cdr, super::ValueStatic::Nil);
+                assert_eq!(*c.cdr, super::Value::<super::ValueTypesStatic>::Nil);
             }
             _ => panic!("Expected a Value::Cons"),
         }
 
-        const LIST3: &super::ValueStatic = list!(sym!("sym1"), sym!("sym2"));
+        const LIST3: &super::Value<super::ValueTypesStatic> = list!(sym!("sym1"), sym!("sym2"));
         match &*LIST3 {
             super::Value::Cons(c) => {
                 match &*c.car {
@@ -286,7 +277,7 @@ mod tests {
                             super::Value::Symbol(s) => assert_eq!(s.0, "sym2"),
                             _ => panic!("Expected a Value::Symbol"),
                         }
-                        assert_eq!(*c.cdr, super::ValueStatic::Nil);
+                        assert_eq!(*c.cdr, super::Value::<super::ValueTypesStatic>::Nil);
                     }
                     _ => panic!("Expected a Value::Cons"),
                 }
@@ -294,7 +285,8 @@ mod tests {
             _ => panic!("Expected a Value::Cons"),
         }
 
-        const LIST4: &super::ValueStatic = list!(sym!("sym1"), sym!("sym2"), sym!("sym3"));
+        const LIST4: &super::Value<super::ValueTypesStatic> =
+            list!(sym!("sym1"), sym!("sym2"), sym!("sym3"));
         match &*LIST4 {
             super::Value::Cons(c) => {
                 match &*c.car {
@@ -313,7 +305,7 @@ mod tests {
                                     super::Value::Symbol(s) => assert_eq!(s.0, "sym3"),
                                     _ => panic!("Expected a Value::Symbol"),
                                 }
-                                assert_eq!(*c.cdr, super::ValueStatic::Nil);
+                                assert_eq!(*c.cdr, super::Value::<super::ValueTypesStatic>::Nil);
                             }
                             _ => panic!("Expected a Value::Cons"),
                         }
@@ -327,22 +319,30 @@ mod tests {
 
     #[test]
     fn test_eq() {
+        use std::marker::PhantomData;
+
+        #[derive(Debug)]
+        struct ValueTypesString<'a> {
+            phantom_lifetime: PhantomData<&'a ()>,
+        }
+
+        impl<'a> super::ValueTypes for ValueTypesString<'a> {
+            type ValueRef = &'a super::Value<Self>;
+            type StringRef = String;
+        }
+
         assert_eq!(nil!(), nil!());
         assert_ne!(nil!(), sym!("sym"));
 
         assert_eq!(sym!("sym"), sym!("sym"));
         assert_eq!(
             sym!("sym"),
-            &super::Value::<super::ValueRef<String>, String>::Symbol(super::ValueSymbol(
-                "sym".to_string()
-            ))
+            &super::Value::<ValueTypesString>::Symbol(super::ValueSymbol("sym".to_string()))
         );
         assert_ne!(sym!("sym1"), sym!("sym2"));
         assert_ne!(
             sym!("sym1"),
-            &super::Value::<super::ValueRef<String>, String>::Symbol(super::ValueSymbol(
-                "sym2".to_string()
-            ))
+            &super::Value::<ValueTypesString>::Symbol(super::ValueSymbol("sym2".to_string()))
         );
         assert_ne!(sym!("sym"), str!("sym"));
         assert_ne!(sym!("sym"), nil!());
@@ -360,16 +360,12 @@ mod tests {
         assert_eq!(str!("str"), str!("str"));
         assert_eq!(
             str!("str"),
-            &super::Value::<super::ValueRef<String>, String>::String(super::ValueString(
-                "str".to_string()
-            ))
+            &super::Value::<ValueTypesString>::String(super::ValueString("str".to_string()))
         );
         assert_ne!(str!("str1"), str!("str2"));
         assert_ne!(
             str!("str1"),
-            &super::Value::<super::ValueRef<String>, String>::String(super::ValueString(
-                "str2".to_string()
-            ))
+            &super::Value::<ValueTypesString>::String(super::ValueString("str2".to_string()))
         );
         assert_ne!(str!("str"), sym!("str"));
         assert_ne!(str!("str"), nil!());
