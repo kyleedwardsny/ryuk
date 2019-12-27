@@ -115,8 +115,17 @@ fn is_token_char(c: char) -> bool {
 }
 
 fn skip_whitespace<I: Iterator<Item = char>>(peekable: &mut Peekable<I>) -> Result<()> {
+    let mut comment = false;
     while let Option::Some(c) = peekable.peek() {
-        if *c == ' ' || *c == '\n' {
+        if comment {
+            if *c == '\n' {
+                comment = false;
+            }
+            peekable.next();
+        } else if *c == ';' {
+            comment = true;
+            peekable.next();
+        } else if *c == ' ' || *c == '\n' {
             peekable.next();
         } else {
             break;
@@ -431,6 +440,16 @@ mod tests {
             i.next().unwrap().unwrap_err().kind,
             crate::ErrorKind::EndOfFile
         );
+        assert!(i.next().is_none());
+    }
+
+    #[test]
+    fn test_comment() {
+        let s = " #t;Hello\n  #f ; world! #t\n \"a;b\"";
+        let mut i = LispValues::<ValueTypesRc>::lisp_values(s.chars().peekable());
+        assert_eq!(*i.next().unwrap().unwrap(), *bool!(true));
+        assert_eq!(*i.next().unwrap().unwrap(), *bool!(false));
+        assert_eq!(*i.next().unwrap().unwrap(), *str!("a;b"));
         assert!(i.next().is_none());
     }
 
