@@ -2,7 +2,6 @@ use ryuk_lisptypes::*;
 use std::fmt::Formatter;
 use std::iter::Peekable;
 use std::marker::PhantomData;
-use std::ops::Deref;
 
 #[derive(Debug)]
 pub struct Error {
@@ -46,38 +45,34 @@ impl std::fmt::Display for Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-pub trait LispValues<V, S>
+pub trait LispValues<T>
 where
-    V: Deref<Target = Value<V, S>>,
-    S: Deref<Target = str>,
+    T: ValueTypes,
 {
-    type Iter: Iterator<Item = Result<V>>;
+    type Iter: Iterator<Item = Result<T::ValueRef>>;
 
     fn lisp_values(self) -> Self::Iter;
 }
 
-pub struct PeekableCharLispIterator<V, S, I>
+pub struct PeekableCharLispIterator<T, I>
 where
-    V: Deref<Target = Value<V, S>>,
-    S: Deref<Target = str>,
+    T: ValueTypes,
     I: Iterator<Item = char>,
-    Value<V, S>: Into<V>,
-    String: Into<S>,
+    Value<T>: Into<T::ValueRef>,
+    String: Into<T::StringRef>,
 {
     reader: Peekable<I>,
-    phantom_value: PhantomData<V>,
-    phantom_str: PhantomData<S>,
+    phantom_types: PhantomData<T>,
 }
 
-impl<V, S, I> Iterator for PeekableCharLispIterator<V, S, I>
+impl<T, I> Iterator for PeekableCharLispIterator<T, I>
 where
-    V: Deref<Target = Value<V, S>>,
-    S: Deref<Target = str>,
+    T: ValueTypes,
     I: Iterator<Item = char>,
-    Value<V, S>: Into<V>,
-    String: Into<S>,
+    Value<T>: Into<T::ValueRef>,
+    String: Into<T::StringRef>,
 {
-    type Item = Result<V>;
+    type Item = Result<T::ValueRef>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match read_impl(&mut self.reader) {
@@ -94,21 +89,19 @@ where
     }
 }
 
-impl<V, S, I> LispValues<V, S> for Peekable<I>
+impl<T, I> LispValues<T> for Peekable<I>
 where
-    V: Deref<Target = Value<V, S>>,
-    S: Deref<Target = str>,
+    T: ValueTypes,
     I: Iterator<Item = char>,
-    Value<V, S>: Into<V>,
-    String: Into<S>,
+    Value<T>: Into<T::ValueRef>,
+    String: Into<T::StringRef>,
 {
-    type Iter = PeekableCharLispIterator<V, S, I>;
+    type Iter = PeekableCharLispIterator<T, I>;
 
     fn lisp_values(self) -> Self::Iter {
         PeekableCharLispIterator {
             reader: self,
-            phantom_value: PhantomData,
-            phantom_str: PhantomData,
+            phantom_types: PhantomData,
         }
     }
 }
@@ -132,26 +125,24 @@ fn skip_whitespace<I: Iterator<Item = char>>(peekable: &mut Peekable<I>) -> Resu
     Result::Ok(())
 }
 
-enum ReadDelimitedResult<V, S>
+enum ReadDelimitedResult<T>
 where
-    V: Deref<Target = Value<V, S>>,
-    S: Deref<Target = str>,
+    T: ValueTypes,
 {
-    Value(V),
+    Value(T::ValueRef),
     InvalidToken(String),
     EndDelimiter,
 }
 
-fn read_delimited<V, S, I>(
+fn read_delimited<T, I>(
     peekable: &mut Peekable<I>,
     delimiter: char,
-) -> Result<ReadDelimitedResult<V, S>>
+) -> Result<ReadDelimitedResult<T>>
 where
-    V: Deref<Target = Value<V, S>>,
-    S: Deref<Target = str>,
+    T: ValueTypes,
     I: Iterator<Item = char>,
-    Value<V, S>: Into<V>,
-    String: Into<S>,
+    Value<T>: Into<T::ValueRef>,
+    String: Into<T::StringRef>,
 {
     skip_whitespace(peekable)?;
     if let Option::Some(c) = peekable.peek() {
@@ -176,17 +167,16 @@ where
     }
 }
 
-fn read_list<V, S, I>(peekable: &mut Peekable<I>) -> Result<V>
+fn read_list<T, I>(peekable: &mut Peekable<I>) -> Result<T::ValueRef>
 where
-    V: Deref<Target = Value<V, S>>,
-    S: Deref<Target = str>,
+    T: ValueTypes,
     I: Iterator<Item = char>,
-    Value<V, S>: Into<V>,
-    String: Into<S>,
+    Value<T>: Into<T::ValueRef>,
+    String: Into<T::StringRef>,
 {
     match read_delimited(peekable, ')')? {
         ReadDelimitedResult::Value(v) => Result::Ok(
-            Value::<V, S>::Cons(ValueCons {
+            Value::<T>::Cons(ValueCons {
                 car: v,
                 cdr: read_list(peekable)?,
             })
@@ -194,15 +184,13 @@ where
         ),
         ReadDelimitedResult::InvalidToken(t) => match &*t {
             "." => match read_delimited(peekable, ')')? {
-                ReadDelimitedResult::Value(cdr) => {
-                    match read_delimited::<V, S, I>(peekable, ')')? {
-                        ReadDelimitedResult::EndDelimiter => Result::Ok(cdr),
-                        _ => Result::Err(Error::new(
-                            ErrorKind::InvalidToken,
-                            "Expected ')', got something else",
-                        )),
-                    }
-                }
+                ReadDelimitedResult::Value(cdr) => match read_delimited::<T, I>(peekable, ')')? {
+                    ReadDelimitedResult::EndDelimiter => Result::Ok(cdr),
+                    _ => Result::Err(Error::new(
+                        ErrorKind::InvalidToken,
+                        "Expected ')', got something else",
+                    )),
+                },
                 _ => Result::Err(Error::new(
                     ErrorKind::InvalidToken,
                     "Expected value, got something else",
@@ -239,13 +227,12 @@ where
     Result::Err(Error::new(ErrorKind::EndOfFile, "End of file reached"))
 }
 
-fn read_macro<V, S, I>(peekable: &mut Peekable<I>) -> Result<V>
+fn read_macro<T, I>(peekable: &mut Peekable<I>) -> Result<T::ValueRef>
 where
-    V: Deref<Target = Value<V, S>>,
-    S: Deref<Target = str>,
+    T: ValueTypes,
     I: Iterator<Item = char>,
-    Value<V, S>: Into<V>,
-    String: Into<S>,
+    Value<T>: Into<T::ValueRef>,
+    String: Into<T::StringRef>,
 {
     if let Option::Some(_) = peekable.peek() {
         match read_token(peekable)? {
@@ -275,7 +262,10 @@ enum ReadTokenResult {
     InvalidToken(String),
 }
 
-fn read_token<I: Iterator<Item = char>>(peekable: &mut Peekable<I>) -> Result<ReadTokenResult> {
+fn read_token<I>(peekable: &mut Peekable<I>) -> Result<ReadTokenResult>
+where
+    I: Iterator<Item = char>,
+{
     let mut token = String::new();
 
     let mut valid = false;
@@ -299,23 +289,21 @@ fn read_token<I: Iterator<Item = char>>(peekable: &mut Peekable<I>) -> Result<Re
     })
 }
 
-pub enum ReadImplResult<V, S>
+pub enum ReadImplResult<T>
 where
-    V: Deref<Target = Value<V, S>>,
-    S: Deref<Target = str>,
+    T: ValueTypes,
 {
-    Value(V),
+    Value(T::ValueRef),
     InvalidToken(String),
     EndOfFile,
 }
 
-pub fn read_impl<V, S, I>(peekable: &mut Peekable<I>) -> Result<ReadImplResult<V, S>>
+pub fn read_impl<T, I>(peekable: &mut Peekable<I>) -> Result<ReadImplResult<T>>
 where
-    V: Deref<Target = Value<V, S>>,
-    S: Deref<Target = str>,
+    T: ValueTypes,
     I: Iterator<Item = char>,
-    Value<V, S>: Into<V>,
-    String: Into<S>,
+    Value<T>: Into<T::ValueRef>,
+    String: Into<T::StringRef>,
 {
     skip_whitespace(peekable)?;
     if let Option::Some(c) = peekable.peek() {
@@ -354,28 +342,17 @@ mod tests {
     use std::rc::Rc;
 
     #[derive(Debug)]
-    struct ValueRcRef(ValueRc);
+    struct ValueTypesRc;
 
-    type ValueRc = Rc<Value<ValueRcRef, String>>;
-
-    impl Deref for ValueRcRef {
-        type Target = Value<ValueRcRef, String>;
-
-        fn deref(&self) -> &Self::Target {
-            &*self.0
-        }
-    }
-
-    impl From<Value<ValueRcRef, String>> for ValueRcRef {
-        fn from(v: Value<ValueRcRef, String>) -> ValueRcRef {
-            ValueRcRef(Rc::from(v))
-        }
+    impl ValueTypes for ValueTypesRc {
+        type ValueRef = Rc<Value<Self>>;
+        type StringRef = String;
     }
 
     #[test]
     fn test_read_symbol() {
         let s = "sym SYM2\nSym3  \n   sym4";
-        let mut i = LispValues::<ValueRcRef, String>::lisp_values(s.chars().peekable());
+        let mut i = LispValues::<ValueTypesRc>::lisp_values(s.chars().peekable());
         assert_eq!(*i.next().unwrap().unwrap(), *sym!("sym"));
         assert_eq!(*i.next().unwrap().unwrap(), *sym!("sym2"));
         assert_eq!(*i.next().unwrap().unwrap(), *sym!("sym3"));
@@ -386,7 +363,7 @@ mod tests {
     #[test]
     fn test_read_bool() {
         let s = "#t #f\n#t  ";
-        let mut i = LispValues::<ValueRcRef, String>::lisp_values(s.chars().peekable());
+        let mut i = LispValues::<ValueTypesRc>::lisp_values(s.chars().peekable());
         assert_eq!(*i.next().unwrap().unwrap(), *bool!(true));
         assert_eq!(*i.next().unwrap().unwrap(), *bool!(false));
         assert_eq!(*i.next().unwrap().unwrap(), *bool!(true));
@@ -396,7 +373,7 @@ mod tests {
     #[test]
     fn test_read_invalid_macro() {
         let s = "#T #F #t#f  ";
-        let mut i = LispValues::<ValueRcRef, String>::lisp_values(s.chars().peekable());
+        let mut i = LispValues::<ValueTypesRc>::lisp_values(s.chars().peekable());
         assert_eq!(
             i.next().unwrap().unwrap_err().kind,
             crate::ErrorKind::InvalidToken
@@ -415,7 +392,7 @@ mod tests {
     #[test]
     fn test_read_string() {
         let s = "\"a\"  \"b \\\"\" \"\\n\nc\"  \"d";
-        let mut i = LispValues::<ValueRcRef, String>::lisp_values(s.chars().peekable());
+        let mut i = LispValues::<ValueTypesRc>::lisp_values(s.chars().peekable());
         assert_eq!(*i.next().unwrap().unwrap(), *str!("a"));
         assert_eq!(*i.next().unwrap().unwrap(), *str!("b \""));
         assert_eq!(*i.next().unwrap().unwrap(), *str!("n\nc"));
@@ -429,7 +406,7 @@ mod tests {
     #[test]
     fn test_read_list() {
         let s = "(s1 s2 s3)(s4\n s5 s6 ) ( s7 () \"s8\") (#t . #f) ( s9 . s10 s11 (a";
-        let mut i = LispValues::<ValueRcRef, String>::lisp_values(s.chars().peekable());
+        let mut i = LispValues::<ValueTypesRc>::lisp_values(s.chars().peekable());
         assert_eq!(
             *i.next().unwrap().unwrap(),
             *list!(sym!("s1"), sym!("s2"), sym!("s3"))
@@ -461,7 +438,7 @@ mod tests {
     fn test_iterator() {
         let s = "() () ()";
         let mut num = 0;
-        for v in LispValues::<ValueRcRef, String>::lisp_values(s.chars().peekable()) {
+        for v in LispValues::<ValueTypesRc>::lisp_values(s.chars().peekable()) {
             num += 1;
             assert_eq!(*v.unwrap(), *nil!());
         }
