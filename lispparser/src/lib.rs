@@ -348,16 +348,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::rc::Rc;
-
-    #[derive(Debug)]
-    struct ValueTypesRc;
-
-    impl ValueTypes for ValueTypesRc {
-        type ValueRef = Rc<Value<Self>>;
-        type StringRef = String;
-        type FnRef = Box<dyn Fn(Vec<Self::ValueRef>) -> Self::ValueRef>;
-    }
 
     #[test]
     fn test_read_symbol() {

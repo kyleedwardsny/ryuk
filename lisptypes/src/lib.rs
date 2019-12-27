@@ -1,5 +1,6 @@
 use std::fmt::{Debug, Formatter};
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
+use std::rc::Rc;
 
 #[derive(Debug)]
 pub struct Error {
@@ -9,7 +10,9 @@ pub struct Error {
 
 #[derive(Debug, PartialEq)]
 pub enum ErrorKind {
-    IncorrectType,
+    ValueNotDefined,
+    NotAFunction,
+    NoPackageForValue,
 }
 
 impl Error {
@@ -37,7 +40,136 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub trait ValueTypes {
     type ValueRef: Deref<Target = Value<Self>> + Debug;
     type StringRef: Deref<Target = str>;
-    type FnRef: Fn(Vec<Self::ValueRef>) -> Self::ValueRef;
+    type FnRef: Fn(&mut (dyn Environment<Self> + 'static), Self::ValueRef) -> Result<Self::ValueRef>;
+}
+
+pub trait Environment<T>
+where
+    T: ValueTypes + ?Sized,
+    T::ValueRef: Clone,
+{
+    fn get_value(&self, s: &ValueSymbol<T::StringRef>) -> Result<T::ValueRef>;
+
+    fn set_value(&mut self, s: &ValueSymbol<T::StringRef>, v: T::ValueRef) -> Result<()>;
+}
+
+pub trait Evaluator<T>
+where
+    T: ValueTypes + ?Sized,
+    T::ValueRef: Clone,
+{
+    fn evaluate(&mut self, v: T::ValueRef) -> Result<T::ValueRef>;
+
+    fn call_function(&mut self, c: &ValueCons<T>) -> Result<T::ValueRef>;
+}
+
+impl<T, E> Evaluator<T> for E
+where
+    T: ValueTypes + ?Sized,
+    T::ValueRef: Clone,
+    E: Environment<T> + 'static,
+{
+    fn evaluate(&mut self, v: T::ValueRef) -> Result<T::ValueRef> {
+        match &*v {
+            Value::Symbol(s) => self.get_value(s),
+            Value::Cons(c) => self.call_function(c),
+            _ => Result::Ok(v),
+        }
+    }
+
+    fn call_function(&mut self, c: &ValueCons<T>) -> Result<T::ValueRef> {
+        match &*self.evaluate(c.car.clone())? {
+            Value::Function(f) => {
+                (f.function)(self as &mut (dyn Environment<T> + 'static), c.cdr.clone())
+            }
+            _ => Result::Err(Error::new(ErrorKind::NotAFunction, "Not a function")),
+        }
+    }
+}
+
+impl<T> Evaluator<T> for dyn Environment<T>
+where
+    T: ValueTypes + ?Sized,
+    T::ValueRef: Clone,
+{
+    fn evaluate(&mut self, v: T::ValueRef) -> Result<T::ValueRef> {
+        match &*v {
+            Value::Symbol(s) => self.get_value(s),
+            Value::Cons(c) => self.call_function(c),
+            _ => Result::Ok(v),
+        }
+    }
+
+    fn call_function(&mut self, c: &ValueCons<T>) -> Result<T::ValueRef> {
+        match &*self.evaluate(c.car.clone())? {
+            Value::Function(f) => (f.function)(self, c.cdr.clone()),
+            _ => Result::Err(Error::new(ErrorKind::NotAFunction, "Not a function")),
+        }
+    }
+}
+
+pub trait LayeredEnvironmentTypes {
+    type EnvironmentLayerRef: DerefMut<Target = dyn EnvironmentLayer<Self>>;
+    type ValueTypes: ValueTypes;
+}
+
+pub struct LayeredEnvironment<T>
+where
+    T: LayeredEnvironmentTypes + ?Sized,
+{
+    pub layers: Vec<T::EnvironmentLayerRef>,
+}
+
+impl<T> Environment<T::ValueTypes> for LayeredEnvironment<T>
+where
+    T: LayeredEnvironmentTypes + ?Sized,
+    <<T as LayeredEnvironmentTypes>::ValueTypes as ValueTypes>::ValueRef: Clone,
+{
+    fn get_value(
+        &self,
+        s: &ValueSymbol<<<T as LayeredEnvironmentTypes>::ValueTypes as ValueTypes>::StringRef>,
+    ) -> Result<<<T as LayeredEnvironmentTypes>::ValueTypes as ValueTypes>::ValueRef> {
+        for layer in &self.layers {
+            if let Option::Some(result) = layer.get_value(&s) {
+                return Result::Ok(result);
+            }
+        }
+
+        Result::Err(Error::new(ErrorKind::ValueNotDefined, "Value not defined"))
+    }
+
+    fn set_value(
+        &mut self,
+        s: &ValueSymbol<<<T as LayeredEnvironmentTypes>::ValueTypes as ValueTypes>::StringRef>,
+        v: <<T as LayeredEnvironmentTypes>::ValueTypes as ValueTypes>::ValueRef,
+    ) -> Result<()> {
+        for layer in &mut self.layers {
+            if layer.set_value(s, v.clone())? {
+                return Result::Ok(());
+            }
+        }
+
+        Result::Err(Error::new(
+            ErrorKind::NoPackageForValue,
+            "No package for value",
+        ))
+    }
+}
+
+pub trait EnvironmentLayer<T>
+where
+    T: LayeredEnvironmentTypes + ?Sized,
+{
+    fn get_value(
+        &self,
+        s: &ValueSymbol<<<T as LayeredEnvironmentTypes>::ValueTypes as ValueTypes>::StringRef>,
+    ) -> Option<<<T as LayeredEnvironmentTypes>::ValueTypes as ValueTypes>::ValueRef>;
+
+    fn set_value(
+        &mut self,
+        s: &ValueSymbol<<<T as LayeredEnvironmentTypes>::ValueTypes as ValueTypes>::StringRef>,
+        v: <<T as LayeredEnvironmentTypes>::ValueTypes as ValueTypes>::ValueRef,
+    ) -> Result<bool>;
 }
 
 #[derive(Debug)]
@@ -156,12 +288,33 @@ where
 }
 
 #[derive(Debug)]
+pub struct ValueTypesRc;
+
+impl ValueTypes for ValueTypesRc {
+    type ValueRef = Rc<Value<Self>>;
+    type StringRef = String;
+    type FnRef = Box<
+        dyn Fn(&mut (dyn Environment<Self> + 'static), Self::ValueRef) -> Result<Self::ValueRef>,
+    >;
+}
+
+pub struct LayeredEnvironmentTypesRc;
+
+impl LayeredEnvironmentTypes for LayeredEnvironmentTypesRc {
+    type EnvironmentLayerRef = Box<dyn EnvironmentLayer<Self>>;
+    type ValueTypes = ValueTypesRc;
+}
+
+#[derive(Debug)]
 pub struct ValueTypesStatic;
 
 impl ValueTypes for ValueTypesStatic {
     type ValueRef = &'static Value<Self>;
     type StringRef = &'static str;
-    type FnRef = &'static dyn Fn(Vec<Self::ValueRef>) -> Self::ValueRef;
+    type FnRef = &'static dyn Fn(
+        &mut (dyn Environment<Self> + 'static),
+        Self::ValueRef,
+    ) -> Result<Self::ValueRef>;
 }
 
 #[macro_export]
@@ -345,31 +498,18 @@ mod tests {
 
     #[test]
     fn test_eq() {
-        use std::marker::PhantomData;
-
-        #[derive(Debug)]
-        struct ValueTypesString<'a> {
-            phantom_lifetime: PhantomData<&'a ()>,
-        }
-
-        impl<'a> super::ValueTypes for ValueTypesString<'a> {
-            type ValueRef = Box<super::Value<Self>>;
-            type StringRef = String;
-            type FnRef = &'a dyn Fn(Vec<Self::ValueRef>) -> Self::ValueRef;
-        }
-
         assert_eq!(nil!(), nil!());
         assert_ne!(nil!(), sym!("sym"));
 
         assert_eq!(sym!("sym"), sym!("sym"));
         assert_eq!(
             sym!("sym"),
-            &super::Value::<ValueTypesString>::Symbol(super::ValueSymbol("sym".to_string()))
+            &super::Value::<super::ValueTypesRc>::Symbol(super::ValueSymbol("sym".to_string()))
         );
         assert_ne!(sym!("sym1"), sym!("sym2"));
         assert_ne!(
             sym!("sym1"),
-            &super::Value::<ValueTypesString>::Symbol(super::ValueSymbol("sym2".to_string()))
+            &super::Value::<super::ValueTypesRc>::Symbol(super::ValueSymbol("sym2".to_string()))
         );
         assert_ne!(sym!("sym"), str!("sym"));
         assert_ne!(sym!("sym"), nil!());
@@ -387,46 +527,274 @@ mod tests {
         assert_eq!(str!("str"), str!("str"));
         assert_eq!(
             str!("str"),
-            &super::Value::<ValueTypesString>::String(super::ValueString("str".to_string()))
+            &super::Value::<super::ValueTypesRc>::String(super::ValueString("str".to_string()))
         );
         assert_ne!(str!("str1"), str!("str2"));
         assert_ne!(
             str!("str1"),
-            &super::Value::<ValueTypesString>::String(super::ValueString("str2".to_string()))
+            &super::Value::<super::ValueTypesRc>::String(super::ValueString("str2".to_string()))
         );
         assert_ne!(str!("str"), sym!("str"));
         assert_ne!(str!("str"), nil!());
 
-        let f1 = |_| Box::new(super::Value::Nil);
-        let f2 = |_| Box::new(super::Value::String(super::ValueString("str".to_string())));
-        let v11 = Box::new(super::Value::<ValueTypesString>::Function(
+        let f1 = |_: &mut (dyn super::Environment<super::ValueTypesRc> + 'static),
+                  _: <super::ValueTypesRc as super::ValueTypes>::ValueRef| {
+            super::Result::Ok(super::Rc::new(super::Value::Nil))
+        };
+        let f2 = |_: &mut (dyn super::Environment<super::ValueTypesRc> + 'static),
+                  _: <super::ValueTypesRc as super::ValueTypes>::ValueRef| {
+            super::Result::Ok(super::Rc::new(super::Value::String(super::ValueString(
+                "str".to_string(),
+            ))))
+        };
+        let v11 = super::Rc::new(super::Value::<super::ValueTypesRc>::Function(
             super::ValueFunction {
                 id: 1,
-                function: &f1,
+                function: Box::new(f1),
             },
         ));
-        let v12 = Box::new(super::Value::<ValueTypesString>::Function(
+        let v12 = super::Rc::new(super::Value::<super::ValueTypesRc>::Function(
             super::ValueFunction {
                 id: 1,
-                function: &f2,
+                function: Box::new(f2),
             },
         ));
-        let v21 = Box::new(super::Value::<ValueTypesString>::Function(
+        let v21 = super::Rc::new(super::Value::<super::ValueTypesRc>::Function(
             super::ValueFunction {
                 id: 2,
-                function: &f1,
+                function: Box::new(f1),
             },
         ));
-        let v22 = Box::new(super::Value::<ValueTypesString>::Function(
+        let v22 = super::Rc::new(super::Value::<super::ValueTypesRc>::Function(
             super::ValueFunction {
                 id: 2,
-                function: &f2,
+                function: Box::new(f2),
             },
         ));
         assert_eq!(v11, v11);
         assert_eq!(v11, v12);
         assert_ne!(v11, v21);
         assert_ne!(v11, v22);
-        assert_ne!(v11, Box::new(super::Value::Nil));
+        assert_ne!(v11, super::Rc::new(super::Value::Nil));
+    }
+
+    struct SimpleLayer {
+        name: &'static str,
+        value: <super::ValueTypesRc as super::ValueTypes>::ValueRef,
+    }
+
+    impl super::EnvironmentLayer<super::LayeredEnvironmentTypesRc> for SimpleLayer {
+        fn get_value(
+            &self,
+            s: &super::ValueSymbol<String>,
+        ) -> Option<<super::ValueTypesRc as super::ValueTypes>::ValueRef> {
+            if s.0 == self.name {
+                Option::Some(self.value.clone())
+            } else {
+                Option::None
+            }
+        }
+
+        fn set_value(
+            &mut self,
+            s: &super::ValueSymbol<String>,
+            v: <super::ValueTypesRc as super::ValueTypes>::ValueRef,
+        ) -> super::Result<bool> {
+            if s.0 == self.name {
+                self.value = v;
+                Result::Ok(true)
+            } else {
+                Result::Ok(false)
+            }
+        }
+    }
+
+    fn make_test_env() -> super::LayeredEnvironment<super::LayeredEnvironmentTypesRc> {
+        use super::*;
+
+        fn concat(
+            env: &mut (dyn Environment<ValueTypesRc> + 'static),
+            args: <ValueTypesRc as ValueTypes>::ValueRef,
+        ) -> Result<<ValueTypesRc as ValueTypes>::ValueRef> {
+            let mut arg = args;
+            let mut result = String::new();
+
+            while let Value::Cons(c) = &*arg {
+                if let Value::String(s) = &*env.evaluate(c.car.clone())? {
+                    result += &s.0;
+                }
+                arg = c.cdr.clone();
+            }
+
+            Result::Ok(Rc::new(Value::String(ValueString(result))))
+        }
+
+        let layers: Vec<Box<dyn EnvironmentLayer<LayeredEnvironmentTypesRc>>> = vec![
+            Box::new(SimpleLayer {
+                name: "a",
+                value: Rc::new(Value::String(ValueString("Hello".to_string()))),
+            }),
+            Box::new(SimpleLayer {
+                name: "b",
+                value: Rc::new(Value::Symbol(ValueSymbol("sym".to_string()))),
+            }),
+            Box::new(SimpleLayer {
+                name: "a",
+                value: Rc::new(Value::String(ValueString("world!".to_string()))),
+            }),
+            Box::new(SimpleLayer {
+                name: "concat",
+                value: Rc::new(Value::Function(ValueFunction {
+                    id: 1,
+                    function: Box::new(concat),
+                })),
+            }),
+        ];
+        LayeredEnvironment { layers }
+    }
+
+    #[test]
+    fn test_layered_environment_get_value() {
+        use super::*;
+
+        let env = make_test_env();
+        assert_eq!(
+            *env.get_value(&ValueSymbol("a".to_string())).unwrap(),
+            *str!("Hello")
+        );
+        assert_eq!(
+            *env.get_value(&ValueSymbol("b".to_string())).unwrap(),
+            *sym!("sym")
+        );
+        assert_eq!(
+            env.get_value(&ValueSymbol("c".to_string()))
+                .unwrap_err()
+                .kind,
+            ErrorKind::ValueNotDefined
+        );
+    }
+
+    #[test]
+    fn test_layered_environment_set_value() {
+        use super::*;
+
+        let mut env = make_test_env();
+        assert_eq!(
+            *env.layers[0]
+                .get_value(&ValueSymbol("a".to_string()))
+                .unwrap(),
+            *str!("Hello")
+        );
+        assert_eq!(
+            *env.layers[1]
+                .get_value(&ValueSymbol("b".to_string()))
+                .unwrap(),
+            *sym!("sym")
+        );
+        assert_eq!(
+            *env.layers[2]
+                .get_value(&ValueSymbol("a".to_string()))
+                .unwrap(),
+            *str!("world!")
+        );
+
+        assert!(env
+            .set_value(
+                &ValueSymbol("a".to_string()),
+                Rc::new(Value::Bool(ValueBool(true)))
+            )
+            .is_ok());
+        assert_eq!(
+            *env.layers[0]
+                .get_value(&ValueSymbol("a".to_string()))
+                .unwrap(),
+            *bool!(true)
+        );
+        assert_eq!(
+            *env.layers[1]
+                .get_value(&ValueSymbol("b".to_string()))
+                .unwrap(),
+            *sym!("sym")
+        );
+        assert_eq!(
+            *env.layers[2]
+                .get_value(&ValueSymbol("a".to_string()))
+                .unwrap(),
+            *str!("world!")
+        );
+
+        assert!(env
+            .set_value(
+                &ValueSymbol("b".to_string()),
+                Rc::new(Value::Bool(ValueBool(false)))
+            )
+            .is_ok());
+        assert_eq!(
+            *env.layers[0]
+                .get_value(&ValueSymbol("a".to_string()))
+                .unwrap(),
+            *bool!(true)
+        );
+        assert_eq!(
+            *env.layers[1]
+                .get_value(&ValueSymbol("b".to_string()))
+                .unwrap(),
+            *bool!(false)
+        );
+        assert_eq!(
+            *env.layers[2]
+                .get_value(&ValueSymbol("a".to_string()))
+                .unwrap(),
+            *str!("world!")
+        );
+
+        assert_eq!(
+            env.set_value(
+                &ValueSymbol("c".to_string()),
+                Rc::new(Value::Bool(ValueBool(true)))
+            )
+            .unwrap_err()
+            .kind,
+            ErrorKind::NoPackageForValue
+        );
+        assert_eq!(
+            *env.layers[0]
+                .get_value(&ValueSymbol("a".to_string()))
+                .unwrap(),
+            *bool!(true)
+        );
+        assert_eq!(
+            *env.layers[1]
+                .get_value(&ValueSymbol("b".to_string()))
+                .unwrap(),
+            *bool!(false)
+        );
+        assert_eq!(
+            *env.layers[2]
+                .get_value(&ValueSymbol("a".to_string()))
+                .unwrap(),
+            *str!("world!")
+        );
+    }
+
+    #[test]
+    fn test_environment_evaluate() {
+        use super::*;
+
+        let mut env = make_test_env();
+        let function_call = Rc::new(Value::Cons(ValueCons {
+            car: Rc::new(Value::Symbol(ValueSymbol("concat".to_string()))),
+            cdr: Rc::new(Value::Cons(ValueCons {
+                car: Rc::new(Value::Symbol(ValueSymbol("a".to_string()))),
+                cdr: Rc::new(Value::Cons(ValueCons {
+                    car: Rc::new(Value::String(ValueString(", world!".to_string()))),
+                    cdr: Rc::new(Value::Nil),
+                })),
+            })),
+        }));
+        assert_eq!(
+            *env.evaluate(function_call).unwrap(),
+            *str!("Hello, world!")
+        );
     }
 }
