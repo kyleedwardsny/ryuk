@@ -37,6 +37,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub trait ValueTypes {
     type ValueRef: Deref<Target = Value<Self>> + Debug;
     type StringRef: Deref<Target = str>;
+    type FnRef: Fn(Vec<Self::ValueRef>) -> Self::ValueRef;
 }
 
 #[derive(Debug)]
@@ -75,7 +76,9 @@ where
 pub struct ValueBool(pub bool);
 
 #[derive(Debug)]
-pub struct ValueString<S: Deref<Target = str>>(pub S);
+pub struct ValueString<S>(pub S)
+where
+    S: Deref<Target = str>;
 
 impl<S1, S2> PartialEq<ValueString<S2>> for ValueString<S1>
 where
@@ -84,6 +87,23 @@ where
 {
     fn eq(&self, rhs: &ValueString<S2>) -> bool {
         *self.0 == *rhs.0
+    }
+}
+
+pub struct ValueFunction<T>
+where
+    T: ValueTypes + ?Sized,
+{
+    pub id: u32, // Needed to test for equality
+    pub function: T::FnRef,
+}
+
+impl<T> Debug for ValueFunction<T>
+where
+    T: ValueTypes + ?Sized,
+{
+    fn fmt(&self, _fmt: &mut Formatter) -> std::result::Result<(), std::fmt::Error> {
+        std::result::Result::Ok(())
     }
 }
 
@@ -97,6 +117,7 @@ where
     Cons(ValueCons<T>),
     Bool(ValueBool),
     String(ValueString<T::StringRef>),
+    Function(ValueFunction<T>),
 }
 
 impl<T1, T2> PartialEq<Value<T2>> for Value<T1>
@@ -126,6 +147,10 @@ where
                 Value::String(s2) => *s1 == *s2,
                 _ => false,
             },
+            Value::Function(f1) => match rhs {
+                Value::Function(f2) => f1.id == f2.id,
+                _ => false,
+            },
         }
     }
 }
@@ -136,6 +161,7 @@ pub struct ValueTypesStatic;
 impl ValueTypes for ValueTypesStatic {
     type ValueRef = &'static Value<Self>;
     type StringRef = &'static str;
+    type FnRef = &'static dyn Fn(Vec<Self::ValueRef>) -> Self::ValueRef;
 }
 
 #[macro_export]
@@ -327,8 +353,9 @@ mod tests {
         }
 
         impl<'a> super::ValueTypes for ValueTypesString<'a> {
-            type ValueRef = &'a super::Value<Self>;
+            type ValueRef = Box<super::Value<Self>>;
             type StringRef = String;
+            type FnRef = &'a dyn Fn(Vec<Self::ValueRef>) -> Self::ValueRef;
         }
 
         assert_eq!(nil!(), nil!());
@@ -369,5 +396,37 @@ mod tests {
         );
         assert_ne!(str!("str"), sym!("str"));
         assert_ne!(str!("str"), nil!());
+
+        let f1 = |_| Box::new(super::Value::Nil);
+        let f2 = |_| Box::new(super::Value::String(super::ValueString("str".to_string())));
+        let v11 = Box::new(super::Value::<ValueTypesString>::Function(
+            super::ValueFunction {
+                id: 1,
+                function: &f1,
+            },
+        ));
+        let v12 = Box::new(super::Value::<ValueTypesString>::Function(
+            super::ValueFunction {
+                id: 1,
+                function: &f2,
+            },
+        ));
+        let v21 = Box::new(super::Value::<ValueTypesString>::Function(
+            super::ValueFunction {
+                id: 2,
+                function: &f1,
+            },
+        ));
+        let v22 = Box::new(super::Value::<ValueTypesString>::Function(
+            super::ValueFunction {
+                id: 2,
+                function: &f2,
+            },
+        ));
+        assert_eq!(v11, v11);
+        assert_eq!(v11, v12);
+        assert_ne!(v11, v21);
+        assert_ne!(v11, v22);
+        assert_ne!(v11, Box::new(super::Value::Nil));
     }
 }

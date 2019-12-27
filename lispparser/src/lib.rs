@@ -356,6 +356,7 @@ mod tests {
     impl ValueTypes for ValueTypesRc {
         type ValueRef = Rc<Value<Self>>;
         type StringRef = String;
+        type FnRef = Box<dyn Fn(Vec<Self::ValueRef>) -> Self::ValueRef>;
     }
 
     #[test]
