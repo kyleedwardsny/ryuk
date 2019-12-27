@@ -391,11 +391,11 @@ mod tests {
 
     #[test]
     fn test_read_string() {
-        let s = "\"a\"  \"b \\\"\" \"\\n\nc\"  \"d";
+        let s = "\"a\"  \"b \\\"\" \"\\n\n\\\\c\"  \"d";
         let mut i = LispValues::<ValueTypesRc>::lisp_values(s.chars().peekable());
         assert_eq!(*i.next().unwrap().unwrap(), *str!("a"));
         assert_eq!(*i.next().unwrap().unwrap(), *str!("b \""));
-        assert_eq!(*i.next().unwrap().unwrap(), *str!("n\nc"));
+        assert_eq!(*i.next().unwrap().unwrap(), *str!("n\n\\c"));
         assert_eq!(
             i.next().unwrap().unwrap_err().kind,
             crate::ErrorKind::EndOfFile
