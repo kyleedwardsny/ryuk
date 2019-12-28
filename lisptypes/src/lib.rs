@@ -287,6 +287,38 @@ where
     }
 }
 
+impl<T1, T2> From<&Value<T1>> for Value<T2>
+where
+    T1: ValueTypes + ?Sized,
+    T2: ValueTypes + ?Sized,
+    Value<T2>: Into<<T2 as ValueTypes>::ValueRef>,
+    T1::StringRef: Into<T2::StringRef> + Clone,
+{
+    fn from(v: &Value<T1>) -> Self {
+        match v.borrow() {
+            Value::Nil => Value::Nil,
+            Value::Symbol(ValueSymbol(s)) => Value::Symbol(ValueSymbol((*s).clone().into())),
+            Value::Cons(ValueCons { car, cdr }) => Value::Cons(ValueCons {
+                car: Into::<Value<T2>>::into(car.borrow()).into(),
+                cdr: Into::<Value<T2>>::into(cdr.borrow()).into(),
+            }),
+            Value::Bool(ValueBool(b)) => Value::Bool(ValueBool(*b)),
+            Value::String(ValueString(s)) => Value::String(ValueString((*s).clone().into())),
+            Value::Function(_) => panic!("Cannot move functions across value type boundaries"),
+        }
+    }
+}
+
+pub fn value_type_convert<T1, T2>(v: T1::ValueRef) -> T2::ValueRef
+where
+    T1: ValueTypes + ?Sized,
+    T2: ValueTypes + ?Sized,
+    T1::ValueRef: Into<Value<T2>>,
+    Value<T2>: Into<<T2 as ValueTypes>::ValueRef>,
+{
+    Into::<Value<T2>>::into(v).into()
+}
+
 #[derive(Debug)]
 pub struct ValueTypesRc;
 
@@ -576,6 +608,46 @@ mod tests {
         assert_ne!(v11, v21);
         assert_ne!(v11, v22);
         assert_ne!(v11, super::Rc::new(super::Value::Nil));
+    }
+
+    #[test]
+    fn test_cross_type_boundary() {
+        use super::*;
+
+        let l: <ValueTypesRc as ValueTypes>::ValueRef =
+            value_type_convert::<ValueTypesStatic, ValueTypesRc>(list!(
+                sym!("sym"),
+                bool!(true),
+                str!("str")
+            ));
+        match l.borrow() {
+            Value::Cons(c) => {
+                match c.car.borrow() {
+                    Value::Symbol(s) => assert_eq!(s.0, "sym"),
+                    _ => panic!("Expected a Value::Symbol"),
+                }
+                match c.cdr.borrow() {
+                    Value::Cons(c) => {
+                        match c.car.borrow() {
+                            Value::Bool(b) => assert_eq!(b.0, true),
+                            _ => panic!("Expected a Value::Bool"),
+                        }
+                        match c.cdr.borrow() {
+                            Value::Cons(c) => {
+                                match c.car.borrow() {
+                                    Value::String(s) => assert_eq!(s.0, "str"),
+                                    _ => panic!("Expected a Value::String"),
+                                }
+                                assert_eq!(*c.cdr, *nil!());
+                            }
+                            _ => panic!("Expected a Value::Cons"),
+                        }
+                    }
+                    _ => panic!("Expected a Value::Cons"),
+                }
+            }
+            _ => panic!("Expected a Value::Cons"),
+        }
     }
 
     struct SimpleLayer {
