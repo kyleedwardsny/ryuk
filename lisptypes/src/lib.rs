@@ -196,8 +196,8 @@ where
 
 impl<T1, T2> PartialEq<ValueCons<T2>> for ValueCons<T1>
 where
-    T1: ValueTypes,
-    T2: ValueTypes,
+    T1: ValueTypes + ?Sized,
+    T2: ValueTypes + ?Sized,
 {
     fn eq(&self, other: &ValueCons<T2>) -> bool {
         self.car.borrow() == other.car.borrow() && self.cdr.borrow() == other.cdr.borrow()
@@ -254,8 +254,8 @@ where
 
 impl<T1, T2> PartialEq<Value<T2>> for Value<T1>
 where
-    T1: ValueTypes,
-    T2: ValueTypes,
+    T1: ValueTypes + ?Sized,
+    T2: ValueTypes + ?Sized,
 {
     fn eq(&self, rhs: &Value<T2>) -> bool {
         match self {
