@@ -611,7 +611,7 @@ mod tests {
     }
 
     #[test]
-    fn test_cross_type_boundary() {
+    fn test_value_type_convert() {
         use super::*;
 
         let l: <ValueTypesRc as ValueTypes>::ValueRef =
