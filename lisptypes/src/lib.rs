@@ -55,43 +55,19 @@ where
     fn set_value(&mut self, s: &ValueSymbol<T::StringRef>, v: T::ValueRef) -> Result<()>;
 }
 
-pub trait Evaluator<T>
-where
-    T: ValueTypes + ?Sized,
-{
-    fn evaluate(&mut self, v: T::ValueRef) -> Result<T::ValueRef>;
-}
-
-impl<T, E> Evaluator<T> for E
-where
-    T: ValueTypes + ?Sized,
-    T::ValueRef: Clone,
-    E: Environment<T> + 'static,
-{
-    fn evaluate(&mut self, v: T::ValueRef) -> Result<T::ValueRef> {
-        (self as &mut dyn Environment<T>).evaluate(v)
-    }
-}
-
-impl<T> Evaluator<T> for dyn Environment<T>
+impl<T> dyn Environment<T>
 where
     T: ValueTypes + ?Sized,
     T::ValueRef: Clone,
 {
-    fn evaluate(&mut self, v: T::ValueRef) -> Result<T::ValueRef> {
+    pub fn evaluate(&mut self, v: T::ValueRef) -> Result<T::ValueRef> {
         match v.borrow() {
             Value::Symbol(s) => self.get_value(s),
             Value::Cons(c) => self.call_function(c),
             _ => Result::Ok(v),
         }
     }
-}
 
-impl<T> dyn Environment<T>
-where
-    T: ValueTypes + ?Sized,
-    T::ValueRef: Clone,
-{
     fn call_function(&mut self, c: &ValueCons<T>) -> Result<T::ValueRef> {
         match self.evaluate(c.car.clone())?.borrow() {
             Value::Function(f) => (f.function)(self, c.cdr.clone()),
@@ -1091,7 +1067,9 @@ mod tests {
             str!(", world!")
         ));
         assert_eq!(
-            *env.evaluate(function_call).unwrap(),
+            *(&mut env as &mut dyn Environment<ValueTypesRc>)
+                .evaluate(function_call)
+                .unwrap(),
             *str!("Hello, world!")
         );
     }
