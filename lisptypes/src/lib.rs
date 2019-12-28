@@ -379,6 +379,10 @@ where
     pub fn new(ptr: T::ValueRef) -> Self {
         Self { ptr }
     }
+
+    pub fn take(self) -> T::ValueRef {
+        self.ptr
+    }
 }
 
 impl<T> Iterator for LispList<T>
@@ -856,7 +860,7 @@ mod tests {
     }
 
     #[test]
-    fn test_iterator() {
+    fn test_lisp_list() {
         use super::*;
 
         let mut i = LispList::<ValueTypesStatic>::new(list!(sym!("sym"), bool!(true), str!("str")));
@@ -871,6 +875,10 @@ mod tests {
             i.next().unwrap().unwrap_err().kind,
             ErrorKind::IncorrectType
         );
+
+        let mut i = LispList::<ValueTypesStatic>::new(list!(sym!("sym"), bool!(true), str!("str")));
+        assert_eq!(i.next().unwrap().unwrap(), sym!("sym"));
+        assert_eq!(i.take(), list!(bool!(true), str!("str")));
     }
 
     struct SimpleLayer {
