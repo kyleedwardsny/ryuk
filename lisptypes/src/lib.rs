@@ -914,19 +914,19 @@ mod tests {
 
     fn make_test_env() -> super::LayeredEnvironment<super::LayeredEnvironmentTypesRc> {
         use super::*;
+        use std::convert::TryInto;
 
         fn concat(
             env: &mut (dyn Environment<ValueTypesRc> + 'static),
             args: <ValueTypesRc as ValueTypes>::ValueRef,
         ) -> Result<<ValueTypesRc as ValueTypes>::ValueRef> {
-            let mut arg = args;
             let mut result = String::new();
 
-            while let Value::Cons(c) = &*arg {
-                if let Value::String(s) = &*env.evaluate(c.car.clone())? {
-                    result += &s.0;
-                }
-                arg = c.cdr.clone();
+            for try_item in LispList::<ValueTypesRc>::new(args) {
+                let item = env.evaluate(try_item?)?;
+                let s: &ValueString<String> =
+                    Borrow::<Value<ValueTypesRc>>::borrow(&item).try_into()?;
+                result += &s.0;
             }
 
             Result::Ok(Rc::new(Value::String(ValueString(result))))
