@@ -285,6 +285,26 @@ try_from_value!(T, ValueBool, Value::Bool(b) => b);
 try_from_value!(T, ValueString<T::StringRef>, Value::String(s) => s);
 try_from_value!(T, ValueFunction<T>, Value::Function(f) => f);
 
+macro_rules! from_value_type {
+    ($t:ident, $in:ty, $param:ident -> $result:expr) => {
+        impl<$t> From<$in> for Value<$t>
+        where
+            $t: ValueTypes + ?Sized,
+        {
+            fn from($param: $in) -> Self {
+                $result
+            }
+        }
+    };
+}
+
+from_value_type!(T, (), _n -> Value::Nil);
+from_value_type!(T, ValueSymbol<T::StringRef>, s -> Value::Symbol(s));
+from_value_type!(T, ValueCons<T>, c -> Value::Cons(c));
+from_value_type!(T, ValueBool, b -> Value::Bool(b));
+from_value_type!(T, ValueString<T::StringRef>, s -> Value::String(s));
+from_value_type!(T, ValueFunction<T>, f -> Value::Function(f));
+
 impl<T1, T2> PartialEq<Value<T2>> for Value<T1>
 where
     T1: ValueTypes + ?Sized,
@@ -690,7 +710,7 @@ mod tests {
     }
 
     #[test]
-    fn test_try_into_value() {
+    fn test_try_into_value_type() {
         use super::*;
         use std::convert::TryInto;
 
@@ -762,6 +782,43 @@ mod tests {
         assert_eq!(
             TryInto::<()>::try_into(&v).unwrap_err().kind,
             ErrorKind::IncorrectType
+        );
+    }
+
+    #[test]
+    fn test_into_value() {
+        use super::*;
+
+        let v: Value<ValueTypesStatic> = ().into();
+        assert_eq!(&v, nil!());
+
+        let v: Value<ValueTypesStatic> = ValueSymbol("sym").into();
+        assert_eq!(&v, sym!("sym"));
+
+        let v: Value<ValueTypesStatic> = ValueCons {
+            car: nil!(),
+            cdr: nil!(),
+        }
+        .into();
+        assert_eq!(&v, cons!(nil!(), nil!()));
+
+        let v: Value<ValueTypesStatic> = ValueBool(true).into();
+        assert_eq!(&v, bool!(true));
+
+        let v: Value<ValueTypesStatic> = ValueString("str").into();
+        assert_eq!(&v, str!("str"));
+
+        let v: Value<ValueTypesRc> = ValueFunction::<ValueTypesRc> {
+            id: 1,
+            function: Box::new(static_f1),
+        }
+        .into();
+        assert_eq!(
+            v,
+            Value::<ValueTypesRc>::Function(ValueFunction {
+                id: 1,
+                function: Box::new(static_f1)
+            })
         );
     }
 
