@@ -363,6 +363,48 @@ where
     Into::<Value<T2>>::into(v).into()
 }
 
+pub struct LispList<T>
+where
+    T: ValueTypes + ?Sized,
+    T::ValueRef: Clone,
+{
+    ptr: T::ValueRef,
+}
+
+impl<T> LispList<T>
+where
+    T: ValueTypes + ?Sized,
+    T::ValueRef: Clone,
+{
+    pub fn new(ptr: T::ValueRef) -> Self {
+        Self { ptr }
+    }
+}
+
+impl<T> Iterator for LispList<T>
+where
+    T: ValueTypes + ?Sized,
+    T::ValueRef: Clone,
+{
+    type Item = Result<T::ValueRef>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.ptr.borrow() {
+            Value::Nil => Option::None,
+            Value::Cons(c) => {
+                let car = c.car.clone();
+                let cdr = c.cdr.clone();
+                self.ptr = cdr;
+                Option::Some(Result::Ok(car))
+            }
+            _ => Option::Some(Result::Err(Error::new(
+                ErrorKind::IncorrectType,
+                "Incorrect type",
+            ))),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct ValueTypesRc;
 
@@ -810,6 +852,24 @@ mod tests {
                 id: 1,
                 function: Box::new(static_f1)
             })
+        );
+    }
+
+    #[test]
+    fn test_iterator() {
+        use super::*;
+
+        let mut i = LispList::<ValueTypesStatic>::new(list!(sym!("sym"), bool!(true), str!("str")));
+        assert_eq!(i.next().unwrap().unwrap(), sym!("sym"));
+        assert_eq!(i.next().unwrap().unwrap(), bool!(true));
+        assert_eq!(i.next().unwrap().unwrap(), str!("str"));
+        assert!(i.next().is_none());
+
+        let mut i = LispList::<ValueTypesStatic>::new(cons!(sym!("sym"), bool!(true)));
+        assert_eq!(i.next().unwrap().unwrap(), sym!("sym"));
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            ErrorKind::IncorrectType
         );
     }
 
