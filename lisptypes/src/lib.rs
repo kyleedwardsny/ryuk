@@ -854,16 +854,11 @@ mod tests {
         use super::*;
 
         let mut env = make_test_env();
-        let function_call = Rc::new(Value::Cons(ValueCons {
-            car: Rc::new(Value::Symbol(ValueSymbol("concat".to_string()))),
-            cdr: Rc::new(Value::Cons(ValueCons {
-                car: Rc::new(Value::Symbol(ValueSymbol("a".to_string()))),
-                cdr: Rc::new(Value::Cons(ValueCons {
-                    car: Rc::new(Value::String(ValueString(", world!".to_string()))),
-                    cdr: Rc::new(Value::Nil),
-                })),
-            })),
-        }));
+        let function_call = value_type_convert::<ValueTypesStatic, ValueTypesRc>(list!(
+            sym!("concat"),
+            sym!("a"),
+            str!(", world!")
+        ));
         assert_eq!(
             *env.evaluate(function_call).unwrap(),
             *str!("Hello, world!")
