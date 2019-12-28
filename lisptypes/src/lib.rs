@@ -56,7 +56,6 @@ where
 pub trait Evaluator<T>
 where
     T: ValueTypes + ?Sized,
-    T::ValueRef: Clone,
 {
     fn evaluate(&mut self, v: T::ValueRef) -> Result<T::ValueRef>;
 }
