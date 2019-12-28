@@ -1,4 +1,5 @@
 use std::borrow::{Borrow, BorrowMut};
+use std::convert::TryFrom;
 use std::fmt::{Debug, Formatter};
 use std::rc::Rc;
 
@@ -10,6 +11,7 @@ pub struct Error {
 
 #[derive(Debug, PartialEq)]
 pub enum ErrorKind {
+    IncorrectType,
     ValueNotDefined,
     NotAFunction,
     NoPackageForValue,
@@ -220,6 +222,16 @@ where
     pub function: T::FnRef,
 }
 
+impl<T1, T2> PartialEq<ValueFunction<T2>> for ValueFunction<T1>
+where
+    T1: ValueTypes + ?Sized,
+    T2: ValueTypes + ?Sized,
+{
+    fn eq(&self, rhs: &ValueFunction<T2>) -> bool {
+        self.id == rhs.id
+    }
+}
+
 impl<T> Debug for ValueFunction<T>
 where
     T: ValueTypes + ?Sized,
@@ -242,6 +254,37 @@ where
     Function(ValueFunction<T>),
 }
 
+macro_rules! try_from_value_impl {
+    ($l:lifetime, $t:ident, $out:ty, $match:pat => $result:expr) => {
+        impl<$l, $t> TryFrom<&$l Value<$t>> for $out
+        where
+            $t: ValueTypes + ?Sized,
+        {
+            type Error = Error;
+
+            fn try_from(v: &$l Value<$t>) -> Result<Self> {
+                match v {
+                    $match => Result::Ok($result),
+                    _ => Result::Err(Error::new(ErrorKind::IncorrectType, "Incorrect type")),
+                }
+            }
+        }
+    };
+}
+
+macro_rules! try_from_value {
+    ($t:ident, $out:ty, $match:pat => $result:expr) => {
+        try_from_value_impl!('a, $t, &'a $out, $match => $result);
+    }
+}
+
+try_from_value_impl!('a, T, (), Value::Nil => ());
+try_from_value!(T, ValueSymbol<T::StringRef>, Value::Symbol(s) => s);
+try_from_value!(T, ValueCons<T>, Value::Cons(c) => c);
+try_from_value!(T, ValueBool, Value::Bool(b) => b);
+try_from_value!(T, ValueString<T::StringRef>, Value::String(s) => s);
+try_from_value!(T, ValueFunction<T>, Value::Function(f) => f);
+
 impl<T1, T2> PartialEq<Value<T2>> for Value<T1>
 where
     T1: ValueTypes + ?Sized,
@@ -254,23 +297,23 @@ where
                 _ => false,
             },
             Value::Symbol(s1) => match rhs {
-                Value::Symbol(s2) => *s1 == *s2,
+                Value::Symbol(s2) => s1 == s2,
                 _ => false,
             },
             Value::Cons(c1) => match rhs {
-                Value::Cons(c2) => *c1 == *c2,
+                Value::Cons(c2) => c1 == c2,
                 _ => false,
             },
             Value::Bool(b1) => match rhs {
-                Value::Bool(b2) => *b1 == *b2,
+                Value::Bool(b2) => b1 == b2,
                 _ => false,
             },
             Value::String(s1) => match rhs {
-                Value::String(s2) => *s1 == *s2,
+                Value::String(s2) => s1 == s2,
                 _ => false,
             },
             Value::Function(f1) => match rhs {
-                Value::Function(f2) => f1.id == f2.id,
+                Value::Function(f2) => f1 == f2,
                 _ => false,
             },
         }
@@ -518,6 +561,22 @@ mod tests {
         }
     }
 
+    fn static_f1(
+        _: &mut (dyn super::Environment<super::ValueTypesRc> + 'static),
+        _: <super::ValueTypesRc as super::ValueTypes>::ValueRef,
+    ) -> super::Result<<super::ValueTypesRc as super::ValueTypes>::ValueRef> {
+        super::Result::Ok(super::Rc::new(super::Value::Nil))
+    }
+
+    fn static_f2(
+        _: &mut (dyn super::Environment<super::ValueTypesRc> + 'static),
+        _: <super::ValueTypesRc as super::ValueTypes>::ValueRef,
+    ) -> super::Result<<super::ValueTypesRc as super::ValueTypes>::ValueRef> {
+        super::Result::Ok(super::Rc::new(super::Value::String(super::ValueString(
+            "str".to_string(),
+        ))))
+    }
+
     #[test]
     fn test_eq() {
         assert_eq!(nil!(), nil!());
@@ -559,38 +618,28 @@ mod tests {
         assert_ne!(str!("str"), sym!("str"));
         assert_ne!(str!("str"), nil!());
 
-        let f1 = |_: &mut (dyn super::Environment<super::ValueTypesRc> + 'static),
-                  _: <super::ValueTypesRc as super::ValueTypes>::ValueRef| {
-            super::Result::Ok(super::Rc::new(super::Value::Nil))
-        };
-        let f2 = |_: &mut (dyn super::Environment<super::ValueTypesRc> + 'static),
-                  _: <super::ValueTypesRc as super::ValueTypes>::ValueRef| {
-            super::Result::Ok(super::Rc::new(super::Value::String(super::ValueString(
-                "str".to_string(),
-            ))))
-        };
         let v11 = super::Rc::new(super::Value::<super::ValueTypesRc>::Function(
             super::ValueFunction {
                 id: 1,
-                function: Box::new(f1),
+                function: Box::new(static_f1),
             },
         ));
         let v12 = super::Rc::new(super::Value::<super::ValueTypesRc>::Function(
             super::ValueFunction {
                 id: 1,
-                function: Box::new(f2),
+                function: Box::new(static_f2),
             },
         ));
         let v21 = super::Rc::new(super::Value::<super::ValueTypesRc>::Function(
             super::ValueFunction {
                 id: 2,
-                function: Box::new(f1),
+                function: Box::new(static_f1),
             },
         ));
         let v22 = super::Rc::new(super::Value::<super::ValueTypesRc>::Function(
             super::ValueFunction {
                 id: 2,
-                function: Box::new(f2),
+                function: Box::new(static_f2),
             },
         ));
         assert_eq!(v11, v11);
@@ -638,6 +687,82 @@ mod tests {
             }
             _ => panic!("Expected a Value::Cons"),
         }
+    }
+
+    #[test]
+    fn test_try_into_value() {
+        use super::*;
+        use std::convert::TryInto;
+
+        let v = nil!();
+        assert_eq!(TryInto::<()>::try_into(v).unwrap(), ());
+        assert_eq!(
+            TryInto::<&ValueString<<ValueTypesStatic as ValueTypes>::StringRef>>::try_into(v)
+                .unwrap_err()
+                .kind,
+            ErrorKind::IncorrectType
+        );
+
+        let v = sym!("sym");
+        assert_eq!(
+            TryInto::<&ValueSymbol<<ValueTypesStatic as ValueTypes>::StringRef>>::try_into(v)
+                .unwrap(),
+            &ValueSymbol("sym")
+        );
+        assert_eq!(
+            TryInto::<()>::try_into(v).unwrap_err().kind,
+            ErrorKind::IncorrectType
+        );
+
+        let v = cons!(nil!(), nil!());
+        assert_eq!(
+            TryInto::<&ValueCons<ValueTypesStatic>>::try_into(v).unwrap(),
+            &ValueCons::<ValueTypesStatic> {
+                car: nil!(),
+                cdr: nil!()
+            }
+        );
+        assert_eq!(
+            TryInto::<()>::try_into(v).unwrap_err().kind,
+            ErrorKind::IncorrectType
+        );
+
+        let v = bool!(true);
+        assert_eq!(
+            TryInto::<&ValueBool>::try_into(v).unwrap(),
+            &ValueBool(true)
+        );
+        assert_eq!(
+            TryInto::<()>::try_into(v).unwrap_err().kind,
+            ErrorKind::IncorrectType
+        );
+
+        let v = str!("str");
+        assert_eq!(
+            TryInto::<&ValueString<<ValueTypesStatic as ValueTypes>::StringRef>>::try_into(v)
+                .unwrap(),
+            &ValueString("str")
+        );
+        assert_eq!(
+            TryInto::<()>::try_into(v).unwrap_err().kind,
+            ErrorKind::IncorrectType
+        );
+
+        let v = Value::<ValueTypesRc>::Function(ValueFunction::<ValueTypesRc> {
+            id: 1,
+            function: Box::new(static_f1),
+        });
+        assert_eq!(
+            TryInto::<&ValueFunction<ValueTypesRc>>::try_into(&v).unwrap(),
+            &ValueFunction::<ValueTypesRc> {
+                id: 1,
+                function: Box::new(static_f1)
+            }
+        );
+        assert_eq!(
+            TryInto::<()>::try_into(&v).unwrap_err().kind,
+            ErrorKind::IncorrectType
+        );
     }
 
     struct SimpleLayer {
