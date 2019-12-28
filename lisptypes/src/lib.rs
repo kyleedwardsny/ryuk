@@ -385,6 +385,17 @@ where
     }
 }
 
+pub fn map_evaluate<'a, T, R>(
+    env: &'a mut (dyn Environment<T> + 'static),
+) -> (impl FnMut(Result<R>) -> Result<T::ValueRef> + 'a)
+where
+    T: ValueTypes + ?Sized,
+    T::ValueRef: Clone,
+    R: Into<T::ValueRef>,
+{
+    move |v| env.evaluate(v?.into())
+}
+
 #[derive(Debug)]
 pub struct ValueTypesRc;
 
@@ -898,8 +909,8 @@ mod tests {
         ) -> Result<<ValueTypesRc as ValueTypes>::ValueRef> {
             let mut result = String::new();
 
-            for try_item in LispList::<ValueTypesRc>::new(args) {
-                let item = env.evaluate(try_item?)?;
+            for try_item in LispList::<ValueTypesRc>::new(args).map(map_evaluate(env)) {
+                let item = try_item?;
                 let s: &ValueString<String> =
                     Borrow::<Value<ValueTypesRc>>::borrow(&item).try_into()?;
                 result += &s.0;
