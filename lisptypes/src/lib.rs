@@ -305,38 +305,31 @@ from_value_type!(T, ValueBool, b -> Value::Bool(b));
 from_value_type!(T, ValueString<T::StringRef>, s -> Value::String(s));
 from_value_type!(T, ValueFunction<T>, f -> Value::Function(f));
 
+macro_rules! eq_match {
+    ($lhs: expr, $rhs:expr, { $(($lpat:pat, $rpat:pat) => $result:expr,)* }) => {
+        match $lhs {
+            $($lpat => match $rhs {
+                $rpat => $result,
+                _ => false,
+            },)*
+        }
+    };
+}
+
 impl<T1, T2> PartialEq<Value<T2>> for Value<T1>
 where
     T1: ValueTypes + ?Sized,
     T2: ValueTypes + ?Sized,
 {
     fn eq(&self, rhs: &Value<T2>) -> bool {
-        match self {
-            Value::Nil => match rhs {
-                Value::Nil => true,
-                _ => false,
-            },
-            Value::Symbol(s1) => match rhs {
-                Value::Symbol(s2) => s1 == s2,
-                _ => false,
-            },
-            Value::Cons(c1) => match rhs {
-                Value::Cons(c2) => c1 == c2,
-                _ => false,
-            },
-            Value::Bool(b1) => match rhs {
-                Value::Bool(b2) => b1 == b2,
-                _ => false,
-            },
-            Value::String(s1) => match rhs {
-                Value::String(s2) => s1 == s2,
-                _ => false,
-            },
-            Value::Function(f1) => match rhs {
-                Value::Function(f2) => f1 == f2,
-                _ => false,
-            },
-        }
+        eq_match!(self, rhs, {
+            (Value::Nil, Value::Nil) => true,
+            (Value::Symbol(s1), Value::Symbol(s2)) => s1 == s2,
+            (Value::Cons(c1), Value::Cons(c2)) => c1 == c2,
+            (Value::Bool(b1), Value::Bool(b2)) => b1 == b2,
+            (Value::String(s1), Value::String(s2)) => s1 == s2,
+            (Value::Function(f1), Value::Function(f2)) => f1 == f2,
+        })
     }
 }
 
