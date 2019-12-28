@@ -1,5 +1,5 @@
+use std::borrow::{Borrow, BorrowMut};
 use std::fmt::{Debug, Formatter};
-use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
 
 #[derive(Debug)]
@@ -38,8 +38,8 @@ impl std::fmt::Display for Error {
 pub type Result<T> = std::result::Result<T, Error>;
 
 pub trait ValueTypes {
-    type ValueRef: Deref<Target = Value<Self>> + Debug;
-    type StringRef: Deref<Target = str>;
+    type ValueRef: Borrow<Value<Self>> + Debug;
+    type StringRef: Borrow<str>;
     type FnRef: Fn(&mut (dyn Environment<Self> + 'static), Self::ValueRef) -> Result<Self::ValueRef>;
 }
 
@@ -70,7 +70,7 @@ where
     E: Environment<T> + 'static,
 {
     fn evaluate(&mut self, v: T::ValueRef) -> Result<T::ValueRef> {
-        match &*v {
+        match v.borrow() {
             Value::Symbol(s) => self.get_value(s),
             Value::Cons(c) => self.call_function(c),
             _ => Result::Ok(v),
@@ -78,7 +78,7 @@ where
     }
 
     fn call_function(&mut self, c: &ValueCons<T>) -> Result<T::ValueRef> {
-        match &*self.evaluate(c.car.clone())? {
+        match self.evaluate(c.car.clone())?.borrow() {
             Value::Function(f) => {
                 (f.function)(self as &mut (dyn Environment<T> + 'static), c.cdr.clone())
             }
@@ -93,7 +93,7 @@ where
     T::ValueRef: Clone,
 {
     fn evaluate(&mut self, v: T::ValueRef) -> Result<T::ValueRef> {
-        match &*v {
+        match v.borrow() {
             Value::Symbol(s) => self.get_value(s),
             Value::Cons(c) => self.call_function(c),
             _ => Result::Ok(v),
@@ -101,7 +101,7 @@ where
     }
 
     fn call_function(&mut self, c: &ValueCons<T>) -> Result<T::ValueRef> {
-        match &*self.evaluate(c.car.clone())? {
+        match self.evaluate(c.car.clone())?.borrow() {
             Value::Function(f) => (f.function)(self, c.cdr.clone()),
             _ => Result::Err(Error::new(ErrorKind::NotAFunction, "Not a function")),
         }
@@ -109,7 +109,7 @@ where
 }
 
 pub trait LayeredEnvironmentTypes {
-    type EnvironmentLayerRef: DerefMut<Target = dyn EnvironmentLayer<Self>>;
+    type EnvironmentLayerRef: BorrowMut<dyn EnvironmentLayer<Self>>;
     type ValueTypes: ValueTypes;
 }
 
@@ -130,7 +130,7 @@ where
         s: &ValueSymbol<<<T as LayeredEnvironmentTypes>::ValueTypes as ValueTypes>::StringRef>,
     ) -> Result<<<T as LayeredEnvironmentTypes>::ValueTypes as ValueTypes>::ValueRef> {
         for layer in &self.layers {
-            if let Option::Some(result) = layer.get_value(&s) {
+            if let Option::Some(result) = layer.borrow().get_value(&s) {
                 return Result::Ok(result);
             }
         }
@@ -144,7 +144,7 @@ where
         v: <<T as LayeredEnvironmentTypes>::ValueTypes as ValueTypes>::ValueRef,
     ) -> Result<()> {
         for layer in &mut self.layers {
-            if layer.set_value(s, v.clone())? {
+            if layer.borrow_mut().set_value(s, v.clone())? {
                 return Result::Ok(());
             }
         }
@@ -173,15 +173,15 @@ where
 }
 
 #[derive(Debug)]
-pub struct ValueSymbol<S: Deref<Target = str>>(pub S);
+pub struct ValueSymbol<S: Borrow<str>>(pub S);
 
 impl<S1, S2> PartialEq<ValueSymbol<S2>> for ValueSymbol<S1>
 where
-    S1: Deref<Target = str>,
-    S2: Deref<Target = str>,
+    S1: Borrow<str>,
+    S2: Borrow<str>,
 {
     fn eq(&self, rhs: &ValueSymbol<S2>) -> bool {
-        *self.0 == *rhs.0
+        self.0.borrow() == rhs.0.borrow()
     }
 }
 
@@ -200,7 +200,7 @@ where
     T2: ValueTypes,
 {
     fn eq(&self, other: &ValueCons<T2>) -> bool {
-        *self.car == *other.car && *self.cdr == *other.cdr
+        self.car.borrow() == other.car.borrow() && self.cdr.borrow() == other.cdr.borrow()
     }
 }
 
@@ -210,15 +210,15 @@ pub struct ValueBool(pub bool);
 #[derive(Debug)]
 pub struct ValueString<S>(pub S)
 where
-    S: Deref<Target = str>;
+    S: Borrow<str>;
 
 impl<S1, S2> PartialEq<ValueString<S2>> for ValueString<S1>
 where
-    S1: Deref<Target = str>,
-    S2: Deref<Target = str>,
+    S1: Borrow<str>,
+    S2: Borrow<str>,
 {
     fn eq(&self, rhs: &ValueString<S2>) -> bool {
-        *self.0 == *rhs.0
+        self.0.borrow() == rhs.0.borrow()
     }
 }
 
