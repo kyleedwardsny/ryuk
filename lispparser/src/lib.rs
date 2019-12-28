@@ -45,18 +45,9 @@ impl std::fmt::Display for Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-pub trait LispValues<T>
+pub struct LispParser<T, I>
 where
-    T: ValueTypes,
-{
-    type Iter: Iterator<Item = Result<T::ValueRef>>;
-
-    fn lisp_values(self) -> Self::Iter;
-}
-
-pub struct PeekableCharLispIterator<T, I>
-where
-    T: ValueTypes,
+    T: ValueTypes + ?Sized,
     I: Iterator<Item = char>,
     Value<T>: Into<T::ValueRef>,
     String: Into<T::StringRef>,
@@ -65,9 +56,24 @@ where
     phantom_types: PhantomData<T>,
 }
 
-impl<T, I> Iterator for PeekableCharLispIterator<T, I>
+impl<T, I> LispParser<T, I>
 where
-    T: ValueTypes,
+    T: ValueTypes + ?Sized,
+    I: Iterator<Item = char>,
+    Value<T>: Into<T::ValueRef>,
+    String: Into<T::StringRef>,
+{
+    pub fn new(reader: Peekable<I>) -> Self {
+        Self {
+            reader,
+            phantom_types: PhantomData,
+        }
+    }
+}
+
+impl<T, I> Iterator for LispParser<T, I>
+where
+    T: ValueTypes + ?Sized,
     I: Iterator<Item = char>,
     Value<T>: Into<T::ValueRef>,
     String: Into<T::StringRef>,
@@ -85,23 +91,6 @@ where
                 ReadImplResult::EndOfFile => Option::None,
             },
             Result::Err(e) => Option::Some(Result::Err(e)),
-        }
-    }
-}
-
-impl<T, I> LispValues<T> for Peekable<I>
-where
-    T: ValueTypes,
-    I: Iterator<Item = char>,
-    Value<T>: Into<T::ValueRef>,
-    String: Into<T::StringRef>,
-{
-    type Iter = PeekableCharLispIterator<T, I>;
-
-    fn lisp_values(self) -> Self::Iter {
-        PeekableCharLispIterator {
-            reader: self,
-            phantom_types: PhantomData,
         }
     }
 }
@@ -136,7 +125,7 @@ fn skip_whitespace<I: Iterator<Item = char>>(peekable: &mut Peekable<I>) -> Resu
 
 enum ReadDelimitedResult<T>
 where
-    T: ValueTypes,
+    T: ValueTypes + ?Sized,
 {
     Value(T::ValueRef),
     InvalidToken(String),
@@ -148,7 +137,7 @@ fn read_delimited<T, I>(
     delimiter: char,
 ) -> Result<ReadDelimitedResult<T>>
 where
-    T: ValueTypes,
+    T: ValueTypes + ?Sized,
     I: Iterator<Item = char>,
     Value<T>: Into<T::ValueRef>,
     String: Into<T::StringRef>,
@@ -178,7 +167,7 @@ where
 
 fn read_list<T, I>(peekable: &mut Peekable<I>) -> Result<T::ValueRef>
 where
-    T: ValueTypes,
+    T: ValueTypes + ?Sized,
     I: Iterator<Item = char>,
     Value<T>: Into<T::ValueRef>,
     String: Into<T::StringRef>,
@@ -238,7 +227,7 @@ where
 
 fn read_macro<T, I>(peekable: &mut Peekable<I>) -> Result<T::ValueRef>
 where
-    T: ValueTypes,
+    T: ValueTypes + ?Sized,
     I: Iterator<Item = char>,
     Value<T>: Into<T::ValueRef>,
     String: Into<T::StringRef>,
@@ -300,7 +289,7 @@ where
 
 pub enum ReadImplResult<T>
 where
-    T: ValueTypes,
+    T: ValueTypes + ?Sized,
 {
     Value(T::ValueRef),
     InvalidToken(String),
@@ -309,7 +298,7 @@ where
 
 pub fn read_impl<T, I>(peekable: &mut Peekable<I>) -> Result<ReadImplResult<T>>
 where
-    T: ValueTypes,
+    T: ValueTypes + ?Sized,
     I: Iterator<Item = char>,
     Value<T>: Into<T::ValueRef>,
     String: Into<T::StringRef>,
@@ -352,7 +341,7 @@ mod tests {
     #[test]
     fn test_read_symbol() {
         let s = "sym SYM2\nSym3  \n   sym4";
-        let mut i = LispValues::<ValueTypesRc>::lisp_values(s.chars().peekable());
+        let mut i = LispParser::<ValueTypesRc, _>::new(s.chars().peekable());
         assert_eq!(*i.next().unwrap().unwrap(), *sym!("sym"));
         assert_eq!(*i.next().unwrap().unwrap(), *sym!("sym2"));
         assert_eq!(*i.next().unwrap().unwrap(), *sym!("sym3"));
@@ -363,7 +352,7 @@ mod tests {
     #[test]
     fn test_read_bool() {
         let s = "#t #f\n#t  ";
-        let mut i = LispValues::<ValueTypesRc>::lisp_values(s.chars().peekable());
+        let mut i = LispParser::<ValueTypesRc, _>::new(s.chars().peekable());
         assert_eq!(*i.next().unwrap().unwrap(), *bool!(true));
         assert_eq!(*i.next().unwrap().unwrap(), *bool!(false));
         assert_eq!(*i.next().unwrap().unwrap(), *bool!(true));
@@ -373,7 +362,7 @@ mod tests {
     #[test]
     fn test_read_invalid_macro() {
         let s = "#T #F #t#f  ";
-        let mut i = LispValues::<ValueTypesRc>::lisp_values(s.chars().peekable());
+        let mut i = LispParser::<ValueTypesRc, _>::new(s.chars().peekable());
         assert_eq!(
             i.next().unwrap().unwrap_err().kind,
             crate::ErrorKind::InvalidToken
@@ -392,7 +381,7 @@ mod tests {
     #[test]
     fn test_read_string() {
         let s = "\"a\"  \"b \\\"\" \"\\n\n\\\\c\"  \"d";
-        let mut i = LispValues::<ValueTypesRc>::lisp_values(s.chars().peekable());
+        let mut i = LispParser::<ValueTypesRc, _>::new(s.chars().peekable());
         assert_eq!(*i.next().unwrap().unwrap(), *str!("a"));
         assert_eq!(*i.next().unwrap().unwrap(), *str!("b \""));
         assert_eq!(*i.next().unwrap().unwrap(), *str!("n\n\\c"));
@@ -406,7 +395,7 @@ mod tests {
     #[test]
     fn test_read_list() {
         let s = "(s1 s2 s3)(s4\n s5 s6 ) ( s7 () \"s8\") (#t . #f) ( s9 . s10 s11 (a";
-        let mut i = LispValues::<ValueTypesRc>::lisp_values(s.chars().peekable());
+        let mut i = LispParser::<ValueTypesRc, _>::new(s.chars().peekable());
         assert_eq!(
             *i.next().unwrap().unwrap(),
             *list!(sym!("s1"), sym!("s2"), sym!("s3"))
@@ -437,7 +426,7 @@ mod tests {
     #[test]
     fn test_comment() {
         let s = " #t;Hello\n  #f ; world! #t\n \"a;b\"";
-        let mut i = LispValues::<ValueTypesRc>::lisp_values(s.chars().peekable());
+        let mut i = LispParser::<ValueTypesRc, _>::new(s.chars().peekable());
         assert_eq!(*i.next().unwrap().unwrap(), *bool!(true));
         assert_eq!(*i.next().unwrap().unwrap(), *bool!(false));
         assert_eq!(*i.next().unwrap().unwrap(), *str!("a;b"));
@@ -448,7 +437,7 @@ mod tests {
     fn test_iterator() {
         let s = "() () ()";
         let mut num = 0;
-        for v in LispValues::<ValueTypesRc>::lisp_values(s.chars().peekable()) {
+        for v in LispParser::<ValueTypesRc, _>::new(s.chars().peekable()) {
             num += 1;
             assert_eq!(*v.unwrap(), *nil!());
         }
