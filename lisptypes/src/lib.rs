@@ -254,7 +254,7 @@ where
     Function(ValueFunction<T>),
 }
 
-macro_rules! try_from_value_impl {
+macro_rules! try_from_value {
     ($l:lifetime, $t:ident, $out:ty, $match:pat => $result:expr) => {
         impl<$l, $t> TryFrom<&$l Value<$t>> for $out
         where
@@ -270,15 +270,13 @@ macro_rules! try_from_value_impl {
             }
         }
     };
-}
 
-macro_rules! try_from_value {
     ($t:ident, $out:ty, $match:pat => $result:expr) => {
-        try_from_value_impl!('a, $t, &'a $out, $match => $result);
-    }
+        try_from_value!('a, $t, &'a $out, $match => $result);
+    };
 }
 
-try_from_value_impl!('a, T, (), Value::Nil => ());
+try_from_value!('a, T, (), Value::Nil => ());
 try_from_value!(T, ValueSymbol<T::StringRef>, Value::Symbol(s) => s);
 try_from_value!(T, ValueCons<T>, Value::Cons(c) => c);
 try_from_value!(T, ValueBool, Value::Bool(b) => b);
