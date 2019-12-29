@@ -72,7 +72,7 @@ where
 
     fn call_function(&mut self, c: &ValueCons<T>) -> Result<T::ValueRef> {
         match self.evaluate(c.car.clone())?.borrow() {
-            Value::Function(f) => f.function.borrow()(self, c.cdr.clone()),
+            Value::Procedure(p) => p.proc.borrow()(self, c.cdr.clone()),
             _ => Result::Err(Error::new(ErrorKind::NotAFunction, "Not a function")),
         }
     }
@@ -229,38 +229,38 @@ where
     }
 }
 
-pub struct ValueFunction<T>
+pub struct ValueProcedure<T>
 where
     T: ValueTypes + ?Sized,
 {
     pub id: u32, // Needed to test for equality
-    pub function: T::ProcRef,
+    pub proc: T::ProcRef,
 }
 
-impl<T> Clone for ValueFunction<T>
+impl<T> Clone for ValueProcedure<T>
 where
     T: ValueTypes + ?Sized,
     T::ProcRef: Clone,
 {
     fn clone(&self) -> Self {
-        ValueFunction {
+        ValueProcedure {
             id: self.id,
-            function: self.function.clone(),
+            proc: self.proc.clone(),
         }
     }
 }
 
-impl<T1, T2> PartialEq<ValueFunction<T2>> for ValueFunction<T1>
+impl<T1, T2> PartialEq<ValueProcedure<T2>> for ValueProcedure<T1>
 where
     T1: ValueTypes + ?Sized,
     T2: ValueTypes + ?Sized,
 {
-    fn eq(&self, rhs: &ValueFunction<T2>) -> bool {
+    fn eq(&self, rhs: &ValueProcedure<T2>) -> bool {
         self.id == rhs.id
     }
 }
 
-impl<T> Debug for ValueFunction<T>
+impl<T> Debug for ValueProcedure<T>
 where
     T: ValueTypes + ?Sized,
 {
@@ -279,7 +279,7 @@ where
     Cons(ValueCons<T>),
     Bool(ValueBool),
     String(ValueString<T::StringRef>),
-    Function(ValueFunction<T>),
+    Procedure(ValueProcedure<T>),
 }
 
 macro_rules! try_from_value {
@@ -316,8 +316,8 @@ try_from_value!('a, T, ValueBool, (), Value::Bool(b) => (*b).clone());
 try_from_value_ref!(T, ValueBool, Value::Bool(b) => b);
 try_from_value!('a, T, ValueString<T::StringRef>, (ValueString<T::StringRef>: Clone), Value::String(s) => (*s).clone());
 try_from_value_ref!(T, ValueString<T::StringRef>, Value::String(s) => s);
-try_from_value!('a, T, ValueFunction<T>, (ValueFunction<T>: Clone), Value::Function(f) => (*f).clone());
-try_from_value_ref!(T, ValueFunction<T>, Value::Function(f) => f);
+try_from_value!('a, T, ValueProcedure<T>, (ValueProcedure<T>: Clone), Value::Procedure(p) => (*p).clone());
+try_from_value_ref!(T, ValueProcedure<T>, Value::Procedure(p) => p);
 
 macro_rules! from_value_type {
     ($t:ident, $in:ty, $param:ident -> $result:expr) => {
@@ -337,7 +337,7 @@ from_value_type!(T, ValueSymbol<T::StringRef>, s -> Value::Symbol(s));
 from_value_type!(T, ValueCons<T>, c -> Value::Cons(c));
 from_value_type!(T, ValueBool, b -> Value::Bool(b));
 from_value_type!(T, ValueString<T::StringRef>, s -> Value::String(s));
-from_value_type!(T, ValueFunction<T>, f -> Value::Function(f));
+from_value_type!(T, ValueProcedure<T>, p -> Value::Procedure(p));
 
 macro_rules! eq_match {
     ($lhs: expr, $rhs:expr, { $(($lpat:pat, $rpat:pat) => $result:expr,)* }) => {
@@ -362,7 +362,7 @@ where
             (Value::Cons(c1), Value::Cons(c2)) => c1 == c2,
             (Value::Bool(b1), Value::Bool(b2)) => b1 == b2,
             (Value::String(s1), Value::String(s2)) => s1 == s2,
-            (Value::Function(f1), Value::Function(f2)) => f1 == f2,
+            (Value::Procedure(p1), Value::Procedure(p2)) => p1 == p2,
         })
     }
 }
@@ -384,7 +384,7 @@ where
             }),
             Value::Bool(ValueBool(b)) => Value::Bool(ValueBool(*b)),
             Value::String(ValueString(s)) => Value::String(ValueString((*s).clone().into())),
-            Value::Function(_) => panic!("Cannot move functions across value type boundaries"),
+            Value::Procedure(_) => panic!("Cannot move procedures across value type boundaries"),
         }
     }
 }
@@ -723,28 +723,28 @@ mod tests {
         assert_ne!(str!("str"), sym!("str"));
         assert_ne!(str!("str"), nil!());
 
-        let v11 = super::Rc::new(super::Value::<super::ValueTypesRc>::Function(
-            super::ValueFunction {
+        let v11 = super::Rc::new(super::Value::<super::ValueTypesRc>::Procedure(
+            super::ValueProcedure {
                 id: 1,
-                function: super::Rc::new(static_f1),
+                proc: super::Rc::new(static_f1),
             },
         ));
-        let v12 = super::Rc::new(super::Value::<super::ValueTypesRc>::Function(
-            super::ValueFunction {
+        let v12 = super::Rc::new(super::Value::<super::ValueTypesRc>::Procedure(
+            super::ValueProcedure {
                 id: 1,
-                function: super::Rc::new(static_f2),
+                proc: super::Rc::new(static_f2),
             },
         ));
-        let v21 = super::Rc::new(super::Value::<super::ValueTypesRc>::Function(
-            super::ValueFunction {
+        let v21 = super::Rc::new(super::Value::<super::ValueTypesRc>::Procedure(
+            super::ValueProcedure {
                 id: 2,
-                function: super::Rc::new(static_f1),
+                proc: super::Rc::new(static_f1),
             },
         ));
-        let v22 = super::Rc::new(super::Value::<super::ValueTypesRc>::Function(
-            super::ValueFunction {
+        let v22 = super::Rc::new(super::Value::<super::ValueTypesRc>::Procedure(
+            super::ValueProcedure {
                 id: 2,
-                function: super::Rc::new(static_f2),
+                proc: super::Rc::new(static_f2),
             },
         ));
         assert_eq!(v11, v11);
@@ -853,15 +853,15 @@ mod tests {
             ErrorKind::IncorrectType
         );
 
-        let v = Value::<ValueTypesRc>::Function(ValueFunction::<ValueTypesRc> {
+        let v = Value::<ValueTypesRc>::Procedure(ValueProcedure::<ValueTypesRc> {
             id: 1,
-            function: Rc::new(static_f1),
+            proc: Rc::new(static_f1),
         });
         assert_eq!(
-            TryInto::<&ValueFunction<ValueTypesRc>>::try_into(&v).unwrap(),
-            &ValueFunction::<ValueTypesRc> {
+            TryInto::<&ValueProcedure<ValueTypesRc>>::try_into(&v).unwrap(),
+            &ValueProcedure::<ValueTypesRc> {
                 id: 1,
-                function: Rc::new(static_f1)
+                proc: Rc::new(static_f1)
             }
         );
         assert_eq!(
@@ -926,15 +926,15 @@ mod tests {
             ErrorKind::IncorrectType
         );
 
-        let v = Value::<ValueTypesRc>::Function(ValueFunction::<ValueTypesRc> {
+        let v = Value::<ValueTypesRc>::Procedure(ValueProcedure::<ValueTypesRc> {
             id: 1,
-            function: Rc::new(static_f1),
+            proc: Rc::new(static_f1),
         });
         assert_eq!(
-            TryInto::<ValueFunction<ValueTypesRc>>::try_into(&v).unwrap(),
-            ValueFunction::<ValueTypesRc> {
+            TryInto::<ValueProcedure<ValueTypesRc>>::try_into(&v).unwrap(),
+            ValueProcedure::<ValueTypesRc> {
                 id: 1,
-                function: Rc::new(static_f1)
+                proc: Rc::new(static_f1)
             }
         );
         assert_eq!(
@@ -966,16 +966,16 @@ mod tests {
         let v: Value<ValueTypesStatic> = ValueString("str").into();
         assert_eq!(&v, str!("str"));
 
-        let v: Value<ValueTypesRc> = ValueFunction::<ValueTypesRc> {
+        let v: Value<ValueTypesRc> = ValueProcedure::<ValueTypesRc> {
             id: 1,
-            function: Rc::new(static_f1),
+            proc: Rc::new(static_f1),
         }
         .into();
         assert_eq!(
             v,
-            Value::<ValueTypesRc>::Function(ValueFunction {
+            Value::<ValueTypesRc>::Procedure(ValueProcedure {
                 id: 1,
-                function: Rc::new(static_f1)
+                proc: Rc::new(static_f1)
             })
         );
     }
@@ -1068,9 +1068,9 @@ mod tests {
             }),
             Box::new(SimpleLayer {
                 name: "concat",
-                value: Rc::new(Value::Function(ValueFunction {
+                value: Rc::new(Value::Procedure(ValueProcedure {
                     id: 1,
-                    function: Rc::new(concat),
+                    proc: Rc::new(concat),
                 })),
             }),
         ];
