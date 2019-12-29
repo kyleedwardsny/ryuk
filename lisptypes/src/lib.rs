@@ -1,5 +1,5 @@
 use std::borrow::{Borrow, BorrowMut};
-use std::convert::TryFrom;
+use std::convert::{TryFrom, TryInto};
 use std::fmt::{Debug, Formatter};
 use std::rc::Rc;
 
@@ -283,15 +283,15 @@ where
 }
 
 macro_rules! try_from_value {
-    ($l:lifetime, $t:ident, $out:ty, ($($ct:ty: $constraint:path),*), $match:pat => $result:expr) => {
-        impl<$l, $t> TryFrom<&$l Value<$t>> for $out
+    ($t:ident, $out:ty, ($($ct:ty: $constraint:path),*), $match:pat => $result:expr) => {
+        impl<$t> TryFrom<&Value<$t>> for $out
         where
             $t: ValueTypes + ?Sized,
             $($ct: $constraint),*
         {
             type Error = Error;
 
-            fn try_from(v: &$l Value<$t>) -> Result<Self> {
+            fn try_from(v: &Value<$t>) -> Result<Self> {
                 match v {
                     $match => Result::Ok($result),
                     _ => Result::Err(Error::new(ErrorKind::IncorrectType, "Incorrect type")),
@@ -303,20 +303,32 @@ macro_rules! try_from_value {
 
 macro_rules! try_from_value_ref {
     ($t:ident, $out:ty, $match:pat => $result:expr) => {
-        try_from_value!('a, $t, &'a $out, (), $match => $result);
+        impl<'a, $t> TryFrom<&'a Value<$t>> for &'a $out
+        where
+            $t: ValueTypes + ?Sized,
+        {
+            type Error = Error;
+
+            fn try_from(v: &'a Value<$t>) -> Result<Self> {
+                match v {
+                    $match => Result::Ok($result),
+                    _ => Result::Err(Error::new(ErrorKind::IncorrectType, "Incorrect type")),
+                }
+            }
+        }
     };
 }
 
-try_from_value!('a, T, (), (), Value::Nil => ());
-try_from_value!('a, T, ValueSymbol<T::StringRef>, (ValueSymbol<T::StringRef>: Clone), Value::Symbol(s) => (*s).clone());
+try_from_value!(T, (), (), Value::Nil => ());
+try_from_value!(T, ValueSymbol<T::StringRef>, (ValueSymbol<T::StringRef>: Clone), Value::Symbol(s) => (*s).clone());
 try_from_value_ref!(T, ValueSymbol<T::StringRef>, Value::Symbol(s) => s);
-try_from_value!('a, T, ValueCons<T>, (ValueCons<T>: Clone), Value::Cons(c) => (*c).clone());
+try_from_value!(T, ValueCons<T>, (ValueCons<T>: Clone), Value::Cons(c) => (*c).clone());
 try_from_value_ref!(T, ValueCons<T>, Value::Cons(c) => c);
-try_from_value!('a, T, ValueBool, (), Value::Bool(b) => (*b).clone());
+try_from_value!(T, ValueBool, (), Value::Bool(b) => (*b).clone());
 try_from_value_ref!(T, ValueBool, Value::Bool(b) => b);
-try_from_value!('a, T, ValueString<T::StringRef>, (ValueString<T::StringRef>: Clone), Value::String(s) => (*s).clone());
+try_from_value!(T, ValueString<T::StringRef>, (ValueString<T::StringRef>: Clone), Value::String(s) => (*s).clone());
 try_from_value_ref!(T, ValueString<T::StringRef>, Value::String(s) => s);
-try_from_value!('a, T, ValueProcedure<T>, (ValueProcedure<T>: Clone), Value::Procedure(p) => (*p).clone());
+try_from_value!(T, ValueProcedure<T>, (ValueProcedure<T>: Clone), Value::Procedure(p) => (*p).clone());
 try_from_value_ref!(T, ValueProcedure<T>, Value::Procedure(p) => p);
 
 macro_rules! from_value_type {
@@ -454,6 +466,18 @@ where
     R: Into<T::ValueRef>,
 {
     move |v| env.evaluate(v?.into())
+}
+
+pub fn map_try_into<T, V, R>(v: Result<V>) -> Result<R>
+where
+    T: ValueTypes + ?Sized,
+    V: Borrow<Value<T>>,
+    for<'a> &'a Value<T>: TryInto<R, Error = Error>,
+{
+    let v = v?;
+    let vb = v.borrow();
+    let o = vb.try_into()?;
+    std::result::Result::Ok(o)
 }
 
 #[derive(Debug)]
@@ -1035,7 +1059,6 @@ mod tests {
 
     fn make_test_env() -> super::LayeredEnvironment<super::LayeredEnvironmentTypesRc> {
         use super::*;
-        use std::convert::TryInto;
 
         fn concat(
             env: &mut (dyn Environment<ValueTypesRc> + 'static),
@@ -1043,11 +1066,12 @@ mod tests {
         ) -> Result<<ValueTypesRc as ValueTypes>::ValueRef> {
             let mut result = String::new();
 
-            for try_item in LispList::<ValueTypesRc>::new(args).map(map_evaluate(env)) {
+            for try_item in LispList::<ValueTypesRc>::new(args)
+                .map(map_evaluate(env))
+                .map(map_try_into::<ValueTypesRc, _, ValueString<String>>)
+            {
                 let item = try_item?;
-                let s: &ValueString<String> =
-                    Borrow::<Value<ValueTypesRc>>::borrow(&item).try_into()?;
-                result += &s.0;
+                result += &item.0;
             }
 
             Result::Ok(Rc::new(Value::String(ValueString(result))))
