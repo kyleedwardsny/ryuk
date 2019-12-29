@@ -62,12 +62,20 @@ where
     T: ValueTypes + ?Sized,
     T::ValueRef: Clone,
 {
-    pub fn evaluate(&mut self, v: T::ValueRef) -> Result<T::ValueRef> {
+    pub fn evaluate(&mut self, v: impl Into<T::ValueRef>) -> Result<T::ValueRef> {
+        let v = v.into();
         match v.borrow() {
             Value::Symbol(s) => self.get_value(s),
             Value::Cons(c) => self.call_function(c),
             _ => Result::Ok(v),
         }
+    }
+
+    pub fn map_evaluate<'a, V>(&'a mut self) -> (impl FnMut(Result<V>) -> Result<T::ValueRef> + 'a)
+    where
+        V: Into<T::ValueRef>,
+    {
+        move |v| self.evaluate(v?)
     }
 
     fn call_function(&mut self, c: &ValueCons<T>) -> Result<T::ValueRef> {
@@ -447,17 +455,6 @@ where
             ))),
         }
     }
-}
-
-pub fn map_evaluate<'a, T, V>(
-    env: &'a mut (dyn Environment<T> + 'static),
-) -> (impl FnMut(Result<V>) -> Result<T::ValueRef> + 'a)
-where
-    T: ValueTypes + ?Sized,
-    T::ValueRef: Clone,
-    V: Into<T::ValueRef>,
-{
-    move |v| env.evaluate(v?.into())
 }
 
 pub fn map_try_into<T, V, R>(v: Result<V>) -> Result<R>
@@ -1059,7 +1056,7 @@ mod tests {
             let mut result = String::new();
 
             for try_item in LispList::<ValueTypesRc>::new(args)
-                .map(map_evaluate(env))
+                .map(env.map_evaluate())
                 .map(map_try_into::<ValueTypesRc, _, ValueString<String>>)
             {
                 let item = try_item?;
