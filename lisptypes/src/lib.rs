@@ -42,7 +42,9 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub trait ValueTypes {
     type ValueRef: Borrow<Value<Self>> + Debug;
     type StringRef: Borrow<str>;
-    type FnRef: Fn(&mut (dyn Environment<Self> + 'static), Self::ValueRef) -> Result<Self::ValueRef>;
+    type Proc: Fn(&mut (dyn Environment<Self> + 'static), Self::ValueRef) -> Result<Self::ValueRef>
+        + ?Sized;
+    type ProcRef: Borrow<Self::Proc>;
 }
 
 pub trait Environment<T>
@@ -70,7 +72,7 @@ where
 
     fn call_function(&mut self, c: &ValueCons<T>) -> Result<T::ValueRef> {
         match self.evaluate(c.car.clone())?.borrow() {
-            Value::Function(f) => (f.function)(self, c.cdr.clone()),
+            Value::Function(f) => f.function.borrow()(self, c.cdr.clone()),
             _ => Result::Err(Error::new(ErrorKind::NotAFunction, "Not a function")),
         }
     }
@@ -143,6 +145,15 @@ where
 #[derive(Debug)]
 pub struct ValueSymbol<S: Borrow<str>>(pub S);
 
+impl<S> Clone for ValueSymbol<S>
+where
+    S: Borrow<str> + Clone,
+{
+    fn clone(&self) -> Self {
+        ValueSymbol(self.0.clone())
+    }
+}
+
 impl<S1, S2> PartialEq<ValueSymbol<S2>> for ValueSymbol<S1>
 where
     S1: Borrow<str>,
@@ -162,6 +173,19 @@ where
     pub cdr: T::ValueRef,
 }
 
+impl<T> Clone for ValueCons<T>
+where
+    T: ValueTypes + ?Sized,
+    T::ValueRef: Clone,
+{
+    fn clone(&self) -> Self {
+        ValueCons {
+            car: self.car.clone(),
+            cdr: self.cdr.clone(),
+        }
+    }
+}
+
 impl<T1, T2> PartialEq<ValueCons<T2>> for ValueCons<T1>
 where
     T1: ValueTypes + ?Sized,
@@ -175,10 +199,25 @@ where
 #[derive(Debug, PartialEq)]
 pub struct ValueBool(pub bool);
 
+impl Clone for ValueBool {
+    fn clone(&self) -> Self {
+        ValueBool(self.0)
+    }
+}
+
 #[derive(Debug)]
 pub struct ValueString<S>(pub S)
 where
     S: Borrow<str>;
+
+impl<S> Clone for ValueString<S>
+where
+    S: Borrow<str> + Clone,
+{
+    fn clone(&self) -> Self {
+        ValueString(self.0.clone())
+    }
+}
 
 impl<S1, S2> PartialEq<ValueString<S2>> for ValueString<S1>
 where
@@ -195,7 +234,20 @@ where
     T: ValueTypes + ?Sized,
 {
     pub id: u32, // Needed to test for equality
-    pub function: T::FnRef,
+    pub function: T::ProcRef,
+}
+
+impl<T> Clone for ValueFunction<T>
+where
+    T: ValueTypes + ?Sized,
+    T::ProcRef: Clone,
+{
+    fn clone(&self) -> Self {
+        ValueFunction {
+            id: self.id,
+            function: self.function.clone(),
+        }
+    }
 }
 
 impl<T1, T2> PartialEq<ValueFunction<T2>> for ValueFunction<T1>
@@ -231,10 +283,11 @@ where
 }
 
 macro_rules! try_from_value {
-    ($l:lifetime, $t:ident, $out:ty, $match:pat => $result:expr) => {
+    ($l:lifetime, $t:ident, $out:ty, ($($ct:ty: $constraint:path),*), $match:pat => $result:expr) => {
         impl<$l, $t> TryFrom<&$l Value<$t>> for $out
         where
             $t: ValueTypes + ?Sized,
+            $($ct: $constraint),*
         {
             type Error = Error;
 
@@ -246,18 +299,25 @@ macro_rules! try_from_value {
             }
         }
     };
+}
 
+macro_rules! try_from_value_ref {
     ($t:ident, $out:ty, $match:pat => $result:expr) => {
-        try_from_value!('a, $t, &'a $out, $match => $result);
+        try_from_value!('a, $t, &'a $out, (), $match => $result);
     };
 }
 
-try_from_value!('a, T, (), Value::Nil => ());
-try_from_value!(T, ValueSymbol<T::StringRef>, Value::Symbol(s) => s);
-try_from_value!(T, ValueCons<T>, Value::Cons(c) => c);
-try_from_value!(T, ValueBool, Value::Bool(b) => b);
-try_from_value!(T, ValueString<T::StringRef>, Value::String(s) => s);
-try_from_value!(T, ValueFunction<T>, Value::Function(f) => f);
+try_from_value!('a, T, (), (), Value::Nil => ());
+try_from_value!('a, T, ValueSymbol<T::StringRef>, (ValueSymbol<T::StringRef>: Clone), Value::Symbol(s) => (*s).clone());
+try_from_value_ref!(T, ValueSymbol<T::StringRef>, Value::Symbol(s) => s);
+try_from_value!('a, T, ValueCons<T>, (ValueCons<T>: Clone), Value::Cons(c) => (*c).clone());
+try_from_value_ref!(T, ValueCons<T>, Value::Cons(c) => c);
+try_from_value!('a, T, ValueBool, (), Value::Bool(b) => (*b).clone());
+try_from_value_ref!(T, ValueBool, Value::Bool(b) => b);
+try_from_value!('a, T, ValueString<T::StringRef>, (ValueString<T::StringRef>: Clone), Value::String(s) => (*s).clone());
+try_from_value_ref!(T, ValueString<T::StringRef>, Value::String(s) => s);
+try_from_value!('a, T, ValueFunction<T>, (ValueFunction<T>: Clone), Value::Function(f) => (*f).clone());
+try_from_value_ref!(T, ValueFunction<T>, Value::Function(f) => f);
 
 macro_rules! from_value_type {
     ($t:ident, $in:ty, $param:ident -> $result:expr) => {
@@ -402,9 +462,9 @@ pub struct ValueTypesRc;
 impl ValueTypes for ValueTypesRc {
     type ValueRef = Rc<Value<Self>>;
     type StringRef = String;
-    type FnRef = Box<
-        dyn Fn(&mut (dyn Environment<Self> + 'static), Self::ValueRef) -> Result<Self::ValueRef>,
-    >;
+    type Proc =
+        dyn Fn(&mut (dyn Environment<Self> + 'static), Self::ValueRef) -> Result<Self::ValueRef>;
+    type ProcRef = Rc<Self::Proc>;
 }
 
 pub struct LayeredEnvironmentTypesRc;
@@ -420,10 +480,11 @@ pub struct ValueTypesStatic;
 impl ValueTypes for ValueTypesStatic {
     type ValueRef = &'static Value<Self>;
     type StringRef = &'static str;
-    type FnRef = &'static dyn Fn(
+    type Proc = &'static dyn Fn(
         &mut (dyn Environment<Self> + 'static),
         Self::ValueRef,
     ) -> Result<Self::ValueRef>;
+    type ProcRef = Self::Proc;
 }
 
 #[macro_export]
@@ -665,25 +726,25 @@ mod tests {
         let v11 = super::Rc::new(super::Value::<super::ValueTypesRc>::Function(
             super::ValueFunction {
                 id: 1,
-                function: Box::new(static_f1),
+                function: super::Rc::new(static_f1),
             },
         ));
         let v12 = super::Rc::new(super::Value::<super::ValueTypesRc>::Function(
             super::ValueFunction {
                 id: 1,
-                function: Box::new(static_f2),
+                function: super::Rc::new(static_f2),
             },
         ));
         let v21 = super::Rc::new(super::Value::<super::ValueTypesRc>::Function(
             super::ValueFunction {
                 id: 2,
-                function: Box::new(static_f1),
+                function: super::Rc::new(static_f1),
             },
         ));
         let v22 = super::Rc::new(super::Value::<super::ValueTypesRc>::Function(
             super::ValueFunction {
                 id: 2,
-                function: Box::new(static_f2),
+                function: super::Rc::new(static_f2),
             },
         ));
         assert_eq!(v11, v11);
@@ -734,7 +795,7 @@ mod tests {
     }
 
     #[test]
-    fn test_try_into_value_type() {
+    fn test_try_into_value_type_ref() {
         use super::*;
         use std::convert::TryInto;
 
@@ -794,13 +855,86 @@ mod tests {
 
         let v = Value::<ValueTypesRc>::Function(ValueFunction::<ValueTypesRc> {
             id: 1,
-            function: Box::new(static_f1),
+            function: Rc::new(static_f1),
         });
         assert_eq!(
             TryInto::<&ValueFunction<ValueTypesRc>>::try_into(&v).unwrap(),
             &ValueFunction::<ValueTypesRc> {
                 id: 1,
-                function: Box::new(static_f1)
+                function: Rc::new(static_f1)
+            }
+        );
+        assert_eq!(
+            TryInto::<()>::try_into(&v).unwrap_err().kind,
+            ErrorKind::IncorrectType
+        );
+    }
+
+    #[test]
+    fn test_try_into_value_type() {
+        use super::*;
+        use std::convert::TryInto;
+
+        let v = nil!();
+        assert_eq!(TryInto::<()>::try_into(v).unwrap(), ());
+        assert_eq!(
+            TryInto::<ValueString<<ValueTypesStatic as ValueTypes>::StringRef>>::try_into(v)
+                .unwrap_err()
+                .kind,
+            ErrorKind::IncorrectType
+        );
+
+        let v = sym!("sym");
+        assert_eq!(
+            TryInto::<ValueSymbol<<ValueTypesStatic as ValueTypes>::StringRef>>::try_into(v)
+                .unwrap(),
+            ValueSymbol("sym")
+        );
+        assert_eq!(
+            TryInto::<()>::try_into(v).unwrap_err().kind,
+            ErrorKind::IncorrectType
+        );
+
+        let v = cons!(nil!(), nil!());
+        assert_eq!(
+            TryInto::<ValueCons<ValueTypesStatic>>::try_into(v).unwrap(),
+            ValueCons::<ValueTypesStatic> {
+                car: nil!(),
+                cdr: nil!()
+            }
+        );
+        assert_eq!(
+            TryInto::<()>::try_into(v).unwrap_err().kind,
+            ErrorKind::IncorrectType
+        );
+
+        let v = bool!(true);
+        assert_eq!(TryInto::<ValueBool>::try_into(v).unwrap(), ValueBool(true));
+        assert_eq!(
+            TryInto::<()>::try_into(v).unwrap_err().kind,
+            ErrorKind::IncorrectType
+        );
+
+        let v = str!("str");
+        assert_eq!(
+            TryInto::<ValueString<<ValueTypesStatic as ValueTypes>::StringRef>>::try_into(v)
+                .unwrap(),
+            ValueString("str")
+        );
+        assert_eq!(
+            TryInto::<()>::try_into(v).unwrap_err().kind,
+            ErrorKind::IncorrectType
+        );
+
+        let v = Value::<ValueTypesRc>::Function(ValueFunction::<ValueTypesRc> {
+            id: 1,
+            function: Rc::new(static_f1),
+        });
+        assert_eq!(
+            TryInto::<ValueFunction<ValueTypesRc>>::try_into(&v).unwrap(),
+            ValueFunction::<ValueTypesRc> {
+                id: 1,
+                function: Rc::new(static_f1)
             }
         );
         assert_eq!(
@@ -834,14 +968,14 @@ mod tests {
 
         let v: Value<ValueTypesRc> = ValueFunction::<ValueTypesRc> {
             id: 1,
-            function: Box::new(static_f1),
+            function: Rc::new(static_f1),
         }
         .into();
         assert_eq!(
             v,
             Value::<ValueTypesRc>::Function(ValueFunction {
                 id: 1,
-                function: Box::new(static_f1)
+                function: Rc::new(static_f1)
             })
         );
     }
@@ -936,7 +1070,7 @@ mod tests {
                 name: "concat",
                 value: Rc::new(Value::Function(ValueFunction {
                     id: 1,
-                    function: Box::new(concat),
+                    function: Rc::new(concat),
                 })),
             }),
         ];
