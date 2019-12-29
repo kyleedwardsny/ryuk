@@ -283,15 +283,15 @@ where
 }
 
 macro_rules! try_from_value {
-    ($t:ident, $out:ty, ($($ct:ty: $constraint:path),*), $match:pat => $result:expr) => {
-        impl<$t> TryFrom<&Value<$t>> for $out
+    ($l:lifetime, $t:ident, $out:ty, ($($ct:ty: $constraint:path),*), $match:pat => $result:expr) => {
+        impl<$l, $t> TryFrom<&$l Value<$t>> for $out
         where
             $t: ValueTypes + ?Sized,
             $($ct: $constraint),*
         {
             type Error = Error;
 
-            fn try_from(v: &Value<$t>) -> Result<Self> {
+            fn try_from(v: &$l Value<$t>) -> Result<Self> {
                 match v {
                     $match => Result::Ok($result),
                     _ => Result::Err(Error::new(ErrorKind::IncorrectType, "Incorrect type")),
@@ -299,23 +299,15 @@ macro_rules! try_from_value {
             }
         }
     };
+
+    ($t:ident, $out:ty, ($($ct:ty: $constraint:path),*), $match:pat => $result:expr) => {
+        try_from_value!('a, $t, $out, ($($ct: $constraint),*), $match => $result);
+    }
 }
 
 macro_rules! try_from_value_ref {
     ($t:ident, $out:ty, $match:pat => $result:expr) => {
-        impl<'a, $t> TryFrom<&'a Value<$t>> for &'a $out
-        where
-            $t: ValueTypes + ?Sized,
-        {
-            type Error = Error;
-
-            fn try_from(v: &'a Value<$t>) -> Result<Self> {
-                match v {
-                    $match => Result::Ok($result),
-                    _ => Result::Err(Error::new(ErrorKind::IncorrectType, "Incorrect type")),
-                }
-            }
-        }
+        try_from_value!('a, $t, &'a $out, (), $match => $result);
     };
 }
 
