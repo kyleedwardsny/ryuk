@@ -449,13 +449,13 @@ where
     }
 }
 
-pub fn map_evaluate<'a, T, R>(
+pub fn map_evaluate<'a, T, V>(
     env: &'a mut (dyn Environment<T> + 'static),
-) -> (impl FnMut(Result<R>) -> Result<T::ValueRef> + 'a)
+) -> (impl FnMut(Result<V>) -> Result<T::ValueRef> + 'a)
 where
     T: ValueTypes + ?Sized,
     T::ValueRef: Clone,
-    R: Into<T::ValueRef>,
+    V: Into<T::ValueRef>,
 {
     move |v| env.evaluate(v?.into())
 }
