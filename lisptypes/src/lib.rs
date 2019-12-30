@@ -826,15 +826,18 @@ macro_rules! str {
 }
 
 #[macro_export]
-macro_rules! v {
+macro_rules! vref {
     ($v:expr) => {{
         const V: &$crate::Value<$crate::ValueTypesStatic> =
             &$crate::Value::Version($crate::ValueVersion($v as &[u64]));
         V
     }};
+}
 
+#[macro_export]
+macro_rules! v {
     [$($c:expr),*] => {
-        v!(&[$($c as u64),*])
+        vref!(&[$($c as u64),*])
     };
 }
 
@@ -913,16 +916,25 @@ mod tests {
     }
 
     #[test]
-    fn test_v_macro() {
-        const V1: &super::Value<super::ValueTypesStatic> = v!(&[1u64, 0u64]);
+    fn test_vref_macro() {
+        const V1: &super::Value<super::ValueTypesStatic> = vref!(&[1u64, 0u64]);
         match &*V1 {
             super::Value::Version(v) => assert_eq!(v.0, &[1, 0]),
             _ => panic!("Expected a Value::Version"),
         }
+    }
 
-        const V2: &super::Value<super::ValueTypesStatic> = v![2, 1];
-        match &*V2 {
+    #[test]
+    fn test_v_macro() {
+        const V1: &super::Value<super::ValueTypesStatic> = v![2, 1];
+        match &*V1 {
             super::Value::Version(v) => assert_eq!(v.0, &[2, 1]),
+            _ => panic!("Expected a Value::Version"),
+        }
+
+        const V2: &super::Value<super::ValueTypesStatic> = v![3];
+        match &*V2 {
+            super::Value::Version(v) => assert_eq!(v.0, &[3]),
             _ => panic!("Expected a Value::Version"),
         }
     }
