@@ -319,7 +319,8 @@ where
         } else if is_token_char(*c) {
             match read_token(peekable)? {
                 ReadTokenResult::ValidToken(t) => Result::Ok(ReadImplResult::Value(
-                    Value::Symbol(ValueSymbol(t.to_lowercase().into())).into(),
+                    Value::UnqualifiedSymbol(ValueUnqualifiedSymbol(t.to_lowercase().into()))
+                        .into(),
                 )),
                 ReadTokenResult::InvalidToken(t) => Result::Ok(ReadImplResult::InvalidToken(t)),
             }
@@ -339,13 +340,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_read_symbol() {
-        let s = "sym SYM2\nSym3  \n   sym4";
+    fn test_read_unqualified_symbol() {
+        let s = "uqsym1 UQSYM2\nUqSym3  \n   uqsym4";
         let mut i = LispParser::<ValueTypesRc, _>::new(s.chars().peekable());
-        assert_eq!(*i.next().unwrap().unwrap(), *sym!("sym"));
-        assert_eq!(*i.next().unwrap().unwrap(), *sym!("sym2"));
-        assert_eq!(*i.next().unwrap().unwrap(), *sym!("sym3"));
-        assert_eq!(*i.next().unwrap().unwrap(), *sym!("sym4"));
+        assert_eq!(*i.next().unwrap().unwrap(), *uqsym!("uqsym1"));
+        assert_eq!(*i.next().unwrap().unwrap(), *uqsym!("uqsym2"));
+        assert_eq!(*i.next().unwrap().unwrap(), *uqsym!("uqsym3"));
+        assert_eq!(*i.next().unwrap().unwrap(), *uqsym!("uqsym4"));
         assert!(i.next().is_none());
     }
 
@@ -398,15 +399,15 @@ mod tests {
         let mut i = LispParser::<ValueTypesRc, _>::new(s.chars().peekable());
         assert_eq!(
             *i.next().unwrap().unwrap(),
-            *list!(sym!("s1"), sym!("s2"), sym!("s3"))
+            *list!(uqsym!("s1"), uqsym!("s2"), uqsym!("s3"))
         );
         assert_eq!(
             *i.next().unwrap().unwrap(),
-            *list!(sym!("s4"), sym!("s5"), sym!("s6"))
+            *list!(uqsym!("s4"), uqsym!("s5"), uqsym!("s6"))
         );
         assert_eq!(
             *i.next().unwrap().unwrap(),
-            *list!(sym!("s7"), nil!(), str!("s8"))
+            *list!(uqsym!("s7"), nil!(), str!("s8"))
         );
         assert_eq!(
             *i.next().unwrap().unwrap(),

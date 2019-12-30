@@ -14,7 +14,7 @@ pub enum ErrorKind {
     IncorrectType,
     ValueNotDefined,
     NotAFunction,
-    NoPackageForValue,
+    NoPackageForSymbol,
 }
 
 impl Error {
@@ -54,13 +54,40 @@ where
 {
     fn as_dyn_mut(&mut self) -> &mut (dyn Environment<T> + 'static);
 
-    fn get_value(&self, s: &ValueSymbol<T::StringRef>) -> Result<T::ValueRef>;
+    fn resolve_symbol(
+        &self,
+        s: &ValueUnqualifiedSymbol<T::StringRef>,
+    ) -> Result<ValueQualifiedSymbol<T::StringRef>>;
 
-    fn set_value(&mut self, s: &ValueSymbol<T::StringRef>, v: T::ValueRef) -> Result<()>;
+    fn get_value_unqualified(
+        &self,
+        s: &ValueUnqualifiedSymbol<T::StringRef>,
+    ) -> Result<T::ValueRef> {
+        let s = self.resolve_symbol(s)?;
+        self.get_value_qualified(&s)
+    }
+
+    fn get_value_qualified(&self, s: &ValueQualifiedSymbol<T::StringRef>) -> Result<T::ValueRef>;
+
+    fn set_value_unqualified(
+        &mut self,
+        s: &ValueUnqualifiedSymbol<T::StringRef>,
+        v: T::ValueRef,
+    ) -> Result<()> {
+        let s = self.resolve_symbol(s)?;
+        self.set_value_qualified(&s, v)
+    }
+
+    fn set_value_qualified(
+        &mut self,
+        s: &ValueQualifiedSymbol<T::StringRef>,
+        v: T::ValueRef,
+    ) -> Result<()>;
 
     fn evaluate(&mut self, v: T::ValueRef) -> Result<T::ValueRef> {
         match v.borrow() {
-            Value::Symbol(s) => self.get_value(s),
+            Value::UnqualifiedSymbol(s) => self.get_value_unqualified(s),
+            Value::QualifiedSymbol(s) => self.get_value_qualified(s),
             Value::Cons(c) => self.call_function(c),
             _ => Result::Ok(v),
         }
@@ -108,12 +135,34 @@ where
         self as &mut dyn Environment<T::ValueTypes>
     }
 
-    fn get_value(
+    fn resolve_symbol(
         &self,
-        s: &ValueSymbol<<<T as LayeredEnvironmentTypes>::ValueTypes as ValueTypes>::StringRef>,
+        s: &ValueUnqualifiedSymbol<
+            <<T as LayeredEnvironmentTypes>::ValueTypes as ValueTypes>::StringRef,
+        >,
+    ) -> Result<
+        ValueQualifiedSymbol<<<T as LayeredEnvironmentTypes>::ValueTypes as ValueTypes>::StringRef>,
+    > {
+        for layer in &self.layers {
+            if let Option::Some(result) = layer.borrow().resolve_symbol(s) {
+                return Result::Ok(result);
+            }
+        }
+
+        Result::Err(Error::new(
+            ErrorKind::NoPackageForSymbol,
+            "No package for symbol",
+        ))
+    }
+
+    fn get_value_qualified(
+        &self,
+        s: &ValueQualifiedSymbol<
+            <<T as LayeredEnvironmentTypes>::ValueTypes as ValueTypes>::StringRef,
+        >,
     ) -> Result<<<T as LayeredEnvironmentTypes>::ValueTypes as ValueTypes>::ValueRef> {
         for layer in &self.layers {
-            if let Option::Some(result) = layer.borrow().get_value(&s) {
+            if let Option::Some(result) = layer.borrow().get_value_qualified(s) {
                 return Result::Ok(result);
             }
         }
@@ -121,20 +170,22 @@ where
         Result::Err(Error::new(ErrorKind::ValueNotDefined, "Value not defined"))
     }
 
-    fn set_value(
+    fn set_value_qualified(
         &mut self,
-        s: &ValueSymbol<<<T as LayeredEnvironmentTypes>::ValueTypes as ValueTypes>::StringRef>,
+        s: &ValueQualifiedSymbol<
+            <<T as LayeredEnvironmentTypes>::ValueTypes as ValueTypes>::StringRef,
+        >,
         v: <<T as LayeredEnvironmentTypes>::ValueTypes as ValueTypes>::ValueRef,
     ) -> Result<()> {
         for layer in &mut self.layers {
-            if layer.borrow_mut().set_value(s, v.clone())? {
+            if layer.borrow_mut().set_value_qualified(s, v.clone())? {
                 return Result::Ok(());
             }
         }
 
         Result::Err(Error::new(
-            ErrorKind::NoPackageForValue,
-            "No package for value",
+            ErrorKind::NoPackageForSymbol,
+            "No package for symbol",
         ))
     }
 }
@@ -143,37 +194,83 @@ pub trait EnvironmentLayer<T>
 where
     T: LayeredEnvironmentTypes + ?Sized,
 {
-    fn get_value(
+    fn resolve_symbol(
         &self,
-        s: &ValueSymbol<<<T as LayeredEnvironmentTypes>::ValueTypes as ValueTypes>::StringRef>,
+        s: &ValueUnqualifiedSymbol<
+            <<T as LayeredEnvironmentTypes>::ValueTypes as ValueTypes>::StringRef,
+        >,
+    ) -> Option<
+        ValueQualifiedSymbol<<<T as LayeredEnvironmentTypes>::ValueTypes as ValueTypes>::StringRef>,
+    >;
+
+    fn get_value_qualified(
+        &self,
+        s: &ValueQualifiedSymbol<
+            <<T as LayeredEnvironmentTypes>::ValueTypes as ValueTypes>::StringRef,
+        >,
     ) -> Option<<<T as LayeredEnvironmentTypes>::ValueTypes as ValueTypes>::ValueRef>;
 
-    fn set_value(
+    fn set_value_qualified(
         &mut self,
-        s: &ValueSymbol<<<T as LayeredEnvironmentTypes>::ValueTypes as ValueTypes>::StringRef>,
+        s: &ValueQualifiedSymbol<
+            <<T as LayeredEnvironmentTypes>::ValueTypes as ValueTypes>::StringRef,
+        >,
         v: <<T as LayeredEnvironmentTypes>::ValueTypes as ValueTypes>::ValueRef,
     ) -> Result<bool>;
 }
 
 #[derive(Debug)]
-pub struct ValueSymbol<S: Borrow<str>>(pub S);
+pub struct ValueUnqualifiedSymbol<S>(pub S)
+where
+    S: Borrow<str>;
 
-impl<S> Clone for ValueSymbol<S>
+impl<S> Clone for ValueUnqualifiedSymbol<S>
 where
     S: Borrow<str> + Clone,
 {
     fn clone(&self) -> Self {
-        ValueSymbol(self.0.clone())
+        ValueUnqualifiedSymbol(self.0.clone())
     }
 }
 
-impl<S1, S2> PartialEq<ValueSymbol<S2>> for ValueSymbol<S1>
+impl<S1, S2> PartialEq<ValueUnqualifiedSymbol<S2>> for ValueUnqualifiedSymbol<S1>
 where
     S1: Borrow<str>,
     S2: Borrow<str>,
 {
-    fn eq(&self, rhs: &ValueSymbol<S2>) -> bool {
+    fn eq(&self, rhs: &ValueUnqualifiedSymbol<S2>) -> bool {
         self.0.borrow() == rhs.0.borrow()
+    }
+}
+
+#[derive(Debug)]
+pub struct ValueQualifiedSymbol<S>
+where
+    S: Borrow<str>,
+{
+    pub package: S,
+    pub name: S,
+}
+
+impl<S> Clone for ValueQualifiedSymbol<S>
+where
+    S: Borrow<str> + Clone,
+{
+    fn clone(&self) -> Self {
+        ValueQualifiedSymbol {
+            package: self.package.clone(),
+            name: self.name.clone(),
+        }
+    }
+}
+
+impl<S1, S2> PartialEq<ValueQualifiedSymbol<S2>> for ValueQualifiedSymbol<S1>
+where
+    S1: Borrow<str>,
+    S2: Borrow<str>,
+{
+    fn eq(&self, rhs: &ValueQualifiedSymbol<S2>) -> bool {
+        self.package.borrow() == rhs.package.borrow() && self.name.borrow() == rhs.name.borrow()
     }
 }
 
@@ -288,7 +385,8 @@ where
     T: ValueTypes + ?Sized,
 {
     Nil,
-    Symbol(ValueSymbol<T::StringRef>),
+    UnqualifiedSymbol(ValueUnqualifiedSymbol<T::StringRef>),
+    QualifiedSymbol(ValueQualifiedSymbol<T::StringRef>),
     Cons(ValueCons<T>),
     Bool(ValueBool),
     String(ValueString<T::StringRef>),
@@ -325,8 +423,10 @@ macro_rules! try_from_value_ref {
 }
 
 try_from_value!(T, (), (), Value::Nil => ());
-try_from_value!(T, ValueSymbol<T::StringRef>, (ValueSymbol<T::StringRef>: Clone), Value::Symbol(s) => (*s).clone());
-try_from_value_ref!(T, ValueSymbol<T::StringRef>, Value::Symbol(s) => s);
+try_from_value!(T, ValueUnqualifiedSymbol<T::StringRef>, (ValueUnqualifiedSymbol<T::StringRef>: Clone), Value::UnqualifiedSymbol(s) => (*s).clone());
+try_from_value_ref!(T, ValueUnqualifiedSymbol<T::StringRef>, Value::UnqualifiedSymbol(s) => s);
+try_from_value!(T, ValueQualifiedSymbol<T::StringRef>, (ValueQualifiedSymbol<T::StringRef>: Clone), Value::QualifiedSymbol(s) => (*s).clone());
+try_from_value_ref!(T, ValueQualifiedSymbol<T::StringRef>, Value::QualifiedSymbol(s) => s);
 try_from_value!(T, ValueCons<T>, (ValueCons<T>: Clone), Value::Cons(c) => (*c).clone());
 try_from_value_ref!(T, ValueCons<T>, Value::Cons(c) => c);
 try_from_value!(T, ValueBool, (), Value::Bool(b) => (*b).clone());
@@ -350,7 +450,8 @@ macro_rules! from_value_type {
 }
 
 from_value_type!(T, (), _n -> Value::Nil);
-from_value_type!(T, ValueSymbol<T::StringRef>, s -> Value::Symbol(s));
+from_value_type!(T, ValueUnqualifiedSymbol<T::StringRef>, s -> Value::UnqualifiedSymbol(s));
+from_value_type!(T, ValueQualifiedSymbol<T::StringRef>, s -> Value::QualifiedSymbol(s));
 from_value_type!(T, ValueCons<T>, c -> Value::Cons(c));
 from_value_type!(T, ValueBool, b -> Value::Bool(b));
 from_value_type!(T, ValueString<T::StringRef>, s -> Value::String(s));
@@ -375,7 +476,8 @@ where
     fn eq(&self, rhs: &Value<T2>) -> bool {
         eq_match!(self, rhs, {
             (Value::Nil, Value::Nil) => true,
-            (Value::Symbol(s1), Value::Symbol(s2)) => s1 == s2,
+            (Value::UnqualifiedSymbol(s1), Value::UnqualifiedSymbol(s2)) => s1 == s2,
+            (Value::QualifiedSymbol(s1), Value::QualifiedSymbol(s2)) => s1 == s2,
             (Value::Cons(c1), Value::Cons(c2)) => c1 == c2,
             (Value::Bool(b1), Value::Bool(b2)) => b1 == b2,
             (Value::String(s1), Value::String(s2)) => s1 == s2,
@@ -394,7 +496,15 @@ where
     fn from(v: &Value<T1>) -> Self {
         match v.borrow() {
             Value::Nil => Value::Nil,
-            Value::Symbol(ValueSymbol(s)) => Value::Symbol(ValueSymbol((*s).clone().into())),
+            Value::UnqualifiedSymbol(ValueUnqualifiedSymbol(s)) => {
+                Value::UnqualifiedSymbol(ValueUnqualifiedSymbol((*s).clone().into()))
+            }
+            Value::QualifiedSymbol(ValueQualifiedSymbol { name, package }) => {
+                Value::QualifiedSymbol(ValueQualifiedSymbol {
+                    name: (*name).clone().into(),
+                    package: (*package).clone().into(),
+                })
+            }
             Value::Cons(ValueCons { car, cdr }) => Value::Cons(ValueCons {
                 car: Into::<Value<T2>>::into(car.borrow()).into(),
                 cdr: Into::<Value<T2>>::into(cdr.borrow()).into(),
@@ -514,10 +624,22 @@ macro_rules! nil {
 }
 
 #[macro_export]
-macro_rules! sym {
+macro_rules! uqsym {
     ($name:expr) => {{
         const S: &$crate::Value<$crate::ValueTypesStatic> =
-            &$crate::Value::Symbol($crate::ValueSymbol($name));
+            &$crate::Value::UnqualifiedSymbol($crate::ValueUnqualifiedSymbol($name));
+        S
+    }};
+}
+
+#[macro_export]
+macro_rules! qsym {
+    ($package:expr, $name:expr) => {{
+        const S: &$crate::Value<$crate::ValueTypesStatic> =
+            &$crate::Value::QualifiedSymbol($crate::ValueQualifiedSymbol {
+                package: $package,
+                name: $name,
+            });
         S
     }};
 }
@@ -568,22 +690,34 @@ mod tests {
     }
 
     #[test]
-    fn test_sym_macro() {
-        const SYM: &super::Value<super::ValueTypesStatic> = sym!("sym");
-        match &*SYM {
-            super::Value::Symbol(s) => assert_eq!(s.0, "sym"),
+    fn test_uqsym_macro() {
+        const UQSYM: &super::Value<super::ValueTypesStatic> = uqsym!("uqsym");
+        match &*UQSYM {
+            super::Value::UnqualifiedSymbol(s) => assert_eq!(s.0, "uqsym"),
             _ => panic!("Expected a Value::Symbol"),
         }
     }
 
     #[test]
+    fn test_qsym_macro() {
+        const UQSYM: &super::Value<super::ValueTypesStatic> = qsym!("package", "qsym");
+        match &*UQSYM {
+            super::Value::QualifiedSymbol(s) => {
+                assert_eq!(s.package, "package");
+                assert_eq!(s.name, "qsym");
+            }
+            _ => panic!("Expected a Value::UnqualifiedSymbol"),
+        }
+    }
+
+    #[test]
     fn test_cons_macro() {
-        const CONS: &super::Value<super::ValueTypesStatic> = cons!(sym!("sym"), nil!());
+        const CONS: &super::Value<super::ValueTypesStatic> = cons!(uqsym!("uqsym"), nil!());
         match &*CONS {
             super::Value::Cons(c) => {
                 match &*c.car {
-                    super::Value::Symbol(s) => assert_eq!(s.0, "sym"),
-                    _ => panic!("Expected a Value::Symbol"),
+                    super::Value::UnqualifiedSymbol(s) => assert_eq!(s.0, "uqsym"),
+                    _ => panic!("Expected a Value::UnqualifiedSymbol"),
                 }
                 assert_eq!(*c.cdr, super::Value::<super::ValueTypesStatic>::Nil);
             }
@@ -593,13 +727,13 @@ mod tests {
 
     #[test]
     fn test_bool_macro() {
-        const B1: &super::Value<super::ValueTypesStatic> = bool!(true);
-        match &*B1 {
+        const BOOL1: &super::Value<super::ValueTypesStatic> = bool!(true);
+        match &*BOOL1 {
             super::Value::Bool(b) => assert_eq!(b.0, true),
             _ => panic!("Expected a Value::Bool"),
         }
-        const B2: &super::Value<super::ValueTypesStatic> = bool!(false);
-        match &*B2 {
+        const BOOL2: &super::Value<super::ValueTypesStatic> = bool!(false);
+        match &*BOOL2 {
             super::Value::Bool(b) => assert_eq!(b.0, false),
             _ => panic!("Expected a Value::Bool"),
         }
@@ -619,30 +753,31 @@ mod tests {
         const LIST1: &super::Value<super::ValueTypesStatic> = list!();
         assert_eq!(*LIST1, super::Value::<super::ValueTypesStatic>::Nil);
 
-        const LIST2: &super::Value<super::ValueTypesStatic> = list!(sym!("sym1"));
+        const LIST2: &super::Value<super::ValueTypesStatic> = list!(uqsym!("uqsym1"));
         match &*LIST2 {
             super::Value::Cons(c) => {
                 match &*c.car {
-                    super::Value::Symbol(s) => assert_eq!(s.0, "sym1"),
-                    _ => panic!("Expected a Value::Symbol"),
+                    super::Value::UnqualifiedSymbol(s) => assert_eq!(s.0, "uqsym1"),
+                    _ => panic!("Expected a Value::UnqualifiedSymbol"),
                 }
                 assert_eq!(*c.cdr, super::Value::<super::ValueTypesStatic>::Nil);
             }
             _ => panic!("Expected a Value::Cons"),
         }
 
-        const LIST3: &super::Value<super::ValueTypesStatic> = list!(sym!("sym1"), sym!("sym2"));
+        const LIST3: &super::Value<super::ValueTypesStatic> =
+            list!(uqsym!("uqsym1"), uqsym!("uqsym2"));
         match &*LIST3 {
             super::Value::Cons(c) => {
                 match &*c.car {
-                    super::Value::Symbol(s) => assert_eq!(s.0, "sym1"),
-                    _ => panic!("Expected a Value::Symbol"),
+                    super::Value::UnqualifiedSymbol(s) => assert_eq!(s.0, "uqsym1"),
+                    _ => panic!("Expected a Value::UnqualifiedSymbol"),
                 }
                 match &*c.cdr {
                     super::Value::Cons(c) => {
                         match &*c.car {
-                            super::Value::Symbol(s) => assert_eq!(s.0, "sym2"),
-                            _ => panic!("Expected a Value::Symbol"),
+                            super::Value::UnqualifiedSymbol(s) => assert_eq!(s.0, "uqsym2"),
+                            _ => panic!("Expected a Value::UnqualifiedSymbol"),
                         }
                         assert_eq!(*c.cdr, super::Value::<super::ValueTypesStatic>::Nil);
                     }
@@ -653,24 +788,24 @@ mod tests {
         }
 
         const LIST4: &super::Value<super::ValueTypesStatic> =
-            list!(sym!("sym1"), sym!("sym2"), sym!("sym3"));
+            list!(uqsym!("uqsym1"), uqsym!("uqsym2"), uqsym!("uqsym3"));
         match &*LIST4 {
             super::Value::Cons(c) => {
                 match &*c.car {
-                    super::Value::Symbol(s) => assert_eq!(s.0, "sym1"),
-                    _ => panic!("Expected a Value::Symbol"),
+                    super::Value::UnqualifiedSymbol(s) => assert_eq!(s.0, "uqsym1"),
+                    _ => panic!("Expected a Value::UnqualifiedSymbol"),
                 }
                 match &*c.cdr {
                     super::Value::Cons(c) => {
                         match &*c.car {
-                            super::Value::Symbol(s) => assert_eq!(s.0, "sym2"),
-                            _ => panic!("Expected a Value::Symbol"),
+                            super::Value::UnqualifiedSymbol(s) => assert_eq!(s.0, "uqsym2"),
+                            _ => panic!("Expected a Value::UnqualifiedSymbol"),
                         }
                         match &*c.cdr {
                             super::Value::Cons(c) => {
                                 match &*c.car {
-                                    super::Value::Symbol(s) => assert_eq!(s.0, "sym3"),
-                                    _ => panic!("Expected a Value::Symbol"),
+                                    super::Value::UnqualifiedSymbol(s) => assert_eq!(s.0, "uqsym3"),
+                                    _ => panic!("Expected a Value::UnqualifiedSymbol"),
                                 }
                                 assert_eq!(*c.cdr, super::Value::<super::ValueTypesStatic>::Nil);
                             }
@@ -703,26 +838,55 @@ mod tests {
     #[test]
     fn test_eq() {
         assert_eq!(nil!(), nil!());
-        assert_ne!(nil!(), sym!("sym"));
+        assert_ne!(nil!(), uqsym!("uqsym"));
 
-        assert_eq!(sym!("sym"), sym!("sym"));
+        assert_eq!(uqsym!("uqsym"), uqsym!("uqsym"));
         assert_eq!(
-            sym!("sym"),
-            &super::Value::<super::ValueTypesRc>::Symbol(super::ValueSymbol("sym".to_string()))
+            uqsym!("uqsym"),
+            &super::Value::<super::ValueTypesRc>::UnqualifiedSymbol(super::ValueUnqualifiedSymbol(
+                "uqsym".to_string()
+            ))
         );
-        assert_ne!(sym!("sym1"), sym!("sym2"));
+        assert_ne!(uqsym!("uqsym1"), uqsym!("uqsym2"));
         assert_ne!(
-            sym!("sym1"),
-            &super::Value::<super::ValueTypesRc>::Symbol(super::ValueSymbol("sym2".to_string()))
+            uqsym!("uqsym1"),
+            &super::Value::<super::ValueTypesRc>::UnqualifiedSymbol(super::ValueUnqualifiedSymbol(
+                "uqsym2".to_string()
+            ))
         );
-        assert_ne!(sym!("sym"), str!("sym"));
-        assert_ne!(sym!("sym"), nil!());
+        assert_ne!(uqsym!("uqsym"), str!("uqsym"));
+        assert_ne!(uqsym!("uqsym"), nil!());
 
-        assert_eq!(cons!(sym!("sym"), nil!()), cons!(sym!("sym"), nil!()));
-        assert_ne!(cons!(sym!("sym1"), nil!()), cons!(sym!("sym2"), nil!()));
-        assert_ne!(cons!(sym!("sym"), nil!()), cons!(nil!(), nil!()));
-        assert_ne!(cons!(sym!("sym"), nil!()), cons!(sym!("sym"), sym!("sym")));
-        assert_ne!(cons!(sym!("sym"), nil!()), nil!());
+        assert_eq!(qsym!("p", "qsym"), qsym!("p", "qsym"));
+        assert_eq!(
+            qsym!("p", "qsym"),
+            &super::Value::<super::ValueTypesRc>::QualifiedSymbol(super::ValueQualifiedSymbol {
+                package: "p".to_string(),
+                name: "qsym".to_string()
+            })
+        );
+        assert_ne!(qsym!("p1", "qsym"), qsym!("p2", "qsym"));
+        assert_ne!(qsym!("p", "qsym1"), qsym!("p", "qsym2"));
+        assert_ne!(qsym!("p", "qsym"), uqsym!("qsym"));
+        assert_ne!(qsym!("p", "qsym"), str!("p:qsym"));
+        assert_ne!(qsym!("p", "qsym"), str!("p"));
+        assert_ne!(qsym!("p", "qsym"), str!("qsym"));
+        assert_ne!(qsym!("p", "qsym"), nil!());
+
+        assert_eq!(
+            cons!(uqsym!("uqsym"), nil!()),
+            cons!(uqsym!("uqsym"), nil!())
+        );
+        assert_ne!(
+            cons!(uqsym!("uqsym1"), nil!()),
+            cons!(uqsym!("uqsym2"), nil!())
+        );
+        assert_ne!(cons!(uqsym!("uqsym"), nil!()), cons!(nil!(), nil!()));
+        assert_ne!(
+            cons!(uqsym!("uqsym"), nil!()),
+            cons!(uqsym!("uqsym"), uqsym!("uqsym"))
+        );
+        assert_ne!(cons!(uqsym!("uqsym"), nil!()), nil!());
 
         assert_eq!(bool!(true), bool!(true));
         assert_ne!(bool!(true), bool!(false));
@@ -738,7 +902,7 @@ mod tests {
             str!("str1"),
             &super::Value::<super::ValueTypesRc>::String(super::ValueString("str2".to_string()))
         );
-        assert_ne!(str!("str"), sym!("str"));
+        assert_ne!(str!("str"), uqsym!("str"));
         assert_ne!(str!("str"), nil!());
 
         let v11 = super::Rc::new(super::Value::<super::ValueTypesRc>::Procedure(
@@ -778,14 +942,14 @@ mod tests {
 
         let l: <ValueTypesRc as ValueTypes>::ValueRef =
             value_type_convert::<ValueTypesStatic, ValueTypesRc>(list!(
-                sym!("sym"),
+                uqsym!("uqsym"),
                 bool!(true),
                 str!("str")
             ));
         match l.borrow() {
             Value::Cons(c) => {
                 match c.car.borrow() {
-                    Value::Symbol(s) => assert_eq!(s.0, "sym"),
+                    Value::UnqualifiedSymbol(s) => assert_eq!(s.0, "uqsym"),
                     _ => panic!("Expected a Value::Symbol"),
                 }
                 match c.cdr.borrow() {
@@ -826,11 +990,22 @@ mod tests {
             ErrorKind::IncorrectType
         );
 
-        let v = sym!("sym");
+        let v = uqsym!("uqsym");
         assert_eq!(
-            TryInto::<&ValueSymbol<<ValueTypesStatic as ValueTypes>::StringRef>>::try_into(v)
+            TryInto::<&ValueUnqualifiedSymbol<<ValueTypesStatic as ValueTypes>::StringRef>>::try_into(v)
                 .unwrap(),
-            &ValueSymbol("sym")
+            &ValueUnqualifiedSymbol("uqsym")
+        );
+        assert_eq!(
+            TryInto::<()>::try_into(v).unwrap_err().kind,
+            ErrorKind::IncorrectType
+        );
+
+        let v = qsym!("p", "qsym");
+        assert_eq!(
+            TryInto::<&ValueQualifiedSymbol<<ValueTypesStatic as ValueTypes>::StringRef>>::try_into(v)
+                .unwrap(),
+            &ValueQualifiedSymbol { package: "p", name: "qsym" }
         );
         assert_eq!(
             TryInto::<()>::try_into(v).unwrap_err().kind,
@@ -902,11 +1077,27 @@ mod tests {
             ErrorKind::IncorrectType
         );
 
-        let v = sym!("sym");
+        let v = uqsym!("uqsym");
         assert_eq!(
-            TryInto::<ValueSymbol<<ValueTypesStatic as ValueTypes>::StringRef>>::try_into(v)
+            TryInto::<ValueUnqualifiedSymbol<<ValueTypesStatic as ValueTypes>::StringRef>>::try_into(v)
                 .unwrap(),
-            ValueSymbol("sym")
+            ValueUnqualifiedSymbol("uqsym")
+        );
+        assert_eq!(
+            TryInto::<()>::try_into(v).unwrap_err().kind,
+            ErrorKind::IncorrectType
+        );
+
+        let v = qsym!("p", "qsym");
+        assert_eq!(
+            TryInto::<ValueQualifiedSymbol<<ValueTypesStatic as ValueTypes>::StringRef>>::try_into(
+                v
+            )
+            .unwrap(),
+            ValueQualifiedSymbol {
+                package: "p",
+                name: "qsym"
+            }
         );
         assert_eq!(
             TryInto::<()>::try_into(v).unwrap_err().kind,
@@ -968,8 +1159,15 @@ mod tests {
         let v: Value<ValueTypesStatic> = ().into();
         assert_eq!(&v, nil!());
 
-        let v: Value<ValueTypesStatic> = ValueSymbol("sym").into();
-        assert_eq!(&v, sym!("sym"));
+        let v: Value<ValueTypesStatic> = ValueUnqualifiedSymbol("uqsym").into();
+        assert_eq!(&v, uqsym!("uqsym"));
+
+        let v: Value<ValueTypesStatic> = ValueQualifiedSymbol {
+            package: "p",
+            name: "qsym",
+        }
+        .into();
+        assert_eq!(&v, qsym!("p", "qsym"));
 
         let v: Value<ValueTypesStatic> = ValueCons {
             car: nil!(),
@@ -1002,52 +1200,105 @@ mod tests {
     fn test_lisp_list() {
         use super::*;
 
-        let mut i = LispList::<ValueTypesStatic>::new(list!(sym!("sym"), bool!(true), str!("str")));
-        assert_eq!(i.next().unwrap().unwrap(), sym!("sym"));
+        let mut i =
+            LispList::<ValueTypesStatic>::new(list!(uqsym!("uqsym"), bool!(true), str!("str")));
+        assert_eq!(i.next().unwrap().unwrap(), uqsym!("uqsym"));
         assert_eq!(i.next().unwrap().unwrap(), bool!(true));
         assert_eq!(i.next().unwrap().unwrap(), str!("str"));
         assert!(i.next().is_none());
 
-        let mut i = LispList::<ValueTypesStatic>::new(cons!(sym!("sym"), bool!(true)));
-        assert_eq!(i.next().unwrap().unwrap(), sym!("sym"));
+        let mut i = LispList::<ValueTypesStatic>::new(cons!(uqsym!("uqsym"), bool!(true)));
+        assert_eq!(i.next().unwrap().unwrap(), uqsym!("uqsym"));
         assert_eq!(
             i.next().unwrap().unwrap_err().kind,
             ErrorKind::IncorrectType
         );
 
-        let mut i = LispList::<ValueTypesStatic>::new(list!(sym!("sym"), bool!(true), str!("str")));
-        assert_eq!(i.next().unwrap().unwrap(), sym!("sym"));
+        let mut i =
+            LispList::<ValueTypesStatic>::new(list!(uqsym!("uqsym"), bool!(true), str!("str")));
+        assert_eq!(i.next().unwrap().unwrap(), uqsym!("uqsym"));
         assert_eq!(i.take(), list!(bool!(true), str!("str")));
     }
 
     struct SimpleLayer {
+        package: &'static str,
         name: &'static str,
         value: <super::ValueTypesRc as super::ValueTypes>::ValueRef,
     }
 
     impl super::EnvironmentLayer<super::LayeredEnvironmentTypesRc> for SimpleLayer {
-        fn get_value(
+        fn resolve_symbol(
             &self,
-            s: &super::ValueSymbol<String>,
-        ) -> Option<<super::ValueTypesRc as super::ValueTypes>::ValueRef> {
+            s: &super::ValueUnqualifiedSymbol<String>,
+        ) -> Option<super::ValueQualifiedSymbol<String>> {
             if s.0 == self.name {
+                Option::Some(super::ValueQualifiedSymbol {
+                    package: self.package.to_string(),
+                    name: s.0.clone(),
+                })
+            } else {
+                Option::None
+            }
+        }
+
+        fn get_value_qualified(
+            &self,
+            s: &super::ValueQualifiedSymbol<String>,
+        ) -> Option<<super::ValueTypesRc as super::ValueTypes>::ValueRef> {
+            if s.package == self.package && s.name == self.name {
                 Option::Some(self.value.clone())
             } else {
                 Option::None
             }
         }
 
-        fn set_value(
+        fn set_value_qualified(
             &mut self,
-            s: &super::ValueSymbol<String>,
+            s: &super::ValueQualifiedSymbol<String>,
             v: <super::ValueTypesRc as super::ValueTypes>::ValueRef,
         ) -> super::Result<bool> {
-            if s.0 == self.name {
+            if s.package == self.package && s.name == self.name {
                 self.value = v;
                 Result::Ok(true)
             } else {
                 Result::Ok(false)
             }
+        }
+    }
+
+    struct PackageOnlyLayer {
+        package: &'static str,
+        name: &'static str,
+    }
+
+    impl super::EnvironmentLayer<super::LayeredEnvironmentTypesRc> for PackageOnlyLayer {
+        fn resolve_symbol(
+            &self,
+            s: &super::ValueUnqualifiedSymbol<String>,
+        ) -> Option<super::ValueQualifiedSymbol<String>> {
+            if s.0 == self.name {
+                Option::Some(super::ValueQualifiedSymbol {
+                    package: self.package.to_string(),
+                    name: s.0.clone(),
+                })
+            } else {
+                Option::None
+            }
+        }
+
+        fn get_value_qualified(
+            &self,
+            _s: &super::ValueQualifiedSymbol<String>,
+        ) -> Option<<super::ValueTypesRc as super::ValueTypes>::ValueRef> {
+            Option::None
+        }
+
+        fn set_value_qualified(
+            &mut self,
+            _s: &super::ValueQualifiedSymbol<String>,
+            _v: <super::ValueTypesRc as super::ValueTypes>::ValueRef,
+        ) -> super::Result<bool> {
+            Result::Ok(false)
         }
     }
 
@@ -1073,43 +1324,61 @@ mod tests {
 
         let layers: Vec<Box<dyn EnvironmentLayer<LayeredEnvironmentTypesRc>>> = vec![
             Box::new(SimpleLayer {
+                package: "p1",
                 name: "a",
                 value: Rc::new(Value::String(ValueString("Hello".to_string()))),
             }),
             Box::new(SimpleLayer {
+                package: "p2",
                 name: "b",
-                value: Rc::new(Value::Symbol(ValueSymbol("sym".to_string()))),
+                value: Rc::new(Value::UnqualifiedSymbol(ValueUnqualifiedSymbol(
+                    "uqsym".to_string(),
+                ))),
             }),
             Box::new(SimpleLayer {
+                package: "p2",
                 name: "a",
                 value: Rc::new(Value::String(ValueString("world!".to_string()))),
             }),
             Box::new(SimpleLayer {
+                package: "p1",
                 name: "concat",
                 value: Rc::new(Value::Procedure(ValueProcedure {
                     id: 1,
                     proc: Rc::new(concat),
                 })),
             }),
+            Box::new(PackageOnlyLayer {
+                package: "p1",
+                name: "d",
+            }),
         ];
         LayeredEnvironment { layers }
     }
 
     #[test]
-    fn test_layered_environment_get_value() {
+    fn test_layered_environment_get_value_unqualified() {
         use super::*;
 
         let env = make_test_env();
         assert_eq!(
-            *env.get_value(&ValueSymbol("a".to_string())).unwrap(),
+            *env.get_value_unqualified(&ValueUnqualifiedSymbol("a".to_string()))
+                .unwrap(),
             *str!("Hello")
         );
         assert_eq!(
-            *env.get_value(&ValueSymbol("b".to_string())).unwrap(),
-            *sym!("sym")
+            *env.get_value_unqualified(&ValueUnqualifiedSymbol("b".to_string()))
+                .unwrap(),
+            *uqsym!("uqsym")
         );
         assert_eq!(
-            env.get_value(&ValueSymbol("c".to_string()))
+            env.get_value_unqualified(&ValueUnqualifiedSymbol("c".to_string()))
+                .unwrap_err()
+                .kind,
+            ErrorKind::NoPackageForSymbol
+        );
+        assert_eq!(
+            env.get_value_unqualified(&ValueUnqualifiedSymbol("d".to_string()))
                 .unwrap_err()
                 .kind,
             ErrorKind::ValueNotDefined
@@ -1117,103 +1386,188 @@ mod tests {
     }
 
     #[test]
-    fn test_layered_environment_set_value() {
+    fn test_layered_environment_get_value_qualified() {
+        use super::*;
+
+        let env = make_test_env();
+        assert_eq!(
+            *env.get_value_qualified(&ValueQualifiedSymbol {
+                package: "p1".to_string(),
+                name: "a".to_string()
+            })
+            .unwrap(),
+            *str!("Hello")
+        );
+        assert_eq!(
+            *env.get_value_qualified(&ValueQualifiedSymbol {
+                package: "p2".to_string(),
+                name: "a".to_string()
+            })
+            .unwrap(),
+            *str!("world!")
+        );
+        assert_eq!(
+            *env.get_value_qualified(&ValueQualifiedSymbol {
+                package: "p2".to_string(),
+                name: "b".to_string()
+            })
+            .unwrap(),
+            *uqsym!("uqsym")
+        );
+        assert_eq!(
+            env.get_value_qualified(&ValueQualifiedSymbol {
+                package: "p1".to_string(),
+                name: "c".to_string()
+            })
+            .unwrap_err()
+            .kind,
+            ErrorKind::ValueNotDefined
+        );
+    }
+
+    #[test]
+    fn test_layered_environment_set_value_qualified() {
         use super::*;
 
         let mut env = make_test_env();
         assert_eq!(
             *env.layers[0]
-                .get_value(&ValueSymbol("a".to_string()))
+                .get_value_qualified(&ValueQualifiedSymbol {
+                    package: "p1".to_string(),
+                    name: "a".to_string()
+                })
                 .unwrap(),
             *str!("Hello")
         );
         assert_eq!(
             *env.layers[1]
-                .get_value(&ValueSymbol("b".to_string()))
+                .get_value_qualified(&ValueQualifiedSymbol {
+                    package: "p2".to_string(),
+                    name: "b".to_string()
+                })
                 .unwrap(),
-            *sym!("sym")
+            *uqsym!("uqsym")
         );
         assert_eq!(
             *env.layers[2]
-                .get_value(&ValueSymbol("a".to_string()))
+                .get_value_qualified(&ValueQualifiedSymbol {
+                    package: "p2".to_string(),
+                    name: "a".to_string()
+                })
                 .unwrap(),
             *str!("world!")
         );
 
         assert!(env
-            .set_value(
-                &ValueSymbol("a".to_string()),
+            .set_value_qualified(
+                &ValueQualifiedSymbol {
+                    package: "p1".to_string(),
+                    name: "a".to_string()
+                },
                 Rc::new(Value::Bool(ValueBool(true)))
             )
             .is_ok());
         assert_eq!(
             *env.layers[0]
-                .get_value(&ValueSymbol("a".to_string()))
+                .get_value_qualified(&ValueQualifiedSymbol {
+                    package: "p1".to_string(),
+                    name: "a".to_string()
+                })
                 .unwrap(),
             *bool!(true)
         );
         assert_eq!(
             *env.layers[1]
-                .get_value(&ValueSymbol("b".to_string()))
+                .get_value_qualified(&ValueQualifiedSymbol {
+                    package: "p2".to_string(),
+                    name: "b".to_string()
+                })
                 .unwrap(),
-            *sym!("sym")
+            *uqsym!("uqsym")
         );
         assert_eq!(
             *env.layers[2]
-                .get_value(&ValueSymbol("a".to_string()))
+                .get_value_qualified(&ValueQualifiedSymbol {
+                    package: "p2".to_string(),
+                    name: "a".to_string()
+                })
                 .unwrap(),
             *str!("world!")
         );
 
         assert!(env
-            .set_value(
-                &ValueSymbol("b".to_string()),
+            .set_value_qualified(
+                &ValueQualifiedSymbol {
+                    package: "p2".to_string(),
+                    name: "b".to_string()
+                },
                 Rc::new(Value::Bool(ValueBool(false)))
             )
             .is_ok());
         assert_eq!(
             *env.layers[0]
-                .get_value(&ValueSymbol("a".to_string()))
+                .get_value_qualified(&ValueQualifiedSymbol {
+                    package: "p1".to_string(),
+                    name: "a".to_string()
+                })
                 .unwrap(),
             *bool!(true)
         );
         assert_eq!(
             *env.layers[1]
-                .get_value(&ValueSymbol("b".to_string()))
+                .get_value_qualified(&ValueQualifiedSymbol {
+                    package: "p2".to_string(),
+                    name: "b".to_string()
+                })
                 .unwrap(),
             *bool!(false)
         );
         assert_eq!(
             *env.layers[2]
-                .get_value(&ValueSymbol("a".to_string()))
+                .get_value_qualified(&ValueQualifiedSymbol {
+                    package: "p2".to_string(),
+                    name: "a".to_string()
+                })
                 .unwrap(),
             *str!("world!")
         );
 
         assert_eq!(
-            env.set_value(
-                &ValueSymbol("c".to_string()),
+            env.set_value_qualified(
+                &ValueQualifiedSymbol {
+                    package: "p1".to_string(),
+                    name: "c".to_string()
+                },
                 Rc::new(Value::Bool(ValueBool(true)))
             )
             .unwrap_err()
             .kind,
-            ErrorKind::NoPackageForValue
+            ErrorKind::NoPackageForSymbol
         );
         assert_eq!(
             *env.layers[0]
-                .get_value(&ValueSymbol("a".to_string()))
+                .get_value_qualified(&ValueQualifiedSymbol {
+                    package: "p1".to_string(),
+                    name: "a".to_string()
+                })
                 .unwrap(),
             *bool!(true)
         );
         assert_eq!(
             *env.layers[1]
-                .get_value(&ValueSymbol("b".to_string()))
+                .get_value_qualified(&ValueQualifiedSymbol {
+                    package: "p2".to_string(),
+                    name: "b".to_string()
+                })
                 .unwrap(),
             *bool!(false)
         );
         assert_eq!(
             *env.layers[2]
-                .get_value(&ValueSymbol("a".to_string()))
+                .get_value_qualified(&ValueQualifiedSymbol {
+                    package: "p2".to_string(),
+                    name: "a".to_string()
+                })
                 .unwrap(),
             *str!("world!")
         );
@@ -1224,16 +1578,27 @@ mod tests {
         use super::*;
 
         let mut env = make_test_env();
+
         let function_call = value_type_convert::<ValueTypesStatic, ValueTypesRc>(list!(
-            sym!("concat"),
-            sym!("a"),
-            str!(", world!")
+            uqsym!("concat"),
+            uqsym!("a"),
+            str!(", "),
+            qsym!("p2", "a")
         ));
         assert_eq!(
-            *(&mut env as &mut dyn Environment<ValueTypesRc>)
-                .evaluate(function_call)
-                .unwrap(),
+            *env.evaluate(function_call).unwrap(),
             *str!("Hello, world!")
+        );
+
+        let function_call = value_type_convert::<ValueTypesStatic, ValueTypesRc>(list!(
+            uqsym!("concat"),
+            uqsym!("a"),
+            str!(", "),
+            bool!(true)
+        ));
+        assert_eq!(
+            env.evaluate(function_call).unwrap_err().kind,
+            ErrorKind::IncorrectType
         );
     }
 }
