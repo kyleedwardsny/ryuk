@@ -52,18 +52,13 @@ where
     T: ValueTypes + ?Sized,
     T::ValueRef: Clone,
 {
+    fn as_dyn_mut(&mut self) -> &mut (dyn Environment<T> + 'static);
+
     fn get_value(&self, s: &ValueSymbol<T::StringRef>) -> Result<T::ValueRef>;
 
     fn set_value(&mut self, s: &ValueSymbol<T::StringRef>, v: T::ValueRef) -> Result<()>;
-}
 
-impl<T> dyn Environment<T>
-where
-    T: ValueTypes + ?Sized,
-    T::ValueRef: Clone,
-{
-    pub fn evaluate(&mut self, v: impl Into<T::ValueRef>) -> Result<T::ValueRef> {
-        let v = v.into();
+    fn evaluate(&mut self, v: T::ValueRef) -> Result<T::ValueRef> {
         match v.borrow() {
             Value::Symbol(s) => self.get_value(s),
             Value::Cons(c) => self.call_function(c),
@@ -71,18 +66,24 @@ where
         }
     }
 
+    fn call_function(&mut self, c: &ValueCons<T>) -> Result<T::ValueRef> {
+        match self.evaluate(c.car.clone())?.borrow() {
+            Value::Procedure(p) => p.proc.borrow()(self.as_dyn_mut(), c.cdr.clone()),
+            _ => Result::Err(Error::new(ErrorKind::NotAFunction, "Not a function")),
+        }
+    }
+}
+
+impl<T> dyn Environment<T>
+where
+    T: ValueTypes + ?Sized,
+    T::ValueRef: Clone,
+{
     pub fn map_evaluate<'a, V>(&'a mut self) -> (impl FnMut(Result<V>) -> Result<T::ValueRef> + 'a)
     where
         V: Into<T::ValueRef>,
     {
-        move |v| self.evaluate(v?)
-    }
-
-    fn call_function(&mut self, c: &ValueCons<T>) -> Result<T::ValueRef> {
-        match self.evaluate(c.car.clone())?.borrow() {
-            Value::Procedure(p) => p.proc.borrow()(self, c.cdr.clone()),
-            _ => Result::Err(Error::new(ErrorKind::NotAFunction, "Not a function")),
-        }
+        move |v| self.evaluate(v?.into())
     }
 }
 
@@ -100,9 +101,13 @@ where
 
 impl<T> Environment<T::ValueTypes> for LayeredEnvironment<T>
 where
-    T: LayeredEnvironmentTypes + ?Sized,
+    T: LayeredEnvironmentTypes + ?Sized + 'static,
     <<T as LayeredEnvironmentTypes>::ValueTypes as ValueTypes>::ValueRef: Clone,
 {
+    fn as_dyn_mut(&mut self) -> &mut (dyn Environment<T::ValueTypes> + 'static) {
+        self as &mut dyn Environment<T::ValueTypes>
+    }
+
     fn get_value(
         &self,
         s: &ValueSymbol<<<T as LayeredEnvironmentTypes>::ValueTypes as ValueTypes>::StringRef>,
