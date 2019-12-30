@@ -1426,6 +1426,145 @@ mod tests {
     }
 
     #[test]
+    fn test_layered_environment_set_value_unqualified() {
+        use super::*;
+
+        let mut env = make_test_env();
+        assert_eq!(
+            *env.layers[0]
+                .get_value_qualified(&ValueQualifiedSymbol {
+                    package: "p1".to_string(),
+                    name: "a".to_string()
+                })
+                .unwrap(),
+            *str!("Hello")
+        );
+        assert_eq!(
+            *env.layers[1]
+                .get_value_qualified(&ValueQualifiedSymbol {
+                    package: "p2".to_string(),
+                    name: "b".to_string()
+                })
+                .unwrap(),
+            *uqsym!("uqsym")
+        );
+        assert_eq!(
+            *env.layers[2]
+                .get_value_qualified(&ValueQualifiedSymbol {
+                    package: "p2".to_string(),
+                    name: "a".to_string()
+                })
+                .unwrap(),
+            *str!("world!")
+        );
+
+        assert!(env
+            .set_value_unqualified(
+                &ValueUnqualifiedSymbol("a".to_string()),
+                Rc::new(Value::Bool(ValueBool(true)))
+            )
+            .is_ok());
+        assert_eq!(
+            *env.layers[0]
+                .get_value_qualified(&ValueQualifiedSymbol {
+                    package: "p1".to_string(),
+                    name: "a".to_string()
+                })
+                .unwrap(),
+            *bool!(true)
+        );
+        assert_eq!(
+            *env.layers[1]
+                .get_value_qualified(&ValueQualifiedSymbol {
+                    package: "p2".to_string(),
+                    name: "b".to_string()
+                })
+                .unwrap(),
+            *uqsym!("uqsym")
+        );
+        assert_eq!(
+            *env.layers[2]
+                .get_value_qualified(&ValueQualifiedSymbol {
+                    package: "p2".to_string(),
+                    name: "a".to_string()
+                })
+                .unwrap(),
+            *str!("world!")
+        );
+
+        assert!(env
+            .set_value_unqualified(
+                &ValueUnqualifiedSymbol("b".to_string()),
+                Rc::new(Value::Bool(ValueBool(false)))
+            )
+            .is_ok());
+        assert_eq!(
+            *env.layers[0]
+                .get_value_qualified(&ValueQualifiedSymbol {
+                    package: "p1".to_string(),
+                    name: "a".to_string()
+                })
+                .unwrap(),
+            *bool!(true)
+        );
+        assert_eq!(
+            *env.layers[1]
+                .get_value_qualified(&ValueQualifiedSymbol {
+                    package: "p2".to_string(),
+                    name: "b".to_string()
+                })
+                .unwrap(),
+            *bool!(false)
+        );
+        assert_eq!(
+            *env.layers[2]
+                .get_value_qualified(&ValueQualifiedSymbol {
+                    package: "p2".to_string(),
+                    name: "a".to_string()
+                })
+                .unwrap(),
+            *str!("world!")
+        );
+
+        assert_eq!(
+            env.set_value_unqualified(
+                &ValueUnqualifiedSymbol("c".to_string()),
+                Rc::new(Value::Bool(ValueBool(true)))
+            )
+            .unwrap_err()
+            .kind,
+            ErrorKind::NoPackageForSymbol
+        );
+        assert_eq!(
+            *env.layers[0]
+                .get_value_qualified(&ValueQualifiedSymbol {
+                    package: "p1".to_string(),
+                    name: "a".to_string()
+                })
+                .unwrap(),
+            *bool!(true)
+        );
+        assert_eq!(
+            *env.layers[1]
+                .get_value_qualified(&ValueQualifiedSymbol {
+                    package: "p2".to_string(),
+                    name: "b".to_string()
+                })
+                .unwrap(),
+            *bool!(false)
+        );
+        assert_eq!(
+            *env.layers[2]
+                .get_value_qualified(&ValueQualifiedSymbol {
+                    package: "p2".to_string(),
+                    name: "a".to_string()
+                })
+                .unwrap(),
+            *str!("world!")
+        );
+    }
+
+    #[test]
     fn test_layered_environment_set_value_qualified() {
         use super::*;
 
@@ -1532,6 +1671,43 @@ mod tests {
             *str!("world!")
         );
 
+        assert!(env
+            .set_value_qualified(
+                &ValueQualifiedSymbol {
+                    package: "p2".to_string(),
+                    name: "a".to_string()
+                },
+                Rc::new(Value::Bool(ValueBool(true)))
+            )
+            .is_ok());
+        assert_eq!(
+            *env.layers[0]
+                .get_value_qualified(&ValueQualifiedSymbol {
+                    package: "p1".to_string(),
+                    name: "a".to_string()
+                })
+                .unwrap(),
+            *bool!(true)
+        );
+        assert_eq!(
+            *env.layers[1]
+                .get_value_qualified(&ValueQualifiedSymbol {
+                    package: "p2".to_string(),
+                    name: "b".to_string()
+                })
+                .unwrap(),
+            *bool!(false)
+        );
+        assert_eq!(
+            *env.layers[2]
+                .get_value_qualified(&ValueQualifiedSymbol {
+                    package: "p2".to_string(),
+                    name: "a".to_string()
+                })
+                .unwrap(),
+            *bool!(true)
+        );
+
         assert_eq!(
             env.set_value_qualified(
                 &ValueQualifiedSymbol {
@@ -1569,7 +1745,7 @@ mod tests {
                     name: "a".to_string()
                 })
                 .unwrap(),
-            *str!("world!")
+            *bool!(true)
         );
     }
 
