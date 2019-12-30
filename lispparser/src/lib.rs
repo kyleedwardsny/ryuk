@@ -79,10 +79,13 @@ impl<T, I> Iterator for LispParser<T, I>
 where
     T: ValueTypes + ?Sized,
     for<'a> &'a <T::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'a u64>,
+    for<'a> <T::VersionTypes as VersionTypes>::Version: Extend<&'a u64>,
     I: Iterator<Item = char>,
     Value<T>: Into<T::ValueRef>,
     String: Into<T::StringRef>,
     &'static str: Into<T::StringRef>,
+    <T::VersionTypes as VersionTypes>::VersionRef:
+        Default + BorrowMut<<T::VersionTypes as VersionTypes>::Version>,
 {
     type Item = Result<T::ValueRef>;
 
@@ -146,10 +149,13 @@ fn read_delimited<T, I>(
 where
     T: ValueTypes + ?Sized,
     for<'a> &'a <T::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'a u64>,
+    for<'a> <T::VersionTypes as VersionTypes>::Version: Extend<&'a u64>,
     I: Iterator<Item = char>,
     Value<T>: Into<T::ValueRef>,
     String: Into<T::StringRef>,
     &'static str: Into<T::StringRef>,
+    <T::VersionTypes as VersionTypes>::VersionRef:
+        Default + BorrowMut<<T::VersionTypes as VersionTypes>::Version>,
 {
     skip_whitespace(peekable)?;
     if let Option::Some(c) = peekable.peek() {
@@ -178,10 +184,13 @@ fn read_list<T, I>(peekable: &mut Peekable<I>, allow_dot: bool) -> Result<T::Val
 where
     T: ValueTypes + ?Sized,
     for<'a> &'a <T::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'a u64>,
+    for<'a> <T::VersionTypes as VersionTypes>::Version: Extend<&'a u64>,
     I: Iterator<Item = char>,
     Value<T>: Into<T::ValueRef>,
     String: Into<T::StringRef>,
     &'static str: Into<T::StringRef>,
+    <T::VersionTypes as VersionTypes>::VersionRef:
+        Default + BorrowMut<<T::VersionTypes as VersionTypes>::Version>,
 {
     match read_delimited(peekable, ')')? {
         ReadDelimitedResult::Value(v) => Result::Ok(
@@ -240,24 +249,40 @@ fn read_macro<T, I>(peekable: &mut Peekable<I>) -> Result<T::ValueRef>
 where
     T: ValueTypes + ?Sized,
     for<'a> &'a <T::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'a u64>,
+    for<'a> <T::VersionTypes as VersionTypes>::Version: Extend<&'a u64>,
     I: Iterator<Item = char>,
     Value<T>: Into<T::ValueRef>,
     String: Into<T::StringRef>,
+    <T::VersionTypes as VersionTypes>::VersionRef:
+        Default + BorrowMut<<T::VersionTypes as VersionTypes>::Version>,
 {
-    if let Option::Some(_) = peekable.peek() {
-        match read_token(peekable)? {
-            ReadTokenResult::ValidToken(t) => match &*t {
-                "t" => Result::Ok(Value::Bool(ValueBool(true)).into()),
-                "f" => Result::Ok(Value::Bool(ValueBool(false)).into()),
-                _ => Result::Err(Error::new(
+    if let Option::Some(&c) = peekable.peek() {
+        if c == 'v' {
+            peekable.next();
+            match read_token(peekable)? {
+                ReadTokenResult::ValidToken(t) => {
+                    Result::Ok(Value::Version(parse_version(&t)?).into())
+                }
+                ReadTokenResult::InvalidToken(t) => Result::Err(Error::new(
                     ErrorKind::InvalidToken,
-                    format!("Invalid macro: '{}'", t),
+                    format!("Invalid token: '{}'", t),
                 )),
-            },
-            ReadTokenResult::InvalidToken(t) => Result::Err(Error::new(
-                ErrorKind::InvalidToken,
-                format!("Invalid token: '{}'", t),
-            )),
+            }
+        } else {
+            match read_token(peekable)? {
+                ReadTokenResult::ValidToken(t) => match &*t {
+                    "t" => Result::Ok(Value::Bool(ValueBool(true)).into()),
+                    "f" => Result::Ok(Value::Bool(ValueBool(false)).into()),
+                    _ => Result::Err(Error::new(
+                        ErrorKind::InvalidToken,
+                        format!("Invalid macro: '{}'", t),
+                    )),
+                },
+                ReadTokenResult::InvalidToken(t) => Result::Err(Error::new(
+                    ErrorKind::InvalidToken,
+                    format!("Invalid token: '{}'", t),
+                )),
+            }
         }
     } else {
         Result::Err(Error::new(
@@ -313,10 +338,13 @@ fn read_impl<T, I>(peekable: &mut Peekable<I>) -> Result<ReadImplResult<T>>
 where
     T: ValueTypes + ?Sized,
     for<'a> &'a <T::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'a u64>,
+    for<'a> <T::VersionTypes as VersionTypes>::Version: Extend<&'a u64>,
     I: Iterator<Item = char>,
     Value<T>: Into<T::ValueRef>,
     String: Into<T::StringRef>,
     &'static str: Into<T::StringRef>,
+    <T::VersionTypes as VersionTypes>::VersionRef:
+        Default + BorrowMut<<T::VersionTypes as VersionTypes>::Version>,
 {
     skip_whitespace(peekable)?;
     if let Option::Some(&c) = peekable.peek() {
@@ -574,6 +602,24 @@ mod tests {
         assert_eq!(
             i.next().unwrap().unwrap_err().kind,
             crate::ErrorKind::EndOfFile
+        );
+        assert!(i.next().is_none());
+    }
+
+    #[test]
+    fn test_read_v() {
+        let s = "#v1.5  #v3\n#v2.5.4   #v3.05 #va.2";
+        let mut i = LispParser::<ValueTypesRc, _>::new(s.chars().peekable());
+        assert_eq!(*i.next().unwrap().unwrap(), *v![1, 5]);
+        assert_eq!(*i.next().unwrap().unwrap(), *v![3]);
+        assert_eq!(*i.next().unwrap().unwrap(), *v![2, 5, 4]);
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            crate::ErrorKind::InvalidVersionComponent
+        );
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            crate::ErrorKind::InvalidCharacter
         );
         assert!(i.next().is_none());
     }
