@@ -77,6 +77,7 @@ where
     I: Iterator<Item = char>,
     Value<T>: Into<T::ValueRef>,
     String: Into<T::StringRef>,
+    &'static str: Into<T::StringRef>,
 {
     type Item = Result<T::ValueRef>;
 
@@ -141,6 +142,7 @@ where
     I: Iterator<Item = char>,
     Value<T>: Into<T::ValueRef>,
     String: Into<T::StringRef>,
+    &'static str: Into<T::StringRef>,
 {
     skip_whitespace(peekable)?;
     if let Option::Some(c) = peekable.peek() {
@@ -171,6 +173,7 @@ where
     I: Iterator<Item = char>,
     Value<T>: Into<T::ValueRef>,
     String: Into<T::StringRef>,
+    &'static str: Into<T::StringRef>,
 {
     match read_delimited(peekable, ')')? {
         ReadDelimitedResult::Value(v) => Result::Ok(
@@ -302,6 +305,7 @@ where
     I: Iterator<Item = char>,
     Value<T>: Into<T::ValueRef>,
     String: Into<T::StringRef>,
+    &'static str: Into<T::StringRef>,
 {
     skip_whitespace(peekable)?;
     if let Option::Some(&c) = peekable.peek() {
@@ -316,6 +320,32 @@ where
             Result::Ok(ReadImplResult::Value(
                 Value::String(ValueString(read_string(peekable, '"')?.into())).into(),
             ))
+        } else if c == '\'' {
+            peekable.next();
+            match read_impl(peekable)? {
+                ReadImplResult::Value(v) => Result::Ok(ReadImplResult::Value(
+                    Value::Cons(ValueCons {
+                        car: Value::QualifiedSymbol(ValueQualifiedSymbol {
+                            package: "std".into(),
+                            name: "quote".into(),
+                        })
+                        .into(),
+                        cdr: Value::Cons(ValueCons {
+                            car: v,
+                            cdr: Value::Nil.into(),
+                        })
+                        .into(),
+                    })
+                    .into(),
+                )),
+                ReadImplResult::InvalidToken(t) => Result::Err(Error::new(
+                    ErrorKind::InvalidToken,
+                    format!("Invalid token: '{}'", t),
+                )),
+                ReadImplResult::EndOfFile => {
+                    Result::Err(Error::new(ErrorKind::EndOfFile, "End of file reached"))
+                }
+            }
         } else if is_token_char(c) {
             match read_token(peekable)? {
                 ReadTokenResult::ValidToken(t1) => match peekable.peek() {
@@ -438,8 +468,23 @@ mod tests {
     }
 
     #[test]
+    fn test_read_quote() {
+        let s = "'a '";
+        let mut i = LispParser::<ValueTypesRc, _>::new(s.chars().peekable());
+        assert_eq!(
+            *i.next().unwrap().unwrap(),
+            *list!(qsym!("std", "quote"), uqsym!("a"))
+        );
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            crate::ErrorKind::EndOfFile
+        );
+        assert!(i.next().is_none());
+    }
+
+    #[test]
     fn test_read_list() {
-        let s = "(s1 s2 p3:s3)(p4:s4\n p5:s5 s6 ) ( s7 () \"s8\") (#t . #f) ( s9 . s10 s11 ( . (a a:. (a";
+        let s = "(s1 s2 p3:s3)(p4:s4\n ' p5:s5 s6 ) ( s7 () \"s8\") (#t . #f) ( s9 . s10 s11 ( . (a a:. (a";
         let mut i = LispParser::<ValueTypesRc, _>::new(s.chars().peekable());
         assert_eq!(
             *i.next().unwrap().unwrap(),
@@ -447,7 +492,11 @@ mod tests {
         );
         assert_eq!(
             *i.next().unwrap().unwrap(),
-            *list!(qsym!("p4", "s4"), qsym!("p5", "s5"), uqsym!("s6"))
+            *list!(
+                qsym!("p4", "s4"),
+                list!(qsym!("std", "quote"), qsym!("p5", "s5")),
+                uqsym!("s6")
+            )
         );
         assert_eq!(
             *i.next().unwrap().unwrap(),
