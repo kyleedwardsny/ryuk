@@ -16,7 +16,7 @@ pub enum ErrorKind {
     IoError,
     InvalidToken,
     InvalidCharacter,
-    InvalidVersionComponent,
+    InvalidSemverComponent,
 }
 
 impl Error {
@@ -50,7 +50,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub struct LispParser<T, I>
 where
     T: ValueTypes + ?Sized,
-    for<'a> &'a <T::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'a u64>,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
     I: Iterator<Item = char>,
     Value<T>: Into<T::ValueRef>,
     String: Into<T::StringRef>,
@@ -62,7 +62,7 @@ where
 impl<T, I> LispParser<T, I>
 where
     T: ValueTypes + ?Sized,
-    for<'a> &'a <T::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'a u64>,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
     I: Iterator<Item = char>,
     Value<T>: Into<T::ValueRef>,
     String: Into<T::StringRef>,
@@ -78,14 +78,14 @@ where
 impl<T, I> Iterator for LispParser<T, I>
 where
     T: ValueTypes + ?Sized,
-    for<'a> &'a <T::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'a u64>,
-    for<'a> <T::VersionTypes as VersionTypes>::Version: Extend<&'a u64>,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+    for<'a> <T::SemverTypes as SemverTypes>::Semver: Extend<&'a u64>,
     I: Iterator<Item = char>,
     Value<T>: Into<T::ValueRef>,
     String: Into<T::StringRef>,
     &'static str: Into<T::StringRef>,
-    <T::VersionTypes as VersionTypes>::VersionRef:
-        Default + BorrowMut<<T::VersionTypes as VersionTypes>::Version>,
+    <T::SemverTypes as SemverTypes>::SemverRef:
+        Default + BorrowMut<<T::SemverTypes as SemverTypes>::Semver>,
 {
     type Item = Result<T::ValueRef>;
 
@@ -135,7 +135,7 @@ fn skip_whitespace<I: Iterator<Item = char>>(peekable: &mut Peekable<I>) -> Resu
 enum ReadDelimitedResult<T>
 where
     T: ValueTypes + ?Sized,
-    for<'a> &'a <T::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'a u64>,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
 {
     Value(T::ValueRef),
     InvalidToken(String),
@@ -148,14 +148,14 @@ fn read_delimited<T, I>(
 ) -> Result<ReadDelimitedResult<T>>
 where
     T: ValueTypes + ?Sized,
-    for<'a> &'a <T::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'a u64>,
-    for<'a> <T::VersionTypes as VersionTypes>::Version: Extend<&'a u64>,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+    for<'a> <T::SemverTypes as SemverTypes>::Semver: Extend<&'a u64>,
     I: Iterator<Item = char>,
     Value<T>: Into<T::ValueRef>,
     String: Into<T::StringRef>,
     &'static str: Into<T::StringRef>,
-    <T::VersionTypes as VersionTypes>::VersionRef:
-        Default + BorrowMut<<T::VersionTypes as VersionTypes>::Version>,
+    <T::SemverTypes as SemverTypes>::SemverRef:
+        Default + BorrowMut<<T::SemverTypes as SemverTypes>::Semver>,
 {
     skip_whitespace(peekable)?;
     if let Option::Some(c) = peekable.peek() {
@@ -183,14 +183,14 @@ where
 fn read_list<T, I>(peekable: &mut Peekable<I>, allow_dot: bool) -> Result<T::ValueRef>
 where
     T: ValueTypes + ?Sized,
-    for<'a> &'a <T::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'a u64>,
-    for<'a> <T::VersionTypes as VersionTypes>::Version: Extend<&'a u64>,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+    for<'a> <T::SemverTypes as SemverTypes>::Semver: Extend<&'a u64>,
     I: Iterator<Item = char>,
     Value<T>: Into<T::ValueRef>,
     String: Into<T::StringRef>,
     &'static str: Into<T::StringRef>,
-    <T::VersionTypes as VersionTypes>::VersionRef:
-        Default + BorrowMut<<T::VersionTypes as VersionTypes>::Version>,
+    <T::SemverTypes as SemverTypes>::SemverRef:
+        Default + BorrowMut<<T::SemverTypes as SemverTypes>::Semver>,
 {
     match read_delimited(peekable, ')')? {
         ReadDelimitedResult::Value(v) => Result::Ok(
@@ -248,20 +248,20 @@ where
 fn read_macro<T, I>(peekable: &mut Peekable<I>) -> Result<T::ValueRef>
 where
     T: ValueTypes + ?Sized,
-    for<'a> &'a <T::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'a u64>,
-    for<'a> <T::VersionTypes as VersionTypes>::Version: Extend<&'a u64>,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+    for<'a> <T::SemverTypes as SemverTypes>::Semver: Extend<&'a u64>,
     I: Iterator<Item = char>,
     Value<T>: Into<T::ValueRef>,
     String: Into<T::StringRef>,
-    <T::VersionTypes as VersionTypes>::VersionRef:
-        Default + BorrowMut<<T::VersionTypes as VersionTypes>::Version>,
+    <T::SemverTypes as SemverTypes>::SemverRef:
+        Default + BorrowMut<<T::SemverTypes as SemverTypes>::Semver>,
 {
     if let Option::Some(&c) = peekable.peek() {
         if c == 'v' {
             peekable.next();
             match read_token(peekable)? {
                 ReadTokenResult::ValidToken(t) => {
-                    Result::Ok(Value::Version(parse_version(&t)?).into())
+                    Result::Ok(Value::Semver(parse_semver(&t)?).into())
                 }
                 ReadTokenResult::InvalidToken(t) => Result::Err(Error::new(
                     ErrorKind::InvalidToken,
@@ -327,7 +327,7 @@ where
 enum ReadImplResult<T>
 where
     T: ValueTypes + ?Sized,
-    for<'a> &'a <T::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'a u64>,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
 {
     Value(T::ValueRef),
     InvalidToken(String),
@@ -337,14 +337,14 @@ where
 fn read_impl<T, I>(peekable: &mut Peekable<I>) -> Result<ReadImplResult<T>>
 where
     T: ValueTypes + ?Sized,
-    for<'a> &'a <T::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'a u64>,
-    for<'a> <T::VersionTypes as VersionTypes>::Version: Extend<&'a u64>,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+    for<'a> <T::SemverTypes as SemverTypes>::Semver: Extend<&'a u64>,
     I: Iterator<Item = char>,
     Value<T>: Into<T::ValueRef>,
     String: Into<T::StringRef>,
     &'static str: Into<T::StringRef>,
-    <T::VersionTypes as VersionTypes>::VersionRef:
-        Default + BorrowMut<<T::VersionTypes as VersionTypes>::Version>,
+    <T::SemverTypes as SemverTypes>::SemverRef:
+        Default + BorrowMut<<T::SemverTypes as SemverTypes>::Semver>,
 {
     skip_whitespace(peekable)?;
     if let Option::Some(&c) = peekable.peek() {
@@ -423,14 +423,14 @@ where
     }
 }
 
-fn parse_version<V>(s: &str) -> Result<ValueVersion<V>>
+fn parse_semver<V>(s: &str) -> Result<ValueSemver<V>>
 where
-    V: VersionTypes,
-    for<'a> &'a V::Version: IntoIterator<Item = &'a u64>,
-    for<'a> V::Version: Extend<&'a u64>,
-    V::VersionRef: Default + BorrowMut<V::Version>,
+    V: SemverTypes,
+    for<'a> &'a V::Semver: IntoIterator<Item = &'a u64>,
+    for<'a> V::Semver: Extend<&'a u64>,
+    V::SemverRef: Default + BorrowMut<V::Semver>,
 {
-    let mut result = V::VersionRef::default();
+    let mut result = V::SemverRef::default();
 
     for component_str in s.split('.') {
         let mut component = 0u64;
@@ -438,8 +438,8 @@ where
         for c in component_str.chars() {
             if component == 0 && !first {
                 return Result::Err(Error::new(
-                    ErrorKind::InvalidVersionComponent,
-                    format!("Invalid version component: '{}'", component_str),
+                    ErrorKind::InvalidSemverComponent,
+                    format!("Invalid semver component: '{}'", component_str),
                 ));
             }
             if let '0'..='9' = c {
@@ -455,14 +455,14 @@ where
         }
         if first {
             return Result::Err(Error::new(
-                ErrorKind::InvalidVersionComponent,
-                "Invalid version component: ''",
+                ErrorKind::InvalidSemverComponent,
+                "Invalid semver component: ''",
             ));
         }
         result.borrow_mut().extend(&[component]);
     }
 
-    Result::Ok(ValueVersion(result))
+    Result::Ok(ValueSemver(result))
 }
 
 #[cfg(test)]
@@ -470,44 +470,44 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_version() {
+    fn test_parse_semver() {
         assert_eq!(
-            parse_version::<VersionTypesVec>("1").unwrap(),
-            ValueVersion::<VersionTypesVec>(vec![1u64])
+            parse_semver::<SemverTypesVec>("1").unwrap(),
+            ValueSemver::<SemverTypesVec>(vec![1u64])
         );
 
         assert_eq!(
-            parse_version::<VersionTypesVec>("2.0").unwrap(),
-            ValueVersion::<VersionTypesVec>(vec![2u64, 0u64])
+            parse_semver::<SemverTypesVec>("2.0").unwrap(),
+            ValueSemver::<SemverTypesVec>(vec![2u64, 0u64])
         );
 
         assert_eq!(
-            parse_version::<VersionTypesVec>("3.5.10").unwrap(),
-            ValueVersion::<VersionTypesVec>(vec![3u64, 5u64, 10u64])
+            parse_semver::<SemverTypesVec>("3.5.10").unwrap(),
+            ValueSemver::<SemverTypesVec>(vec![3u64, 5u64, 10u64])
         );
 
         assert_eq!(
-            parse_version::<VersionTypesVec>("3.05").unwrap_err().kind,
-            crate::ErrorKind::InvalidVersionComponent
+            parse_semver::<SemverTypesVec>("3.05").unwrap_err().kind,
+            crate::ErrorKind::InvalidSemverComponent
         );
 
         assert_eq!(
-            parse_version::<VersionTypesVec>("").unwrap_err().kind,
-            crate::ErrorKind::InvalidVersionComponent
+            parse_semver::<SemverTypesVec>("").unwrap_err().kind,
+            crate::ErrorKind::InvalidSemverComponent
         );
 
         assert_eq!(
-            parse_version::<VersionTypesVec>("5.").unwrap_err().kind,
-            crate::ErrorKind::InvalidVersionComponent
+            parse_semver::<SemverTypesVec>("5.").unwrap_err().kind,
+            crate::ErrorKind::InvalidSemverComponent
         );
 
         assert_eq!(
-            parse_version::<VersionTypesVec>(".5").unwrap_err().kind,
-            crate::ErrorKind::InvalidVersionComponent
+            parse_semver::<SemverTypesVec>(".5").unwrap_err().kind,
+            crate::ErrorKind::InvalidSemverComponent
         );
 
         assert_eq!(
-            parse_version::<VersionTypesVec>("3.a").unwrap_err().kind,
+            parse_semver::<SemverTypesVec>("3.a").unwrap_err().kind,
             crate::ErrorKind::InvalidCharacter
         );
     }
@@ -615,7 +615,7 @@ mod tests {
         assert_eq!(*i.next().unwrap().unwrap(), *v![2, 5, 4]);
         assert_eq!(
             i.next().unwrap().unwrap_err().kind,
-            crate::ErrorKind::InvalidVersionComponent
+            crate::ErrorKind::InvalidSemverComponent
         );
         assert_eq!(
             i.next().unwrap().unwrap_err().kind,

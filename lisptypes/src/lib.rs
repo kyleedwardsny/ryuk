@@ -42,21 +42,21 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 pub trait ValueTypes
 where
-    for<'a> &'a <Self::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'a u64>,
+    for<'a> &'a <Self::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
 {
     type ValueRef: Borrow<Value<Self>> + Debug;
     type StringRef: Borrow<str>;
     type Proc: Fn(&mut (dyn Environment<Self> + 'static), Self::ValueRef) -> Result<Self::ValueRef>
         + ?Sized;
     type ProcRef: Borrow<Self::Proc>;
-    type VersionTypes: VersionTypes;
+    type SemverTypes: SemverTypes;
 }
 
 pub trait Environment<T>
 where
     T: ValueTypes + ?Sized,
     T::ValueRef: Clone,
-    for<'a> &'a <T::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'a u64>,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
 {
     fn as_dyn_mut(&mut self) -> &mut (dyn Environment<T> + 'static);
 
@@ -110,7 +110,7 @@ where
 impl<T> dyn Environment<T>
 where
     T: ValueTypes + ?Sized,
-    for<'a> &'a <T::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'a u64>,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
     T::ValueRef: Clone,
 {
     pub fn map_evaluate<'a, V>(&'a mut self) -> (impl FnMut(Result<V>) -> Result<T::ValueRef> + 'a)
@@ -123,7 +123,7 @@ where
 
 pub trait LayeredEnvironmentTypes
 where
-    for<'a> &'a <<Self::ValueTypes as ValueTypes>::VersionTypes as VersionTypes>::Version:
+    for<'a> &'a <<Self::ValueTypes as ValueTypes>::SemverTypes as SemverTypes>::Semver:
         IntoIterator<Item = &'a u64>,
 {
     type EnvironmentLayerRef: BorrowMut<dyn EnvironmentLayer<Self>>;
@@ -133,7 +133,7 @@ where
 pub struct LayeredEnvironment<T>
 where
     T: LayeredEnvironmentTypes + ?Sized,
-    for<'a> &'a <<T::ValueTypes as ValueTypes>::VersionTypes as VersionTypes>::Version:
+    for<'a> &'a <<T::ValueTypes as ValueTypes>::SemverTypes as SemverTypes>::Semver:
         IntoIterator<Item = &'a u64>,
 {
     pub layers: Vec<T::EnvironmentLayerRef>,
@@ -142,7 +142,7 @@ where
 impl<T> Environment<T::ValueTypes> for LayeredEnvironment<T>
 where
     T: LayeredEnvironmentTypes + ?Sized + 'static,
-    for<'a> &'a <<T::ValueTypes as ValueTypes>::VersionTypes as VersionTypes>::Version:
+    for<'a> &'a <<T::ValueTypes as ValueTypes>::SemverTypes as SemverTypes>::Semver:
         IntoIterator<Item = &'a u64>,
     <<T as LayeredEnvironmentTypes>::ValueTypes as ValueTypes>::ValueRef: Clone,
 {
@@ -208,7 +208,7 @@ where
 pub trait EnvironmentLayer<T>
 where
     T: LayeredEnvironmentTypes + ?Sized,
-    for<'a> &'a <<T::ValueTypes as ValueTypes>::VersionTypes as VersionTypes>::Version:
+    for<'a> &'a <<T::ValueTypes as ValueTypes>::SemverTypes as SemverTypes>::Semver:
         IntoIterator<Item = &'a u64>,
 {
     fn resolve_symbol(
@@ -295,7 +295,7 @@ where
 pub struct ValueCons<T>
 where
     T: ValueTypes + ?Sized,
-    for<'a> &'a <T::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'a u64>,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
 {
     pub car: T::ValueRef,
     pub cdr: T::ValueRef,
@@ -304,7 +304,7 @@ where
 impl<T> Clone for ValueCons<T>
 where
     T: ValueTypes + ?Sized,
-    for<'a> &'a <T::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'a u64>,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
     T::ValueRef: Clone,
 {
     fn clone(&self) -> Self {
@@ -319,8 +319,8 @@ impl<T1, T2> PartialEq<ValueCons<T2>> for ValueCons<T1>
 where
     T1: ValueTypes + ?Sized,
     T2: ValueTypes + ?Sized,
-    for<'a> &'a <T1::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'a u64>,
-    for<'a> &'a <T2::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'a u64>,
+    for<'a> &'a <T1::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+    for<'a> &'a <T2::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
 {
     fn eq(&self, other: &ValueCons<T2>) -> bool {
         self.car.borrow() == other.car.borrow() && self.cdr.borrow() == other.cdr.borrow()
@@ -363,7 +363,7 @@ where
 pub struct ValueProcedure<T>
 where
     T: ValueTypes + ?Sized,
-    for<'a> &'a <T::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'a u64>,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
 {
     pub id: u32, // Needed to test for equality
     pub proc: T::ProcRef,
@@ -372,7 +372,7 @@ where
 impl<T> Clone for ValueProcedure<T>
 where
     T: ValueTypes + ?Sized,
-    for<'a> &'a <T::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'a u64>,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
     T::ProcRef: Clone,
 {
     fn clone(&self) -> Self {
@@ -387,8 +387,8 @@ impl<T1, T2> PartialEq<ValueProcedure<T2>> for ValueProcedure<T1>
 where
     T1: ValueTypes + ?Sized,
     T2: ValueTypes + ?Sized,
-    for<'a> &'a <T1::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'a u64>,
-    for<'a> &'a <T2::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'a u64>,
+    for<'a> &'a <T1::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+    for<'a> &'a <T2::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
 {
     fn eq(&self, rhs: &ValueProcedure<T2>) -> bool {
         self.id == rhs.id
@@ -398,7 +398,7 @@ where
 impl<T> Debug for ValueProcedure<T>
 where
     T: ValueTypes + ?Sized,
-    for<'a> &'a <T::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'a u64>,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
 {
     fn fmt(&self, fmt: &mut Formatter) -> std::result::Result<(), std::fmt::Error> {
         fmt.debug_struct("ValueProcedure")
@@ -407,51 +407,51 @@ where
     }
 }
 
-pub trait VersionTypes
+pub trait SemverTypes
 where
-    for<'a> &'a Self::Version: IntoIterator<Item = &'a u64>,
+    for<'a> &'a Self::Semver: IntoIterator<Item = &'a u64>,
 {
-    type Version: ?Sized;
-    type VersionRef: Borrow<Self::Version> + Debug;
+    type Semver: ?Sized;
+    type SemverRef: Borrow<Self::Semver> + Debug;
 }
 
 #[derive(Debug)]
-pub struct ValueVersion<T>(pub T::VersionRef)
+pub struct ValueSemver<T>(pub T::SemverRef)
 where
-    T: VersionTypes + ?Sized,
-    for<'a> &'a T::Version: IntoIterator<Item = &'a u64>;
+    T: SemverTypes + ?Sized,
+    for<'a> &'a T::Semver: IntoIterator<Item = &'a u64>;
 
-impl<T> Clone for ValueVersion<T>
+impl<T> Clone for ValueSemver<T>
 where
-    T: VersionTypes + ?Sized,
-    for<'a> &'a T::Version: IntoIterator<Item = &'a u64>,
-    T::VersionRef: Clone,
+    T: SemverTypes + ?Sized,
+    for<'a> &'a T::Semver: IntoIterator<Item = &'a u64>,
+    T::SemverRef: Clone,
 {
     fn clone(&self) -> Self {
-        ValueVersion(self.0.clone())
+        ValueSemver(self.0.clone())
     }
 }
 
-impl<T1, T2> PartialEq<ValueVersion<T2>> for ValueVersion<T1>
+impl<T1, T2> PartialEq<ValueSemver<T2>> for ValueSemver<T1>
 where
-    T1: VersionTypes + ?Sized,
-    T2: VersionTypes + ?Sized,
-    for<'a> &'a T1::Version: IntoIterator<Item = &'a u64>,
-    for<'a> &'a T2::Version: IntoIterator<Item = &'a u64>,
+    T1: SemverTypes + ?Sized,
+    T2: SemverTypes + ?Sized,
+    for<'a> &'a T1::Semver: IntoIterator<Item = &'a u64>,
+    for<'a> &'a T2::Semver: IntoIterator<Item = &'a u64>,
 {
-    fn eq(&self, other: &ValueVersion<T2>) -> bool {
+    fn eq(&self, other: &ValueSemver<T2>) -> bool {
         self.partial_cmp(other) == Option::Some(Ordering::Equal)
     }
 }
 
-impl<T1, T2> PartialOrd<ValueVersion<T2>> for ValueVersion<T1>
+impl<T1, T2> PartialOrd<ValueSemver<T2>> for ValueSemver<T1>
 where
-    T1: VersionTypes + ?Sized,
-    T2: VersionTypes + ?Sized,
-    for<'a> &'a T1::Version: IntoIterator<Item = &'a u64>,
-    for<'a> &'a T2::Version: IntoIterator<Item = &'a u64>,
+    T1: SemverTypes + ?Sized,
+    T2: SemverTypes + ?Sized,
+    for<'a> &'a T1::Semver: IntoIterator<Item = &'a u64>,
+    for<'a> &'a T2::Semver: IntoIterator<Item = &'a u64>,
 {
-    fn partial_cmp(&self, other: &ValueVersion<T2>) -> Option<Ordering> {
+    fn partial_cmp(&self, other: &ValueSemver<T2>) -> Option<Ordering> {
         let mut v1 = self.0.borrow().into_iter();
         let mut v2 = other.0.borrow().into_iter();
         loop {
@@ -474,7 +474,7 @@ where
 pub enum Value<T>
 where
     T: ValueTypes + ?Sized,
-    for<'a> &'a <T::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'a u64>,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
 {
     Nil,
     UnqualifiedSymbol(ValueUnqualifiedSymbol<T::StringRef>),
@@ -482,7 +482,7 @@ where
     Cons(ValueCons<T>),
     Bool(ValueBool),
     String(ValueString<T::StringRef>),
-    Version(ValueVersion<T::VersionTypes>),
+    Semver(ValueSemver<T::SemverTypes>),
     Procedure(ValueProcedure<T>),
 }
 
@@ -491,7 +491,7 @@ macro_rules! try_from_value {
         impl<$l, $t> TryFrom<&$l Value<$t>> for $out
         where
             $t: ValueTypes + ?Sized,
-            for<'b> &'b <$t::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'b u64>,
+            for<'b> &'b <$t::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'b u64>,
             $($ct: $constraint),*
         {
             type Error = Error;
@@ -541,11 +541,11 @@ try_from_value!(
 );
 try_from_value_ref!(T, ValueString<T::StringRef>, Value::String(s) => s);
 try_from_value!(
-    T, ValueVersion<T::VersionTypes>,
-    (ValueVersion<T::VersionTypes>: Clone),
-    Value::Version(v) => (*v).clone()
+    T, ValueSemver<T::SemverTypes>,
+    (ValueSemver<T::SemverTypes>: Clone),
+    Value::Semver(v) => (*v).clone()
 );
-try_from_value_ref!(T, ValueVersion<T::VersionTypes>, Value::Version(v) => v);
+try_from_value_ref!(T, ValueSemver<T::SemverTypes>, Value::Semver(v) => v);
 try_from_value!(
     T, ValueProcedure<T>,
     (ValueProcedure<T>: Clone),
@@ -558,7 +558,7 @@ macro_rules! from_value_type {
         impl<$t> From<$in> for Value<$t>
         where
             $t: ValueTypes + ?Sized,
-            for<'b> &'b <$t::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'b u64>,
+            for<'b> &'b <$t::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'b u64>,
         {
             fn from($param: $in) -> Self {
                 $result
@@ -573,7 +573,7 @@ from_value_type!(T, ValueQualifiedSymbol<T::StringRef>, s -> Value::QualifiedSym
 from_value_type!(T, ValueCons<T>, c -> Value::Cons(c));
 from_value_type!(T, ValueBool, b -> Value::Bool(b));
 from_value_type!(T, ValueString<T::StringRef>, s -> Value::String(s));
-from_value_type!(T, ValueVersion<T::VersionTypes>, v -> Value::Version(v));
+from_value_type!(T, ValueSemver<T::SemverTypes>, v -> Value::Semver(v));
 from_value_type!(T, ValueProcedure<T>, p -> Value::Procedure(p));
 
 macro_rules! eq_match {
@@ -591,8 +591,8 @@ impl<T1, T2> PartialEq<Value<T2>> for Value<T1>
 where
     T1: ValueTypes + ?Sized,
     T2: ValueTypes + ?Sized,
-    for<'b> &'b <T1::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'b u64>,
-    for<'b> &'b <T2::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'b u64>,
+    for<'b> &'b <T1::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'b u64>,
+    for<'b> &'b <T2::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'b u64>,
 {
     fn eq(&self, rhs: &Value<T2>) -> bool {
         eq_match!(self, rhs, {
@@ -602,7 +602,7 @@ where
             (Value::Cons(c1), Value::Cons(c2)) => c1 == c2,
             (Value::Bool(b1), Value::Bool(b2)) => b1 == b2,
             (Value::String(s1), Value::String(s2)) => s1 == s2,
-            (Value::Version(v1), Value::Version(v2)) => v1 == v2,
+            (Value::Semver(v1), Value::Semver(v2)) => v1 == v2,
             (Value::Procedure(p1), Value::Procedure(p2)) => p1 == p2,
         })
     }
@@ -612,12 +612,12 @@ impl<T1, T2> From<&Value<T1>> for Value<T2>
 where
     T1: ValueTypes + ?Sized,
     T2: ValueTypes + ?Sized,
-    for<'b> &'b <T1::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'b u64>,
-    for<'b> &'b <T2::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'b u64>,
+    for<'b> &'b <T1::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'b u64>,
+    for<'b> &'b <T2::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'b u64>,
     Value<T2>: Into<<T2 as ValueTypes>::ValueRef>,
     T1::StringRef: Into<T2::StringRef> + Clone,
-    <T1::VersionTypes as VersionTypes>::VersionRef:
-        Into<<T2::VersionTypes as VersionTypes>::VersionRef> + Clone,
+    <T1::SemverTypes as SemverTypes>::SemverRef:
+        Into<<T2::SemverTypes as SemverTypes>::SemverRef> + Clone,
 {
     fn from(v: &Value<T1>) -> Self {
         match v.borrow() {
@@ -637,7 +637,7 @@ where
             }),
             Value::Bool(ValueBool(b)) => Value::Bool(ValueBool(*b)),
             Value::String(ValueString(s)) => Value::String(ValueString((*s).clone().into())),
-            Value::Version(ValueVersion(v)) => Value::Version(ValueVersion((*v).clone().into())),
+            Value::Semver(ValueSemver(v)) => Value::Semver(ValueSemver((*v).clone().into())),
             Value::Procedure(_) => panic!("Cannot move procedures across value type boundaries"),
         }
     }
@@ -647,8 +647,8 @@ pub fn value_type_convert<T1, T2>(v: T1::ValueRef) -> T2::ValueRef
 where
     T1: ValueTypes + ?Sized,
     T2: ValueTypes + ?Sized,
-    for<'b> &'b <T1::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'b u64>,
-    for<'b> &'b <T2::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'b u64>,
+    for<'b> &'b <T1::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'b u64>,
+    for<'b> &'b <T2::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'b u64>,
     T1::ValueRef: Into<Value<T2>>,
     Value<T2>: Into<<T2 as ValueTypes>::ValueRef>,
 {
@@ -658,7 +658,7 @@ where
 pub struct LispList<T>
 where
     T: ValueTypes + ?Sized,
-    for<'b> &'b <T::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'b u64>,
+    for<'b> &'b <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'b u64>,
     T::ValueRef: Clone,
 {
     ptr: T::ValueRef,
@@ -667,7 +667,7 @@ where
 impl<T> LispList<T>
 where
     T: ValueTypes + ?Sized,
-    for<'b> &'b <T::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'b u64>,
+    for<'b> &'b <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'b u64>,
     T::ValueRef: Clone,
 {
     pub fn new(ptr: T::ValueRef) -> Self {
@@ -682,7 +682,7 @@ where
 impl<T> Iterator for LispList<T>
 where
     T: ValueTypes + ?Sized,
-    for<'b> &'b <T::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'b u64>,
+    for<'b> &'b <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'b u64>,
     T::ValueRef: Clone,
 {
     type Item = Result<T::ValueRef>;
@@ -707,7 +707,7 @@ where
 pub fn map_try_into<T, V, R>(v: Result<V>) -> Result<R>
 where
     T: ValueTypes + ?Sized,
-    for<'b> &'b <T::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'b u64>,
+    for<'b> &'b <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'b u64>,
     V: Borrow<Value<T>>,
     for<'a> &'a Value<T>: TryInto<R, Error = Error>,
 {
@@ -718,11 +718,11 @@ where
 }
 
 #[derive(Debug)]
-pub struct VersionTypesVec;
+pub struct SemverTypesVec;
 
-impl VersionTypes for VersionTypesVec {
-    type Version = Vec<u64>;
-    type VersionRef = Self::Version;
+impl SemverTypes for SemverTypesVec {
+    type Semver = Vec<u64>;
+    type SemverRef = Self::Semver;
 }
 
 #[derive(Debug)]
@@ -734,7 +734,7 @@ impl ValueTypes for ValueTypesRc {
     type Proc =
         dyn Fn(&mut (dyn Environment<Self> + 'static), Self::ValueRef) -> Result<Self::ValueRef>;
     type ProcRef = Rc<Self::Proc>;
-    type VersionTypes = VersionTypesVec;
+    type SemverTypes = SemverTypesVec;
 }
 
 pub struct LayeredEnvironmentTypesRc;
@@ -745,11 +745,11 @@ impl LayeredEnvironmentTypes for LayeredEnvironmentTypesRc {
 }
 
 #[derive(Debug)]
-pub struct VersionTypesStatic;
+pub struct SemverTypesStatic;
 
-impl VersionTypes for VersionTypesStatic {
-    type Version = [u64];
-    type VersionRef = &'static Self::Version;
+impl SemverTypes for SemverTypesStatic {
+    type Semver = [u64];
+    type SemverRef = &'static Self::Semver;
 }
 
 #[derive(Debug)]
@@ -763,7 +763,7 @@ impl ValueTypes for ValueTypesStatic {
         Self::ValueRef,
     ) -> Result<Self::ValueRef>;
     type ProcRef = Self::Proc;
-    type VersionTypes = VersionTypesStatic;
+    type SemverTypes = SemverTypesStatic;
 }
 
 #[macro_export]
@@ -829,7 +829,7 @@ macro_rules! str {
 macro_rules! vref {
     ($v:expr) => {{
         const V: &$crate::Value<$crate::ValueTypesStatic> =
-            &$crate::Value::Version($crate::ValueVersion($v as &[u64]));
+            &$crate::Value::Semver($crate::ValueSemver($v as &[u64]));
         V
     }};
 }
@@ -919,8 +919,8 @@ mod tests {
     fn test_vref_macro() {
         const V1: &super::Value<super::ValueTypesStatic> = vref!(&[1u64, 0u64]);
         match &*V1 {
-            super::Value::Version(v) => assert_eq!(v.0, &[1, 0]),
-            _ => panic!("Expected a Value::Version"),
+            super::Value::Semver(v) => assert_eq!(v.0, &[1, 0]),
+            _ => panic!("Expected a Value::Semver"),
         }
     }
 
@@ -928,14 +928,14 @@ mod tests {
     fn test_v_macro() {
         const V1: &super::Value<super::ValueTypesStatic> = v![2, 1];
         match &*V1 {
-            super::Value::Version(v) => assert_eq!(v.0, &[2, 1]),
-            _ => panic!("Expected a Value::Version"),
+            super::Value::Semver(v) => assert_eq!(v.0, &[2, 1]),
+            _ => panic!("Expected a Value::Semver"),
         }
 
         const V2: &super::Value<super::ValueTypesStatic> = v![3];
         match &*V2 {
-            super::Value::Version(v) => assert_eq!(v.0, &[3]),
-            _ => panic!("Expected a Value::Version"),
+            super::Value::Semver(v) => assert_eq!(v.0, &[3]),
+            _ => panic!("Expected a Value::Semver"),
         }
     }
 
@@ -1016,58 +1016,58 @@ mod tests {
         use more_asserts::*;
 
         assert_eq!(
-            ValueVersion::<VersionTypesStatic>(&[1u64, 0u64] as &[u64]),
-            ValueVersion::<VersionTypesStatic>(&[1u64, 0u64] as &[u64]),
+            ValueSemver::<SemverTypesStatic>(&[1u64, 0u64] as &[u64]),
+            ValueSemver::<SemverTypesStatic>(&[1u64, 0u64] as &[u64]),
         );
 
         assert_ne!(
-            ValueVersion::<VersionTypesStatic>(&[1u64, 0u64] as &[u64]),
-            ValueVersion::<VersionTypesStatic>(&[1u64, 0u64, 0u64] as &[u64]),
+            ValueSemver::<SemverTypesStatic>(&[1u64, 0u64] as &[u64]),
+            ValueSemver::<SemverTypesStatic>(&[1u64, 0u64, 0u64] as &[u64]),
         );
 
         assert_lt!(
-            ValueVersion::<VersionTypesStatic>(&[1u64, 0u64] as &[u64]),
-            ValueVersion::<VersionTypesStatic>(&[1u64, 0u64, 0u64] as &[u64]),
+            ValueSemver::<SemverTypesStatic>(&[1u64, 0u64] as &[u64]),
+            ValueSemver::<SemverTypesStatic>(&[1u64, 0u64, 0u64] as &[u64]),
         );
 
         assert_lt!(
-            ValueVersion::<VersionTypesStatic>(&[1u64, 0u64] as &[u64]),
-            ValueVersion::<VersionTypesStatic>(&[1u64, 1u64] as &[u64]),
+            ValueSemver::<SemverTypesStatic>(&[1u64, 0u64] as &[u64]),
+            ValueSemver::<SemverTypesStatic>(&[1u64, 1u64] as &[u64]),
         );
 
         assert_lt!(
-            ValueVersion::<VersionTypesStatic>(&[1u64, 1u64] as &[u64]),
-            ValueVersion::<VersionTypesStatic>(&[2u64, 0u64] as &[u64]),
+            ValueSemver::<SemverTypesStatic>(&[1u64, 1u64] as &[u64]),
+            ValueSemver::<SemverTypesStatic>(&[2u64, 0u64] as &[u64]),
         );
 
         assert_lt!(
-            ValueVersion::<VersionTypesStatic>(&[1u64, 1u64] as &[u64]),
-            ValueVersion::<VersionTypesStatic>(&[2u64] as &[u64]),
+            ValueSemver::<SemverTypesStatic>(&[1u64, 1u64] as &[u64]),
+            ValueSemver::<SemverTypesStatic>(&[2u64] as &[u64]),
         );
 
         assert_ne!(
-            ValueVersion::<VersionTypesStatic>(&[1u64, 0u64, 0u64] as &[u64]),
-            ValueVersion::<VersionTypesStatic>(&[1u64, 0u64] as &[u64]),
+            ValueSemver::<SemverTypesStatic>(&[1u64, 0u64, 0u64] as &[u64]),
+            ValueSemver::<SemverTypesStatic>(&[1u64, 0u64] as &[u64]),
         );
 
         assert_gt!(
-            ValueVersion::<VersionTypesStatic>(&[1u64, 0u64, 0u64] as &[u64]),
-            ValueVersion::<VersionTypesStatic>(&[1u64, 0u64] as &[u64]),
+            ValueSemver::<SemverTypesStatic>(&[1u64, 0u64, 0u64] as &[u64]),
+            ValueSemver::<SemverTypesStatic>(&[1u64, 0u64] as &[u64]),
         );
 
         assert_gt!(
-            ValueVersion::<VersionTypesStatic>(&[1u64, 1u64] as &[u64]),
-            ValueVersion::<VersionTypesStatic>(&[1u64, 0u64] as &[u64]),
+            ValueSemver::<SemverTypesStatic>(&[1u64, 1u64] as &[u64]),
+            ValueSemver::<SemverTypesStatic>(&[1u64, 0u64] as &[u64]),
         );
 
         assert_gt!(
-            ValueVersion::<VersionTypesStatic>(&[2u64, 0u64] as &[u64]),
-            ValueVersion::<VersionTypesStatic>(&[1u64, 1u64] as &[u64]),
+            ValueSemver::<SemverTypesStatic>(&[2u64, 0u64] as &[u64]),
+            ValueSemver::<SemverTypesStatic>(&[1u64, 1u64] as &[u64]),
         );
 
         assert_gt!(
-            ValueVersion::<VersionTypesStatic>(&[2u64] as &[u64]),
-            ValueVersion::<VersionTypesStatic>(&[1u64, 1u64] as &[u64]),
+            ValueSemver::<SemverTypesStatic>(&[2u64] as &[u64]),
+            ValueSemver::<SemverTypesStatic>(&[1u64, 1u64] as &[u64]),
         );
     }
 
@@ -1304,9 +1304,9 @@ mod tests {
 
         let v = v![1, 0];
         assert_eq!(
-            TryInto::<&ValueVersion<<ValueTypesStatic as ValueTypes>::VersionTypes>>::try_into(v)
+            TryInto::<&ValueSemver<<ValueTypesStatic as ValueTypes>::SemverTypes>>::try_into(v)
                 .unwrap(),
-            &ValueVersion::<<ValueTypesStatic as ValueTypes>::VersionTypes>(&[1u64, 0u64] as &[u64])
+            &ValueSemver::<<ValueTypesStatic as ValueTypes>::SemverTypes>(&[1u64, 0u64] as &[u64])
         );
         assert_eq!(
             TryInto::<()>::try_into(v).unwrap_err().kind,
@@ -1404,9 +1404,9 @@ mod tests {
 
         let v = v![1, 0];
         assert_eq!(
-            TryInto::<ValueVersion<<ValueTypesStatic as ValueTypes>::VersionTypes>>::try_into(v)
+            TryInto::<ValueSemver<<ValueTypesStatic as ValueTypes>::SemverTypes>>::try_into(v)
                 .unwrap(),
-            ValueVersion::<<ValueTypesStatic as ValueTypes>::VersionTypes>(&[1u64, 0u64] as &[u64])
+            ValueSemver::<<ValueTypesStatic as ValueTypes>::SemverTypes>(&[1u64, 0u64] as &[u64])
         );
         assert_eq!(
             TryInto::<()>::try_into(v).unwrap_err().kind,
