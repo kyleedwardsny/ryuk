@@ -165,7 +165,7 @@ where
     }
 }
 
-fn read_list<T, I>(peekable: &mut Peekable<I>) -> Result<T::ValueRef>
+fn read_list<T, I>(peekable: &mut Peekable<I>, allow_dot: bool) -> Result<T::ValueRef>
 where
     T: ValueTypes + ?Sized,
     I: Iterator<Item = char>,
@@ -176,12 +176,12 @@ where
         ReadDelimitedResult::Value(v) => Result::Ok(
             Value::<T>::Cons(ValueCons {
                 car: v,
-                cdr: read_list(peekable)?,
+                cdr: read_list(peekable, true)?,
             })
             .into(),
         ),
-        ReadDelimitedResult::InvalidToken(t) => match &*t {
-            "." => match read_delimited(peekable, ')')? {
+        ReadDelimitedResult::InvalidToken(t) => match (allow_dot, &*t) {
+            (true, ".") => match read_delimited(peekable, ')')? {
                 ReadDelimitedResult::Value(cdr) => match read_delimited::<T, I>(peekable, ')')? {
                     ReadDelimitedResult::EndDelimiter => Result::Ok(cdr),
                     _ => Result::Err(Error::new(
@@ -304,27 +304,46 @@ where
     String: Into<T::StringRef>,
 {
     skip_whitespace(peekable)?;
-    if let Option::Some(c) = peekable.peek() {
-        if *c == '(' {
+    if let Option::Some(&c) = peekable.peek() {
+        if c == '(' {
             peekable.next();
-            Result::Ok(ReadImplResult::Value(read_list(peekable)?))
-        } else if *c == '#' {
+            Result::Ok(ReadImplResult::Value(read_list(peekable, false)?))
+        } else if c == '#' {
             peekable.next();
             Result::Ok(ReadImplResult::Value(read_macro(peekable)?))
-        } else if *c == '"' {
+        } else if c == '"' {
             peekable.next();
             Result::Ok(ReadImplResult::Value(
                 Value::String(ValueString(read_string(peekable, '"')?.into())).into(),
             ))
-        } else if is_token_char(*c) {
+        } else if is_token_char(c) {
             match read_token(peekable)? {
-                ReadTokenResult::ValidToken(t) => Result::Ok(ReadImplResult::Value(
-                    Value::UnqualifiedSymbol(ValueUnqualifiedSymbol(t.to_lowercase().into()))
-                        .into(),
-                )),
+                ReadTokenResult::ValidToken(t1) => match peekable.peek() {
+                    Option::Some(':') => {
+                        peekable.next();
+                        match read_token(peekable)? {
+                            ReadTokenResult::ValidToken(t2) => Result::Ok(ReadImplResult::Value(
+                                Value::QualifiedSymbol(ValueQualifiedSymbol {
+                                    package: t1.to_lowercase().into(),
+                                    name: t2.to_lowercase().into(),
+                                })
+                                .into(),
+                            )),
+                            ReadTokenResult::InvalidToken(t) => Result::Err(Error::new(
+                                ErrorKind::InvalidToken,
+                                format!("Invalid token: '{}'", t),
+                            )),
+                        }
+                    }
+                    _ => Result::Ok(ReadImplResult::Value(
+                        Value::UnqualifiedSymbol(ValueUnqualifiedSymbol(t1.to_lowercase().into()))
+                            .into(),
+                    )),
+                },
                 ReadTokenResult::InvalidToken(t) => Result::Ok(ReadImplResult::InvalidToken(t)),
             }
         } else {
+            peekable.next();
             Result::Err(Error::new(
                 ErrorKind::InvalidCharacter,
                 format!("Invalid character: '{}'", c),
@@ -347,6 +366,31 @@ mod tests {
         assert_eq!(*i.next().unwrap().unwrap(), *uqsym!("uqsym2"));
         assert_eq!(*i.next().unwrap().unwrap(), *uqsym!("uqsym3"));
         assert_eq!(*i.next().unwrap().unwrap(), *uqsym!("uqsym4"));
+        assert!(i.next().is_none());
+    }
+
+    #[test]
+    fn test_read_qualified_symbol() {
+        let s = "pa1:qsym1 PA2:QSYM2\nPa3:QSym3  \n   pa4:qsym4 pa5: qsym5 pa6::qsym6";
+        let mut i = LispParser::<ValueTypesRc, _>::new(s.chars().peekable());
+        assert_eq!(*i.next().unwrap().unwrap(), *qsym!("pa1", "qsym1"));
+        assert_eq!(*i.next().unwrap().unwrap(), *qsym!("pa2", "qsym2"));
+        assert_eq!(*i.next().unwrap().unwrap(), *qsym!("pa3", "qsym3"));
+        assert_eq!(*i.next().unwrap().unwrap(), *qsym!("pa4", "qsym4"));
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            crate::ErrorKind::InvalidToken
+        );
+        assert_eq!(*i.next().unwrap().unwrap(), *uqsym!("qsym5"));
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            crate::ErrorKind::InvalidToken
+        );
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            crate::ErrorKind::InvalidCharacter
+        );
+        assert_eq!(*i.next().unwrap().unwrap(), *uqsym!("qsym6"));
         assert!(i.next().is_none());
     }
 
@@ -395,15 +439,15 @@ mod tests {
 
     #[test]
     fn test_read_list() {
-        let s = "(s1 s2 s3)(s4\n s5 s6 ) ( s7 () \"s8\") (#t . #f) ( s9 . s10 s11 (a";
+        let s = "(s1 s2 p3:s3)(p4:s4\n p5:s5 s6 ) ( s7 () \"s8\") (#t . #f) ( s9 . s10 s11 ( . (a a:. (a";
         let mut i = LispParser::<ValueTypesRc, _>::new(s.chars().peekable());
         assert_eq!(
             *i.next().unwrap().unwrap(),
-            *list!(uqsym!("s1"), uqsym!("s2"), uqsym!("s3"))
+            *list!(uqsym!("s1"), uqsym!("s2"), qsym!("p3", "s3"))
         );
         assert_eq!(
             *i.next().unwrap().unwrap(),
-            *list!(uqsym!("s4"), uqsym!("s5"), uqsym!("s6"))
+            *list!(qsym!("p4", "s4"), qsym!("p5", "s5"), uqsym!("s6"))
         );
         assert_eq!(
             *i.next().unwrap().unwrap(),
@@ -412,6 +456,14 @@ mod tests {
         assert_eq!(
             *i.next().unwrap().unwrap(),
             *cons!(bool!(true), bool!(false))
+        );
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            crate::ErrorKind::InvalidToken
+        );
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            crate::ErrorKind::InvalidToken
         );
         assert_eq!(
             i.next().unwrap().unwrap_err().kind,
