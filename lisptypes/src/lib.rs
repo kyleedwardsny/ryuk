@@ -423,17 +423,34 @@ macro_rules! try_from_value_ref {
 }
 
 try_from_value!(T, (), (), Value::Nil => ());
-try_from_value!(T, ValueUnqualifiedSymbol<T::StringRef>, (ValueUnqualifiedSymbol<T::StringRef>: Clone), Value::UnqualifiedSymbol(s) => (*s).clone());
+try_from_value!(
+    T, ValueUnqualifiedSymbol<T::StringRef>,
+    (ValueUnqualifiedSymbol<T::StringRef>: Clone),
+    Value::UnqualifiedSymbol(s) => (*s).clone()
+);
 try_from_value_ref!(T, ValueUnqualifiedSymbol<T::StringRef>, Value::UnqualifiedSymbol(s) => s);
-try_from_value!(T, ValueQualifiedSymbol<T::StringRef>, (ValueQualifiedSymbol<T::StringRef>: Clone), Value::QualifiedSymbol(s) => (*s).clone());
+try_from_value!(
+    T,
+    ValueQualifiedSymbol<T::StringRef>,
+    (ValueQualifiedSymbol<T::StringRef>: Clone),
+    Value::QualifiedSymbol(s) => (*s).clone()
+);
 try_from_value_ref!(T, ValueQualifiedSymbol<T::StringRef>, Value::QualifiedSymbol(s) => s);
 try_from_value!(T, ValueCons<T>, (ValueCons<T>: Clone), Value::Cons(c) => (*c).clone());
 try_from_value_ref!(T, ValueCons<T>, Value::Cons(c) => c);
 try_from_value!(T, ValueBool, (), Value::Bool(b) => (*b).clone());
 try_from_value_ref!(T, ValueBool, Value::Bool(b) => b);
-try_from_value!(T, ValueString<T::StringRef>, (ValueString<T::StringRef>: Clone), Value::String(s) => (*s).clone());
+try_from_value!(
+    T, ValueString<T::StringRef>,
+    (ValueString<T::StringRef>: Clone),
+    Value::String(s) => (*s).clone()
+);
 try_from_value_ref!(T, ValueString<T::StringRef>, Value::String(s) => s);
-try_from_value!(T, ValueProcedure<T>, (ValueProcedure<T>: Clone), Value::Procedure(p) => (*p).clone());
+try_from_value!(
+    T, ValueProcedure<T>,
+    (ValueProcedure<T>: Clone),
+    Value::Procedure(p) => (*p).clone()
+);
 try_from_value_ref!(T, ValueProcedure<T>, Value::Procedure(p) => p);
 
 macro_rules! from_value_type {
