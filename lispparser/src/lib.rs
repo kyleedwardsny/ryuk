@@ -608,7 +608,7 @@ mod tests {
 
     #[test]
     fn test_read_v() {
-        let s = "#v1.5  #v3\n#v2.5.4   #v3.05 #va.2";
+        let s = "#v1.5  #v3\n#v2.5.4   #v3.05 #va.2 #V1.5";
         let mut i = LispParser::<ValueTypesRc, _>::new(s.chars().peekable());
         assert_eq!(*i.next().unwrap().unwrap(), *v![1, 5]);
         assert_eq!(*i.next().unwrap().unwrap(), *v![3]);
@@ -620,6 +620,10 @@ mod tests {
         assert_eq!(
             i.next().unwrap().unwrap_err().kind,
             crate::ErrorKind::InvalidCharacter
+        );
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            crate::ErrorKind::InvalidToken
         );
         assert!(i.next().is_none());
     }
