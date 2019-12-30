@@ -297,7 +297,7 @@ where
     })
 }
 
-pub enum ReadImplResult<T>
+enum ReadImplResult<T>
 where
     T: ValueTypes + ?Sized,
     for<'a> &'a <T::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'a u64>,
@@ -307,7 +307,7 @@ where
     EndOfFile,
 }
 
-pub fn read_impl<T, I>(peekable: &mut Peekable<I>) -> Result<ReadImplResult<T>>
+fn read_impl<T, I>(peekable: &mut Peekable<I>) -> Result<ReadImplResult<T>>
 where
     T: ValueTypes + ?Sized,
     for<'a> &'a <T::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'a u64>,
