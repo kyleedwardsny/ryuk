@@ -1,4 +1,5 @@
 use ryuk_lisptypes::*;
+use std::borrow::BorrowMut;
 use std::fmt::Formatter;
 use std::iter::Peekable;
 use std::marker::PhantomData;
@@ -15,6 +16,7 @@ pub enum ErrorKind {
     IoError,
     InvalidToken,
     InvalidCharacter,
+    InvalidVersionComponent,
 }
 
 impl Error {
@@ -393,9 +395,94 @@ where
     }
 }
 
+fn parse_version<V>(s: &str) -> Result<ValueVersion<V>>
+where
+    V: VersionTypes,
+    for<'a> &'a V::Version: IntoIterator<Item = &'a u64>,
+    for<'a> V::Version: Extend<&'a u64>,
+    V::VersionRef: Default + BorrowMut<V::Version>,
+{
+    let mut result = V::VersionRef::default();
+
+    for component_str in s.split('.') {
+        let mut component = 0u64;
+        let mut first = true;
+        for c in component_str.chars() {
+            if component == 0 && !first {
+                return Result::Err(Error::new(
+                    ErrorKind::InvalidVersionComponent,
+                    format!("Invalid version component: '{}'", component_str),
+                ));
+            }
+            if let '0'..='9' = c {
+                component *= 10;
+                component += c as u64 - '0' as u64;
+            } else {
+                return Result::Err(Error::new(
+                    ErrorKind::InvalidCharacter,
+                    format!("Invalid character: '{}'", c),
+                ));
+            }
+            first = false;
+        }
+        if first {
+            return Result::Err(Error::new(
+                ErrorKind::InvalidVersionComponent,
+                "Invalid version component: ''",
+            ));
+        }
+        result.borrow_mut().extend(&[component]);
+    }
+
+    Result::Ok(ValueVersion(result))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_parse_version() {
+        assert_eq!(
+            parse_version::<VersionTypesVec>("1").unwrap(),
+            ValueVersion::<VersionTypesVec>(vec![1u64])
+        );
+
+        assert_eq!(
+            parse_version::<VersionTypesVec>("2.0").unwrap(),
+            ValueVersion::<VersionTypesVec>(vec![2u64, 0u64])
+        );
+
+        assert_eq!(
+            parse_version::<VersionTypesVec>("3.5.10").unwrap(),
+            ValueVersion::<VersionTypesVec>(vec![3u64, 5u64, 10u64])
+        );
+
+        assert_eq!(
+            parse_version::<VersionTypesVec>("3.05").unwrap_err().kind,
+            crate::ErrorKind::InvalidVersionComponent
+        );
+
+        assert_eq!(
+            parse_version::<VersionTypesVec>("").unwrap_err().kind,
+            crate::ErrorKind::InvalidVersionComponent
+        );
+
+        assert_eq!(
+            parse_version::<VersionTypesVec>("5.").unwrap_err().kind,
+            crate::ErrorKind::InvalidVersionComponent
+        );
+
+        assert_eq!(
+            parse_version::<VersionTypesVec>(".5").unwrap_err().kind,
+            crate::ErrorKind::InvalidVersionComponent
+        );
+
+        assert_eq!(
+            parse_version::<VersionTypesVec>("3.a").unwrap_err().kind,
+            crate::ErrorKind::InvalidCharacter
+        );
+    }
 
     #[test]
     fn test_read_unqualified_symbol() {
