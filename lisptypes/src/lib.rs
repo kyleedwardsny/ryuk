@@ -1,4 +1,5 @@
 use std::borrow::{Borrow, BorrowMut};
+use std::cmp::Ordering;
 use std::convert::{TryFrom, TryInto};
 use std::fmt::{Debug, Formatter};
 use std::rc::Rc;
@@ -39,18 +40,23 @@ impl std::fmt::Display for Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-pub trait ValueTypes {
+pub trait ValueTypes
+where
+    for<'a> &'a <Self::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'a u64>,
+{
     type ValueRef: Borrow<Value<Self>> + Debug;
     type StringRef: Borrow<str>;
     type Proc: Fn(&mut (dyn Environment<Self> + 'static), Self::ValueRef) -> Result<Self::ValueRef>
         + ?Sized;
     type ProcRef: Borrow<Self::Proc>;
+    type VersionTypes: VersionTypes;
 }
 
 pub trait Environment<T>
 where
     T: ValueTypes + ?Sized,
     T::ValueRef: Clone,
+    for<'a> &'a <T::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'a u64>,
 {
     fn as_dyn_mut(&mut self) -> &mut (dyn Environment<T> + 'static);
 
@@ -104,6 +110,7 @@ where
 impl<T> dyn Environment<T>
 where
     T: ValueTypes + ?Sized,
+    for<'a> &'a <T::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'a u64>,
     T::ValueRef: Clone,
 {
     pub fn map_evaluate<'a, V>(&'a mut self) -> (impl FnMut(Result<V>) -> Result<T::ValueRef> + 'a)
@@ -114,7 +121,11 @@ where
     }
 }
 
-pub trait LayeredEnvironmentTypes {
+pub trait LayeredEnvironmentTypes
+where
+    for<'a> &'a <<Self::ValueTypes as ValueTypes>::VersionTypes as VersionTypes>::Version:
+        IntoIterator<Item = &'a u64>,
+{
     type EnvironmentLayerRef: BorrowMut<dyn EnvironmentLayer<Self>>;
     type ValueTypes: ValueTypes;
 }
@@ -122,6 +133,8 @@ pub trait LayeredEnvironmentTypes {
 pub struct LayeredEnvironment<T>
 where
     T: LayeredEnvironmentTypes + ?Sized,
+    for<'a> &'a <<T::ValueTypes as ValueTypes>::VersionTypes as VersionTypes>::Version:
+        IntoIterator<Item = &'a u64>,
 {
     pub layers: Vec<T::EnvironmentLayerRef>,
 }
@@ -129,6 +142,8 @@ where
 impl<T> Environment<T::ValueTypes> for LayeredEnvironment<T>
 where
     T: LayeredEnvironmentTypes + ?Sized + 'static,
+    for<'a> &'a <<T::ValueTypes as ValueTypes>::VersionTypes as VersionTypes>::Version:
+        IntoIterator<Item = &'a u64>,
     <<T as LayeredEnvironmentTypes>::ValueTypes as ValueTypes>::ValueRef: Clone,
 {
     fn as_dyn_mut(&mut self) -> &mut (dyn Environment<T::ValueTypes> + 'static) {
@@ -193,6 +208,8 @@ where
 pub trait EnvironmentLayer<T>
 where
     T: LayeredEnvironmentTypes + ?Sized,
+    for<'a> &'a <<T::ValueTypes as ValueTypes>::VersionTypes as VersionTypes>::Version:
+        IntoIterator<Item = &'a u64>,
 {
     fn resolve_symbol(
         &self,
@@ -278,6 +295,7 @@ where
 pub struct ValueCons<T>
 where
     T: ValueTypes + ?Sized,
+    for<'a> &'a <T::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'a u64>,
 {
     pub car: T::ValueRef,
     pub cdr: T::ValueRef,
@@ -286,6 +304,7 @@ where
 impl<T> Clone for ValueCons<T>
 where
     T: ValueTypes + ?Sized,
+    for<'a> &'a <T::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'a u64>,
     T::ValueRef: Clone,
 {
     fn clone(&self) -> Self {
@@ -300,6 +319,8 @@ impl<T1, T2> PartialEq<ValueCons<T2>> for ValueCons<T1>
 where
     T1: ValueTypes + ?Sized,
     T2: ValueTypes + ?Sized,
+    for<'a> &'a <T1::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'a u64>,
+    for<'a> &'a <T2::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'a u64>,
 {
     fn eq(&self, other: &ValueCons<T2>) -> bool {
         self.car.borrow() == other.car.borrow() && self.cdr.borrow() == other.cdr.borrow()
@@ -342,6 +363,7 @@ where
 pub struct ValueProcedure<T>
 where
     T: ValueTypes + ?Sized,
+    for<'a> &'a <T::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'a u64>,
 {
     pub id: u32, // Needed to test for equality
     pub proc: T::ProcRef,
@@ -350,6 +372,7 @@ where
 impl<T> Clone for ValueProcedure<T>
 where
     T: ValueTypes + ?Sized,
+    for<'a> &'a <T::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'a u64>,
     T::ProcRef: Clone,
 {
     fn clone(&self) -> Self {
@@ -364,6 +387,8 @@ impl<T1, T2> PartialEq<ValueProcedure<T2>> for ValueProcedure<T1>
 where
     T1: ValueTypes + ?Sized,
     T2: ValueTypes + ?Sized,
+    for<'a> &'a <T1::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'a u64>,
+    for<'a> &'a <T2::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'a u64>,
 {
     fn eq(&self, rhs: &ValueProcedure<T2>) -> bool {
         self.id == rhs.id
@@ -373,6 +398,7 @@ where
 impl<T> Debug for ValueProcedure<T>
 where
     T: ValueTypes + ?Sized,
+    for<'a> &'a <T::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'a u64>,
 {
     fn fmt(&self, fmt: &mut Formatter) -> std::result::Result<(), std::fmt::Error> {
         fmt.debug_struct("ValueProcedure")
@@ -381,10 +407,74 @@ where
     }
 }
 
+pub trait VersionTypes
+where
+    for<'a> &'a Self::Version: IntoIterator<Item = &'a u64>,
+{
+    type Version: ?Sized;
+    type VersionRef: Borrow<Self::Version> + Debug;
+}
+
+#[derive(Debug)]
+pub struct ValueVersion<T>(pub T::VersionRef)
+where
+    T: VersionTypes + ?Sized,
+    for<'a> &'a T::Version: IntoIterator<Item = &'a u64>;
+
+impl<T> Clone for ValueVersion<T>
+where
+    T: VersionTypes + ?Sized,
+    for<'a> &'a T::Version: IntoIterator<Item = &'a u64>,
+    T::VersionRef: Clone,
+{
+    fn clone(&self) -> Self {
+        ValueVersion(self.0.clone())
+    }
+}
+
+impl<T1, T2> PartialEq<ValueVersion<T2>> for ValueVersion<T1>
+where
+    T1: VersionTypes + ?Sized,
+    T2: VersionTypes + ?Sized,
+    for<'a> &'a T1::Version: IntoIterator<Item = &'a u64>,
+    for<'a> &'a T2::Version: IntoIterator<Item = &'a u64>,
+{
+    fn eq(&self, other: &ValueVersion<T2>) -> bool {
+        self.partial_cmp(other) == Option::Some(Ordering::Equal)
+    }
+}
+
+impl<T1, T2> PartialOrd<ValueVersion<T2>> for ValueVersion<T1>
+where
+    T1: VersionTypes + ?Sized,
+    T2: VersionTypes + ?Sized,
+    for<'a> &'a T1::Version: IntoIterator<Item = &'a u64>,
+    for<'a> &'a T2::Version: IntoIterator<Item = &'a u64>,
+{
+    fn partial_cmp(&self, other: &ValueVersion<T2>) -> Option<Ordering> {
+        let mut v1 = self.0.borrow().into_iter();
+        let mut v2 = other.0.borrow().into_iter();
+        loop {
+            match (v1.next(), v2.next()) {
+                (Option::Some(c1), Option::Some(c2)) => {
+                    match c1.borrow().partial_cmp(c2.borrow()) {
+                        Option::Some(Ordering::Equal) => (),
+                        r => return r,
+                    }
+                }
+                (Option::Some(_), Option::None) => return Option::Some(Ordering::Greater),
+                (Option::None, Option::Some(_)) => return Option::Some(Ordering::Less),
+                (Option::None, Option::None) => return Option::Some(Ordering::Equal),
+            }
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum Value<T>
 where
     T: ValueTypes + ?Sized,
+    for<'a> &'a <T::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'a u64>,
 {
     Nil,
     UnqualifiedSymbol(ValueUnqualifiedSymbol<T::StringRef>),
@@ -392,6 +482,7 @@ where
     Cons(ValueCons<T>),
     Bool(ValueBool),
     String(ValueString<T::StringRef>),
+    Version(ValueVersion<T::VersionTypes>),
     Procedure(ValueProcedure<T>),
 }
 
@@ -400,6 +491,7 @@ macro_rules! try_from_value {
         impl<$l, $t> TryFrom<&$l Value<$t>> for $out
         where
             $t: ValueTypes + ?Sized,
+            for<'b> &'b <$t::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'b u64>,
             $($ct: $constraint),*
         {
             type Error = Error;
@@ -449,6 +541,12 @@ try_from_value!(
 );
 try_from_value_ref!(T, ValueString<T::StringRef>, Value::String(s) => s);
 try_from_value!(
+    T, ValueVersion<T::VersionTypes>,
+    (ValueVersion<T::VersionTypes>: Clone),
+    Value::Version(v) => (*v).clone()
+);
+try_from_value_ref!(T, ValueVersion<T::VersionTypes>, Value::Version(v) => v);
+try_from_value!(
     T, ValueProcedure<T>,
     (ValueProcedure<T>: Clone),
     Value::Procedure(p) => (*p).clone()
@@ -460,6 +558,7 @@ macro_rules! from_value_type {
         impl<$t> From<$in> for Value<$t>
         where
             $t: ValueTypes + ?Sized,
+            for<'b> &'b <$t::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'b u64>,
         {
             fn from($param: $in) -> Self {
                 $result
@@ -474,6 +573,7 @@ from_value_type!(T, ValueQualifiedSymbol<T::StringRef>, s -> Value::QualifiedSym
 from_value_type!(T, ValueCons<T>, c -> Value::Cons(c));
 from_value_type!(T, ValueBool, b -> Value::Bool(b));
 from_value_type!(T, ValueString<T::StringRef>, s -> Value::String(s));
+from_value_type!(T, ValueVersion<T::VersionTypes>, v -> Value::Version(v));
 from_value_type!(T, ValueProcedure<T>, p -> Value::Procedure(p));
 
 macro_rules! eq_match {
@@ -491,6 +591,8 @@ impl<T1, T2> PartialEq<Value<T2>> for Value<T1>
 where
     T1: ValueTypes + ?Sized,
     T2: ValueTypes + ?Sized,
+    for<'b> &'b <T1::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'b u64>,
+    for<'b> &'b <T2::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'b u64>,
 {
     fn eq(&self, rhs: &Value<T2>) -> bool {
         eq_match!(self, rhs, {
@@ -500,6 +602,7 @@ where
             (Value::Cons(c1), Value::Cons(c2)) => c1 == c2,
             (Value::Bool(b1), Value::Bool(b2)) => b1 == b2,
             (Value::String(s1), Value::String(s2)) => s1 == s2,
+            (Value::Version(v1), Value::Version(v2)) => v1 == v2,
             (Value::Procedure(p1), Value::Procedure(p2)) => p1 == p2,
         })
     }
@@ -509,8 +612,12 @@ impl<T1, T2> From<&Value<T1>> for Value<T2>
 where
     T1: ValueTypes + ?Sized,
     T2: ValueTypes + ?Sized,
+    for<'b> &'b <T1::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'b u64>,
+    for<'b> &'b <T2::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'b u64>,
     Value<T2>: Into<<T2 as ValueTypes>::ValueRef>,
     T1::StringRef: Into<T2::StringRef> + Clone,
+    <T1::VersionTypes as VersionTypes>::VersionRef:
+        Into<<T2::VersionTypes as VersionTypes>::VersionRef> + Clone,
 {
     fn from(v: &Value<T1>) -> Self {
         match v.borrow() {
@@ -530,6 +637,7 @@ where
             }),
             Value::Bool(ValueBool(b)) => Value::Bool(ValueBool(*b)),
             Value::String(ValueString(s)) => Value::String(ValueString((*s).clone().into())),
+            Value::Version(ValueVersion(v)) => Value::Version(ValueVersion((*v).clone().into())),
             Value::Procedure(_) => panic!("Cannot move procedures across value type boundaries"),
         }
     }
@@ -539,6 +647,8 @@ pub fn value_type_convert<T1, T2>(v: T1::ValueRef) -> T2::ValueRef
 where
     T1: ValueTypes + ?Sized,
     T2: ValueTypes + ?Sized,
+    for<'b> &'b <T1::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'b u64>,
+    for<'b> &'b <T2::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'b u64>,
     T1::ValueRef: Into<Value<T2>>,
     Value<T2>: Into<<T2 as ValueTypes>::ValueRef>,
 {
@@ -548,6 +658,7 @@ where
 pub struct LispList<T>
 where
     T: ValueTypes + ?Sized,
+    for<'b> &'b <T::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'b u64>,
     T::ValueRef: Clone,
 {
     ptr: T::ValueRef,
@@ -556,6 +667,7 @@ where
 impl<T> LispList<T>
 where
     T: ValueTypes + ?Sized,
+    for<'b> &'b <T::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'b u64>,
     T::ValueRef: Clone,
 {
     pub fn new(ptr: T::ValueRef) -> Self {
@@ -570,6 +682,7 @@ where
 impl<T> Iterator for LispList<T>
 where
     T: ValueTypes + ?Sized,
+    for<'b> &'b <T::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'b u64>,
     T::ValueRef: Clone,
 {
     type Item = Result<T::ValueRef>;
@@ -594,6 +707,7 @@ where
 pub fn map_try_into<T, V, R>(v: Result<V>) -> Result<R>
 where
     T: ValueTypes + ?Sized,
+    for<'b> &'b <T::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'b u64>,
     V: Borrow<Value<T>>,
     for<'a> &'a Value<T>: TryInto<R, Error = Error>,
 {
@@ -601,6 +715,14 @@ where
     let vb = v.borrow();
     let o = vb.try_into()?;
     std::result::Result::Ok(o)
+}
+
+#[derive(Debug)]
+pub struct VersionTypesVec;
+
+impl VersionTypes for VersionTypesVec {
+    type Version = Vec<u64>;
+    type VersionRef = Self::Version;
 }
 
 #[derive(Debug)]
@@ -612,6 +734,7 @@ impl ValueTypes for ValueTypesRc {
     type Proc =
         dyn Fn(&mut (dyn Environment<Self> + 'static), Self::ValueRef) -> Result<Self::ValueRef>;
     type ProcRef = Rc<Self::Proc>;
+    type VersionTypes = VersionTypesVec;
 }
 
 pub struct LayeredEnvironmentTypesRc;
@@ -619,6 +742,14 @@ pub struct LayeredEnvironmentTypesRc;
 impl LayeredEnvironmentTypes for LayeredEnvironmentTypesRc {
     type EnvironmentLayerRef = Box<dyn EnvironmentLayer<Self>>;
     type ValueTypes = ValueTypesRc;
+}
+
+#[derive(Debug)]
+pub struct VersionTypesStatic;
+
+impl VersionTypes for VersionTypesStatic {
+    type Version = [u64];
+    type VersionRef = &'static Self::Version;
 }
 
 #[derive(Debug)]
@@ -632,6 +763,7 @@ impl ValueTypes for ValueTypesStatic {
         Self::ValueRef,
     ) -> Result<Self::ValueRef>;
     type ProcRef = Self::Proc;
+    type VersionTypes = VersionTypesStatic;
 }
 
 #[macro_export]
@@ -691,6 +823,19 @@ macro_rules! str {
             &$crate::Value::String($crate::ValueString($s));
         S
     }};
+}
+
+#[macro_export]
+macro_rules! v {
+    ($v:expr) => {{
+        const V: &$crate::Value<$crate::ValueTypesStatic> =
+            &$crate::Value::Version($crate::ValueVersion($v as &[u64]));
+        V
+    }};
+
+    [$($c:expr),*] => {
+        v!(&[$($c as u64),*])
+    };
 }
 
 #[macro_export]
@@ -768,6 +913,21 @@ mod tests {
     }
 
     #[test]
+    fn test_v_macro() {
+        const V1: &super::Value<super::ValueTypesStatic> = v!(&[1u64, 0u64]);
+        match &*V1 {
+            super::Value::Version(v) => assert_eq!(v.0, &[1, 0]),
+            _ => panic!("Expected a Value::Version"),
+        }
+
+        const V2: &super::Value<super::ValueTypesStatic> = v![2, 1];
+        match &*V2 {
+            super::Value::Version(v) => assert_eq!(v.0, &[2, 1]),
+            _ => panic!("Expected a Value::Version"),
+        }
+    }
+
+    #[test]
     fn test_list_macro() {
         const LIST1: &super::Value<super::ValueTypesStatic> = list!();
         assert_eq!(*LIST1, super::Value::<super::ValueTypesStatic>::Nil);
@@ -836,6 +996,67 @@ mod tests {
             }
             _ => panic!("Expected a Value::Cons"),
         }
+    }
+
+    #[test]
+    fn test_v_cmp() {
+        use super::*;
+        use more_asserts::*;
+
+        assert_eq!(
+            ValueVersion::<VersionTypesStatic>(&[1u64, 0u64] as &[u64]),
+            ValueVersion::<VersionTypesStatic>(&[1u64, 0u64] as &[u64]),
+        );
+
+        assert_ne!(
+            ValueVersion::<VersionTypesStatic>(&[1u64, 0u64] as &[u64]),
+            ValueVersion::<VersionTypesStatic>(&[1u64, 0u64, 0u64] as &[u64]),
+        );
+
+        assert_lt!(
+            ValueVersion::<VersionTypesStatic>(&[1u64, 0u64] as &[u64]),
+            ValueVersion::<VersionTypesStatic>(&[1u64, 0u64, 0u64] as &[u64]),
+        );
+
+        assert_lt!(
+            ValueVersion::<VersionTypesStatic>(&[1u64, 0u64] as &[u64]),
+            ValueVersion::<VersionTypesStatic>(&[1u64, 1u64] as &[u64]),
+        );
+
+        assert_lt!(
+            ValueVersion::<VersionTypesStatic>(&[1u64, 1u64] as &[u64]),
+            ValueVersion::<VersionTypesStatic>(&[2u64, 0u64] as &[u64]),
+        );
+
+        assert_lt!(
+            ValueVersion::<VersionTypesStatic>(&[1u64, 1u64] as &[u64]),
+            ValueVersion::<VersionTypesStatic>(&[2u64] as &[u64]),
+        );
+
+        assert_ne!(
+            ValueVersion::<VersionTypesStatic>(&[1u64, 0u64, 0u64] as &[u64]),
+            ValueVersion::<VersionTypesStatic>(&[1u64, 0u64] as &[u64]),
+        );
+
+        assert_gt!(
+            ValueVersion::<VersionTypesStatic>(&[1u64, 0u64, 0u64] as &[u64]),
+            ValueVersion::<VersionTypesStatic>(&[1u64, 0u64] as &[u64]),
+        );
+
+        assert_gt!(
+            ValueVersion::<VersionTypesStatic>(&[1u64, 1u64] as &[u64]),
+            ValueVersion::<VersionTypesStatic>(&[1u64, 0u64] as &[u64]),
+        );
+
+        assert_gt!(
+            ValueVersion::<VersionTypesStatic>(&[2u64, 0u64] as &[u64]),
+            ValueVersion::<VersionTypesStatic>(&[1u64, 1u64] as &[u64]),
+        );
+
+        assert_gt!(
+            ValueVersion::<VersionTypesStatic>(&[2u64] as &[u64]),
+            ValueVersion::<VersionTypesStatic>(&[1u64, 1u64] as &[u64]),
+        );
     }
 
     fn static_f1(
@@ -923,6 +1144,10 @@ mod tests {
         );
         assert_ne!(str!("str"), uqsym!("str"));
         assert_ne!(str!("str"), nil!());
+
+        assert_eq!(v![1, 0], v![1, 0]);
+        assert_ne!(v![1, 0], v![1, 1]);
+        assert_ne!(v![1, 0], nil!());
 
         let v11 = super::Rc::new(super::Value::<super::ValueTypesRc>::Procedure(
             super::ValueProcedure {
@@ -1065,6 +1290,17 @@ mod tests {
             ErrorKind::IncorrectType
         );
 
+        let v = v![1, 0];
+        assert_eq!(
+            TryInto::<&ValueVersion<<ValueTypesStatic as ValueTypes>::VersionTypes>>::try_into(v)
+                .unwrap(),
+            &ValueVersion::<<ValueTypesStatic as ValueTypes>::VersionTypes>(&[1u64, 0u64] as &[u64])
+        );
+        assert_eq!(
+            TryInto::<()>::try_into(v).unwrap_err().kind,
+            ErrorKind::IncorrectType
+        );
+
         let v = Value::<ValueTypesRc>::Procedure(ValueProcedure::<ValueTypesRc> {
             id: 1,
             proc: Rc::new(static_f1),
@@ -1148,6 +1384,17 @@ mod tests {
             TryInto::<ValueString<<ValueTypesStatic as ValueTypes>::StringRef>>::try_into(v)
                 .unwrap(),
             ValueString("str")
+        );
+        assert_eq!(
+            TryInto::<()>::try_into(v).unwrap_err().kind,
+            ErrorKind::IncorrectType
+        );
+
+        let v = v![1, 0];
+        assert_eq!(
+            TryInto::<ValueVersion<<ValueTypesStatic as ValueTypes>::VersionTypes>>::try_into(v)
+                .unwrap(),
+            ValueVersion::<<ValueTypesStatic as ValueTypes>::VersionTypes>(&[1u64, 0u64] as &[u64])
         );
         assert_eq!(
             TryInto::<()>::try_into(v).unwrap_err().kind,

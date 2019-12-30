@@ -48,6 +48,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub struct LispParser<T, I>
 where
     T: ValueTypes + ?Sized,
+    for<'a> &'a <T::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'a u64>,
     I: Iterator<Item = char>,
     Value<T>: Into<T::ValueRef>,
     String: Into<T::StringRef>,
@@ -59,6 +60,7 @@ where
 impl<T, I> LispParser<T, I>
 where
     T: ValueTypes + ?Sized,
+    for<'a> &'a <T::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'a u64>,
     I: Iterator<Item = char>,
     Value<T>: Into<T::ValueRef>,
     String: Into<T::StringRef>,
@@ -74,6 +76,7 @@ where
 impl<T, I> Iterator for LispParser<T, I>
 where
     T: ValueTypes + ?Sized,
+    for<'a> &'a <T::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'a u64>,
     I: Iterator<Item = char>,
     Value<T>: Into<T::ValueRef>,
     String: Into<T::StringRef>,
@@ -127,6 +130,7 @@ fn skip_whitespace<I: Iterator<Item = char>>(peekable: &mut Peekable<I>) -> Resu
 enum ReadDelimitedResult<T>
 where
     T: ValueTypes + ?Sized,
+    for<'a> &'a <T::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'a u64>,
 {
     Value(T::ValueRef),
     InvalidToken(String),
@@ -139,6 +143,7 @@ fn read_delimited<T, I>(
 ) -> Result<ReadDelimitedResult<T>>
 where
     T: ValueTypes + ?Sized,
+    for<'a> &'a <T::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'a u64>,
     I: Iterator<Item = char>,
     Value<T>: Into<T::ValueRef>,
     String: Into<T::StringRef>,
@@ -170,6 +175,7 @@ where
 fn read_list<T, I>(peekable: &mut Peekable<I>, allow_dot: bool) -> Result<T::ValueRef>
 where
     T: ValueTypes + ?Sized,
+    for<'a> &'a <T::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'a u64>,
     I: Iterator<Item = char>,
     Value<T>: Into<T::ValueRef>,
     String: Into<T::StringRef>,
@@ -231,6 +237,7 @@ where
 fn read_macro<T, I>(peekable: &mut Peekable<I>) -> Result<T::ValueRef>
 where
     T: ValueTypes + ?Sized,
+    for<'a> &'a <T::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'a u64>,
     I: Iterator<Item = char>,
     Value<T>: Into<T::ValueRef>,
     String: Into<T::StringRef>,
@@ -293,6 +300,7 @@ where
 pub enum ReadImplResult<T>
 where
     T: ValueTypes + ?Sized,
+    for<'a> &'a <T::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'a u64>,
 {
     Value(T::ValueRef),
     InvalidToken(String),
@@ -302,6 +310,7 @@ where
 pub fn read_impl<T, I>(peekable: &mut Peekable<I>) -> Result<ReadImplResult<T>>
 where
     T: ValueTypes + ?Sized,
+    for<'a> &'a <T::VersionTypes as VersionTypes>::Version: IntoIterator<Item = &'a u64>,
     I: Iterator<Item = char>,
     Value<T>: Into<T::ValueRef>,
     String: Into<T::StringRef>,
