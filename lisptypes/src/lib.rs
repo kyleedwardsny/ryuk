@@ -374,8 +374,10 @@ impl<T> Debug for ValueProcedure<T>
 where
     T: ValueTypes + ?Sized,
 {
-    fn fmt(&self, _fmt: &mut Formatter) -> std::result::Result<(), std::fmt::Error> {
-        std::result::Result::Ok(())
+    fn fmt(&self, fmt: &mut Formatter) -> std::result::Result<(), std::fmt::Error> {
+        fmt.debug_struct("ValueProcedure")
+            .field("id", &self.id)
+            .finish()
     }
 }
 
