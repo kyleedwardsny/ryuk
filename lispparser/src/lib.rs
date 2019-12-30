@@ -430,7 +430,8 @@ where
     for<'a> V::Semver: Extend<&'a u64>,
     V::SemverRef: Default + BorrowMut<V::Semver>,
 {
-    let mut result = V::SemverRef::default();
+    let mut major = Option::None;
+    let mut rest = V::SemverRef::default();
 
     for component_str in s.split('.') {
         let mut component = 0u64;
@@ -459,10 +460,19 @@ where
                 "Invalid semver component: ''",
             ));
         }
-        result.borrow_mut().extend(&[component]);
+        match &mut major {
+            Option::None => major = Option::Some(component),
+            Option::Some(_) => rest.borrow_mut().extend(&[component]),
+        }
     }
 
-    Result::Ok(ValueSemver(result))
+    match major {
+        Option::Some(major) => Result::Ok(ValueSemver { major, rest }),
+        Option::None => Result::Err(Error::new(
+            ErrorKind::InvalidSemverComponent,
+            "Invalid semver component: ''",
+        )),
+    }
 }
 
 #[cfg(test)]
@@ -473,17 +483,26 @@ mod tests {
     fn test_parse_semver() {
         assert_eq!(
             parse_semver::<SemverTypesVec>("1").unwrap(),
-            ValueSemver::<SemverTypesVec>(vec![1u64])
+            ValueSemver::<SemverTypesVec> {
+                major: 1u64,
+                rest: vec![]
+            },
         );
 
         assert_eq!(
             parse_semver::<SemverTypesVec>("2.0").unwrap(),
-            ValueSemver::<SemverTypesVec>(vec![2u64, 0u64])
+            ValueSemver::<SemverTypesVec> {
+                major: 2u64,
+                rest: vec![0u64]
+            },
         );
 
         assert_eq!(
             parse_semver::<SemverTypesVec>("3.5.10").unwrap(),
-            ValueSemver::<SemverTypesVec>(vec![3u64, 5u64, 10u64])
+            ValueSemver::<SemverTypesVec> {
+                major: 3u64,
+                rest: vec![5u64, 10u64]
+            },
         );
 
         assert_eq!(

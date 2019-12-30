@@ -416,10 +416,14 @@ where
 }
 
 #[derive(Debug)]
-pub struct ValueSemver<T>(pub T::SemverRef)
+pub struct ValueSemver<T>
 where
     T: SemverTypes + ?Sized,
-    for<'a> &'a T::Semver: IntoIterator<Item = &'a u64>;
+    for<'a> &'a T::Semver: IntoIterator<Item = &'a u64>,
+{
+    pub major: u64,
+    pub rest: T::SemverRef,
+}
 
 impl<T> Clone for ValueSemver<T>
 where
@@ -428,7 +432,50 @@ where
     T::SemverRef: Clone,
 {
     fn clone(&self) -> Self {
-        ValueSemver(self.0.clone())
+        ValueSemver {
+            major: self.major,
+            rest: self.rest.clone(),
+        }
+    }
+}
+
+pub struct SemverIter<'v, T>
+where
+    T: SemverTypes + ?Sized,
+    for<'a> &'a T::Semver: IntoIterator<Item = &'a u64>,
+{
+    v: &'v ValueSemver<T>,
+    iter: Option<<&'v T::Semver as IntoIterator>::IntoIter>,
+}
+
+impl<'v, T> Iterator for SemverIter<'v, T>
+where
+    T: SemverTypes + ?Sized,
+    for<'a> &'a T::Semver: IntoIterator<Item = &'a u64>,
+{
+    type Item = &'v u64;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match &mut self.iter {
+            Option::None => {
+                self.iter = Option::Some(self.v.rest.borrow().into_iter());
+                Option::Some(&self.v.major)
+            }
+            Option::Some(i) => i.next(),
+        }
+    }
+}
+
+impl<T> ValueSemver<T>
+where
+    T: SemverTypes + ?Sized,
+    for<'a> &'a T::Semver: IntoIterator<Item = &'a u64>,
+{
+    fn items<'v>(&'v self) -> SemverIter<'v, T> {
+        SemverIter {
+            v: self,
+            iter: Option::None,
+        }
     }
 }
 
@@ -452,8 +499,8 @@ where
     for<'a> &'a T2::Semver: IntoIterator<Item = &'a u64>,
 {
     fn partial_cmp(&self, other: &ValueSemver<T2>) -> Option<Ordering> {
-        let mut v1 = self.0.borrow().into_iter();
-        let mut v2 = other.0.borrow().into_iter();
+        let mut v1 = self.items();
+        let mut v2 = other.items();
         loop {
             match (v1.next(), v2.next()) {
                 (Option::Some(c1), Option::Some(c2)) => {
@@ -623,21 +670,24 @@ where
         match v.borrow() {
             Value::Nil => Value::Nil,
             Value::UnqualifiedSymbol(ValueUnqualifiedSymbol(s)) => {
-                Value::UnqualifiedSymbol(ValueUnqualifiedSymbol((*s).clone().into()))
+                Value::UnqualifiedSymbol(ValueUnqualifiedSymbol(s.clone().into()))
             }
-            Value::QualifiedSymbol(ValueQualifiedSymbol { name, package }) => {
+            Value::QualifiedSymbol(ValueQualifiedSymbol { package, name }) => {
                 Value::QualifiedSymbol(ValueQualifiedSymbol {
-                    name: (*name).clone().into(),
-                    package: (*package).clone().into(),
+                    package: package.clone().into().into(),
+                    name: name.clone().into().into(),
                 })
             }
             Value::Cons(ValueCons { car, cdr }) => Value::Cons(ValueCons {
                 car: Into::<Value<T2>>::into(car.borrow()).into(),
                 cdr: Into::<Value<T2>>::into(cdr.borrow()).into(),
             }),
-            Value::Bool(ValueBool(b)) => Value::Bool(ValueBool(*b)),
-            Value::String(ValueString(s)) => Value::String(ValueString((*s).clone().into())),
-            Value::Semver(ValueSemver(v)) => Value::Semver(ValueSemver((*v).clone().into())),
+            Value::Bool(b) => Value::Bool(b.clone()),
+            Value::String(ValueString(s)) => Value::String(ValueString(s.clone().into())),
+            Value::Semver(ValueSemver { major, rest }) => Value::Semver(ValueSemver {
+                major: *major,
+                rest: rest.clone().into(),
+            }),
             Value::Procedure(_) => panic!("Cannot move procedures across value type boundaries"),
         }
     }
@@ -827,17 +877,24 @@ macro_rules! str {
 
 #[macro_export]
 macro_rules! vref {
-    ($v:expr) => {{
+    ($major: expr, $rest:expr) => {{
         const V: &$crate::Value<$crate::ValueTypesStatic> =
-            &$crate::Value::Semver($crate::ValueSemver($v as &[u64]));
+            &$crate::Value::Semver($crate::ValueSemver {
+                major: $major as u64,
+                rest: $rest as &[u64],
+            });
         V
     }};
 }
 
 #[macro_export]
 macro_rules! v {
-    [$($c:expr),*] => {
-        vref!(&[$($c as u64),*])
+    [$major:expr] => {
+        vref!($major, &[])
+    };
+
+    [$major:expr, $($rest:expr),*] => {
+        vref!($major, &[$($rest as u64),*])
     };
 }
 
@@ -917,9 +974,21 @@ mod tests {
 
     #[test]
     fn test_vref_macro() {
-        const V1: &super::Value<super::ValueTypesStatic> = vref!(&[1u64, 0u64]);
+        const V1: &super::Value<super::ValueTypesStatic> = vref!(1u64, &[0u64]);
         match &*V1 {
-            super::Value::Semver(v) => assert_eq!(v.0, &[1, 0]),
+            super::Value::Semver(v) => {
+                assert_eq!(v.major, 1);
+                assert_eq!(v.rest, &[0]);
+            }
+            _ => panic!("Expected a Value::Semver"),
+        }
+
+        const V2: &super::Value<super::ValueTypesStatic> = vref!(4u64, &[]);
+        match &*V2 {
+            super::Value::Semver(v) => {
+                assert_eq!(v.major, 4);
+                assert_eq!(v.rest, &[]);
+            }
             _ => panic!("Expected a Value::Semver"),
         }
     }
@@ -928,13 +997,19 @@ mod tests {
     fn test_v_macro() {
         const V1: &super::Value<super::ValueTypesStatic> = v![2, 1];
         match &*V1 {
-            super::Value::Semver(v) => assert_eq!(v.0, &[2, 1]),
+            super::Value::Semver(v) => {
+                assert_eq!(v.major, 2);
+                assert_eq!(v.rest, &[1]);
+            }
             _ => panic!("Expected a Value::Semver"),
         }
 
         const V2: &super::Value<super::ValueTypesStatic> = v![3];
         match &*V2 {
-            super::Value::Semver(v) => assert_eq!(v.0, &[3]),
+            super::Value::Semver(v) => {
+                assert_eq!(v.major, 3);
+                assert_eq!(v.rest, &[]);
+            }
             _ => panic!("Expected a Value::Semver"),
         }
     }
@@ -1016,58 +1091,124 @@ mod tests {
         use more_asserts::*;
 
         assert_eq!(
-            ValueSemver::<SemverTypesStatic>(&[1u64, 0u64] as &[u64]),
-            ValueSemver::<SemverTypesStatic>(&[1u64, 0u64] as &[u64]),
+            ValueSemver::<SemverTypesStatic> {
+                major: 1u64,
+                rest: &[0u64] as &[u64]
+            },
+            ValueSemver::<SemverTypesStatic> {
+                major: 1u64,
+                rest: &[0u64] as &[u64]
+            },
         );
 
         assert_ne!(
-            ValueSemver::<SemverTypesStatic>(&[1u64, 0u64] as &[u64]),
-            ValueSemver::<SemverTypesStatic>(&[1u64, 0u64, 0u64] as &[u64]),
+            ValueSemver::<SemverTypesStatic> {
+                major: 1u64,
+                rest: &[0u64] as &[u64]
+            },
+            ValueSemver::<SemverTypesStatic> {
+                major: 1u64,
+                rest: &[0u64, 0u64] as &[u64]
+            },
         );
 
         assert_lt!(
-            ValueSemver::<SemverTypesStatic>(&[1u64, 0u64] as &[u64]),
-            ValueSemver::<SemverTypesStatic>(&[1u64, 0u64, 0u64] as &[u64]),
+            ValueSemver::<SemverTypesStatic> {
+                major: 1u64,
+                rest: &[0u64] as &[u64]
+            },
+            ValueSemver::<SemverTypesStatic> {
+                major: 1u64,
+                rest: &[0u64, 0u64] as &[u64]
+            },
         );
 
         assert_lt!(
-            ValueSemver::<SemverTypesStatic>(&[1u64, 0u64] as &[u64]),
-            ValueSemver::<SemverTypesStatic>(&[1u64, 1u64] as &[u64]),
+            ValueSemver::<SemverTypesStatic> {
+                major: 1u64,
+                rest: &[0u64] as &[u64]
+            },
+            ValueSemver::<SemverTypesStatic> {
+                major: 1u64,
+                rest: &[1u64] as &[u64]
+            },
         );
 
         assert_lt!(
-            ValueSemver::<SemverTypesStatic>(&[1u64, 1u64] as &[u64]),
-            ValueSemver::<SemverTypesStatic>(&[2u64, 0u64] as &[u64]),
+            ValueSemver::<SemverTypesStatic> {
+                major: 1u64,
+                rest: &[1u64] as &[u64]
+            },
+            ValueSemver::<SemverTypesStatic> {
+                major: 2u64,
+                rest: &[0u64] as &[u64]
+            },
         );
 
         assert_lt!(
-            ValueSemver::<SemverTypesStatic>(&[1u64, 1u64] as &[u64]),
-            ValueSemver::<SemverTypesStatic>(&[2u64] as &[u64]),
+            ValueSemver::<SemverTypesStatic> {
+                major: 1u64,
+                rest: &[1u64] as &[u64]
+            },
+            ValueSemver::<SemverTypesStatic> {
+                major: 2u64,
+                rest: &[] as &[u64]
+            },
         );
 
         assert_ne!(
-            ValueSemver::<SemverTypesStatic>(&[1u64, 0u64, 0u64] as &[u64]),
-            ValueSemver::<SemverTypesStatic>(&[1u64, 0u64] as &[u64]),
+            ValueSemver::<SemverTypesStatic> {
+                major: 1u64,
+                rest: &[0u64, 0u64] as &[u64]
+            },
+            ValueSemver::<SemverTypesStatic> {
+                major: 1u64,
+                rest: &[0u64] as &[u64]
+            },
         );
 
         assert_gt!(
-            ValueSemver::<SemverTypesStatic>(&[1u64, 0u64, 0u64] as &[u64]),
-            ValueSemver::<SemverTypesStatic>(&[1u64, 0u64] as &[u64]),
+            ValueSemver::<SemverTypesStatic> {
+                major: 1u64,
+                rest: &[0u64, 0u64] as &[u64]
+            },
+            ValueSemver::<SemverTypesStatic> {
+                major: 1u64,
+                rest: &[0u64] as &[u64]
+            },
         );
 
         assert_gt!(
-            ValueSemver::<SemverTypesStatic>(&[1u64, 1u64] as &[u64]),
-            ValueSemver::<SemverTypesStatic>(&[1u64, 0u64] as &[u64]),
+            ValueSemver::<SemverTypesStatic> {
+                major: 1u64,
+                rest: &[1u64] as &[u64]
+            },
+            ValueSemver::<SemverTypesStatic> {
+                major: 1u64,
+                rest: &[0u64] as &[u64]
+            },
         );
 
         assert_gt!(
-            ValueSemver::<SemverTypesStatic>(&[2u64, 0u64] as &[u64]),
-            ValueSemver::<SemverTypesStatic>(&[1u64, 1u64] as &[u64]),
+            ValueSemver::<SemverTypesStatic> {
+                major: 2u64,
+                rest: &[0u64] as &[u64]
+            },
+            ValueSemver::<SemverTypesStatic> {
+                major: 1u64,
+                rest: &[1u64] as &[u64]
+            },
         );
 
         assert_gt!(
-            ValueSemver::<SemverTypesStatic>(&[2u64] as &[u64]),
-            ValueSemver::<SemverTypesStatic>(&[1u64, 1u64] as &[u64]),
+            ValueSemver::<SemverTypesStatic> {
+                major: 2u64,
+                rest: &[] as &[u64]
+            },
+            ValueSemver::<SemverTypesStatic> {
+                major: 1u64,
+                rest: &[1u64] as &[u64]
+            },
         );
     }
 
@@ -1306,7 +1447,10 @@ mod tests {
         assert_eq!(
             TryInto::<&ValueSemver<<ValueTypesStatic as ValueTypes>::SemverTypes>>::try_into(v)
                 .unwrap(),
-            &ValueSemver::<<ValueTypesStatic as ValueTypes>::SemverTypes>(&[1u64, 0u64] as &[u64])
+            &ValueSemver::<<ValueTypesStatic as ValueTypes>::SemverTypes> {
+                major: 1u64,
+                rest: &[0u64] as &[u64]
+            }
         );
         assert_eq!(
             TryInto::<()>::try_into(v).unwrap_err().kind,
@@ -1406,7 +1550,10 @@ mod tests {
         assert_eq!(
             TryInto::<ValueSemver<<ValueTypesStatic as ValueTypes>::SemverTypes>>::try_into(v)
                 .unwrap(),
-            ValueSemver::<<ValueTypesStatic as ValueTypes>::SemverTypes>(&[1u64, 0u64] as &[u64])
+            ValueSemver::<<ValueTypesStatic as ValueTypes>::SemverTypes> {
+                major: 1u64,
+                rest: &[0u64] as &[u64]
+            }
         );
         assert_eq!(
             TryInto::<()>::try_into(v).unwrap_err().kind,
