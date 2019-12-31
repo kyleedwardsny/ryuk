@@ -1,5 +1,5 @@
 use ryuk_lisptypes::*;
-use std::borrow::BorrowMut;
+use std::borrow::{Borrow, BorrowMut};
 use std::fmt::Formatter;
 use std::iter::Peekable;
 use std::marker::PhantomData;
@@ -105,7 +105,7 @@ where
 }
 
 fn is_token_char(c: char) -> bool {
-    if let 'a'..='z' | 'A'..='Z' | '0'..='9' | '.' | '#' = c {
+    if let 'a'..='z' | 'A'..='Z' | '0'..='9' | '.' | '#' | '/' | '-' = c {
         true
     } else {
         false
@@ -245,6 +245,33 @@ where
     Result::Err(Error::new(ErrorKind::EndOfFile, "End of file reached"))
 }
 
+fn read_language_directive<S, V, I>(
+    peekable: &mut Peekable<I>,
+) -> Result<ValueLanguageDirective<S, V>>
+where
+    V: SemverTypes + ?Sized,
+    for<'a> &'a V::Semver: IntoIterator<Item = &'a u64>,
+    for<'a> V::Semver: Extend<&'a u64>,
+    I: Iterator<Item = char>,
+    S: Borrow<str>,
+    String: Into<S>,
+    V::SemverRef: Default + BorrowMut<V::Semver>,
+{
+    skip_whitespace(peekable)?;
+
+    match read_token(peekable)? {
+        ReadTokenResult::ValidToken(t) => Result::Ok(if t.starts_with("kira/") {
+            ValueLanguageDirective::Kira(parse_semver(&t[5..])?)
+        } else {
+            ValueLanguageDirective::Other(t.into())
+        }),
+        ReadTokenResult::InvalidToken(t) => Result::Err(Error::new(
+            ErrorKind::InvalidToken,
+            format!("Invalid token: '{}'", t),
+        )),
+    }
+}
+
 fn read_macro<T, I>(peekable: &mut Peekable<I>) -> Result<T::ValueRef>
 where
     T: ValueTypes + ?Sized,
@@ -271,6 +298,9 @@ where
         } else {
             match read_token(peekable)? {
                 ReadTokenResult::ValidToken(t) => match &*t {
+                    "lang" => Result::Ok(
+                        Value::LanguageDirective(read_language_directive(peekable)?).into(),
+                    ),
                     "t" => Result::Ok(Value::Bool(ValueBool(true)).into()),
                     "f" => Result::Ok(Value::Bool(ValueBool(false)).into()),
                     _ => Result::Err(Error::new(
@@ -425,7 +455,7 @@ where
 
 fn parse_semver<V>(s: &str) -> Result<ValueSemver<V>>
 where
-    V: SemverTypes,
+    V: SemverTypes + ?Sized,
     for<'a> &'a V::Semver: IntoIterator<Item = &'a u64>,
     for<'a> V::Semver: Extend<&'a u64>,
     V::SemverRef: Default + BorrowMut<V::Semver>,
@@ -643,6 +673,33 @@ mod tests {
         assert_eq!(
             i.next().unwrap().unwrap_err().kind,
             crate::ErrorKind::InvalidToken
+        );
+        assert!(i.next().is_none());
+    }
+
+    #[test]
+    fn test_read_lang() {
+        let s = "#lang kira/1.0 #lang\nnot-kira #lang Kira/1.0  \n  #lang ( #lang kira/1.a #Lang kira/1.0\n#lang kira/1.01";
+        let mut i = LispParser::<ValueTypesRc, _>::new(s.chars().peekable());
+        assert_eq!(*i.next().unwrap().unwrap(), *lang_kira![1, 0]);
+        assert_eq!(*i.next().unwrap().unwrap(), *lang_other!("not-kira"));
+        assert_eq!(*i.next().unwrap().unwrap(), *lang_other!("Kira/1.0"));
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            crate::ErrorKind::InvalidToken
+        );
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            crate::ErrorKind::InvalidCharacter
+        );
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            crate::ErrorKind::InvalidToken
+        );
+        assert_eq!(*i.next().unwrap().unwrap(), *uqsym!("kira/1.0"));
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            crate::ErrorKind::InvalidSemverComponent
         );
         assert!(i.next().is_none());
     }
