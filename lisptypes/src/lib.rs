@@ -4,6 +4,17 @@ use std::convert::{TryFrom, TryInto};
 use std::fmt::{Debug, Formatter};
 use std::rc::Rc;
 
+macro_rules! eq_match {
+    ($lhs: expr, $rhs:expr, { $(($lpat:pat, $rpat:pat) => $result:expr,)* }) => {
+        match $lhs {
+            $($lpat => match $rhs {
+                $rpat => $result,
+                _ => false,
+            },)*
+        }
+    };
+}
+
 #[derive(Debug)]
 pub struct Error {
     pub kind: ErrorKind,
@@ -518,6 +529,49 @@ where
 }
 
 #[derive(Debug)]
+pub enum ValueLanguageDirective<S, V>
+where
+    S: Borrow<str>,
+    V: SemverTypes + ?Sized,
+    for<'a> &'a V::Semver: IntoIterator<Item = &'a u64>,
+{
+    Kira(ValueSemver<V>),
+    Other(S),
+}
+
+impl<S, V> Clone for ValueLanguageDirective<S, V>
+where
+    S: Borrow<str> + Clone,
+    V: SemverTypes + ?Sized,
+    for<'a> &'a V::Semver: IntoIterator<Item = &'a u64>,
+    V::SemverRef: Clone,
+{
+    fn clone(&self) -> Self {
+        match self {
+            Self::Kira(v) => Self::Kira(v.clone()),
+            Self::Other(s) => Self::Other(s.clone()),
+        }
+    }
+}
+
+impl<S1, V1, S2, V2> PartialEq<ValueLanguageDirective<S2, V2>> for ValueLanguageDirective<S1, V1>
+where
+    S1: Borrow<str>,
+    S2: Borrow<str>,
+    V1: SemverTypes + ?Sized,
+    V2: SemverTypes + ?Sized,
+    for<'a> &'a V1::Semver: IntoIterator<Item = &'a u64>,
+    for<'a> &'a V2::Semver: IntoIterator<Item = &'a u64>,
+{
+    fn eq(&self, rhs: &ValueLanguageDirective<S2, V2>) -> bool {
+        eq_match!(self, rhs, {
+            (ValueLanguageDirective::Kira(v1), ValueLanguageDirective::Kira(v2)) => v1 == v2,
+            (ValueLanguageDirective::Other(n1), ValueLanguageDirective::Other(n2)) => n1.borrow() == n2.borrow(),
+        })
+    }
+}
+
+#[derive(Debug)]
 pub enum Value<T>
 where
     T: ValueTypes + ?Sized,
@@ -530,6 +584,7 @@ where
     Bool(ValueBool),
     String(ValueString<T::StringRef>),
     Semver(ValueSemver<T::SemverTypes>),
+    LanguageDirective(ValueLanguageDirective<T::StringRef, T::SemverTypes>),
     Procedure(ValueProcedure<T>),
 }
 
@@ -623,17 +678,6 @@ from_value_type!(T, ValueString<T::StringRef>, s -> Value::String(s));
 from_value_type!(T, ValueSemver<T::SemverTypes>, v -> Value::Semver(v));
 from_value_type!(T, ValueProcedure<T>, p -> Value::Procedure(p));
 
-macro_rules! eq_match {
-    ($lhs: expr, $rhs:expr, { $(($lpat:pat, $rpat:pat) => $result:expr,)* }) => {
-        match $lhs {
-            $($lpat => match $rhs {
-                $rpat => $result,
-                _ => false,
-            },)*
-        }
-    };
-}
-
 impl<T1, T2> PartialEq<Value<T2>> for Value<T1>
 where
     T1: ValueTypes + ?Sized,
@@ -651,6 +695,7 @@ where
             (Value::String(s1), Value::String(s2)) => s1 == s2,
             (Value::Semver(v1), Value::Semver(v2)) => v1 == v2,
             (Value::Procedure(p1), Value::Procedure(p2)) => p1 == p2,
+            (Value::LanguageDirective(l1), Value::LanguageDirective(l2)) => l1 == l2,
         })
     }
 }
@@ -687,6 +732,15 @@ where
             Value::Semver(ValueSemver { major, rest }) => Value::Semver(ValueSemver {
                 major: *major,
                 rest: rest.clone().into(),
+            }),
+            Value::LanguageDirective(l) => Value::<T2>::LanguageDirective(match l {
+                ValueLanguageDirective::Kira(ValueSemver { major, rest }) => {
+                    ValueLanguageDirective::Kira(ValueSemver {
+                        major: *major,
+                        rest: rest.clone().into(),
+                    })
+                }
+                ValueLanguageDirective::Other(n) => ValueLanguageDirective::Other(n.clone().into()),
             }),
             Value::Procedure(_) => panic!("Cannot move procedures across value type boundaries"),
         }
@@ -899,6 +953,43 @@ macro_rules! v {
 }
 
 #[macro_export]
+macro_rules! lang_ref {
+    ($lang:expr) => {{
+        const L: &$crate::Value<$crate::ValueTypesStatic> =
+            &$crate::Value::LanguageDirective($lang);
+        L
+    }};
+}
+
+#[macro_export]
+macro_rules! lang_kira_ref {
+    ($major:expr, $rest:expr) => {
+        lang_ref!($crate::ValueLanguageDirective::Kira($crate::ValueSemver {
+            major: $major as u64,
+            rest: $rest as &[u64]
+        }))
+    };
+}
+
+#[macro_export]
+macro_rules! lang_kira {
+    [$major:expr] => {
+        lang_kira_ref!($major, &[])
+    };
+
+    [$major:expr, $($rest:expr),*] => {
+        lang_kira_ref!($major, &[$($rest as u64),*])
+    };
+}
+
+#[macro_export]
+macro_rules! lang_other {
+    ($name:expr) => {
+        lang_ref!($crate::ValueLanguageDirective::Other($name))
+    };
+}
+
+#[macro_export]
 macro_rules! list {
     () => { nil!() };
     ($e:expr) => { cons!($e, nil!()) };
@@ -1011,6 +1102,38 @@ mod tests {
                 assert_eq!(v.rest, &[]);
             }
             _ => panic!("Expected a Value::Semver"),
+        }
+    }
+
+    #[test]
+    fn test_lang_kira_macro() {
+        const L1: &super::Value<super::ValueTypesStatic> = lang_kira![1];
+        match &*L1 {
+            super::Value::LanguageDirective(super::ValueLanguageDirective::Kira(v)) => {
+                assert_eq!(v.major, 1);
+                assert_eq!(v.rest, &[]);
+            }
+            _ => panic!("Expected a Value::LanguageDirective with Kira"),
+        }
+
+        const L2: &super::Value<super::ValueTypesStatic> = lang_kira![1, 0];
+        match &*L2 {
+            super::Value::LanguageDirective(super::ValueLanguageDirective::Kira(v)) => {
+                assert_eq!(v.major, 1);
+                assert_eq!(v.rest, &[0]);
+            }
+            _ => panic!("Expected a Value::LanguageDirective with Kira"),
+        }
+    }
+
+    #[test]
+    fn test_lang_other_macro() {
+        const L1: &super::Value<super::ValueTypesStatic> = lang_other!("not-kira");
+        match &*L1 {
+            super::Value::LanguageDirective(super::ValueLanguageDirective::Other(n)) => {
+                assert_eq!(n, &"not-kira");
+            }
+            _ => panic!("Expected a Value::LanguageDirective with other"),
         }
     }
 
@@ -1301,6 +1424,12 @@ mod tests {
         assert_eq!(v![1, 0], v![1, 0]);
         assert_ne!(v![1, 0], v![1, 1]);
         assert_ne!(v![1, 0], nil!());
+
+        assert_eq!(lang_kira![1, 0], lang_kira![1, 0]);
+        assert_ne!(lang_kira![1, 0], lang_kira![1, 1]);
+        assert_ne!(lang_kira![1, 0], lang_other!("not-kira"));
+        assert_ne!(lang_kira![1, 0], v![1, 0]);
+        assert_ne!(lang_kira![1, 0], nil!());
 
         let v11 = super::Rc::new(super::Value::<super::ValueTypesRc>::Procedure(
             super::ValueProcedure {
