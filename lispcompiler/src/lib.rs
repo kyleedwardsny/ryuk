@@ -97,6 +97,13 @@ where
 mod tests {
     use super::*;
 
+    fn static_f1(
+        _: &mut (dyn Environment<ValueTypesStatic> + 'static),
+        _: &Value<ValueTypesStatic>,
+    ) -> Result<&'static Value<ValueTypesStatic>> {
+        Result::Ok(&Value::Nil)
+    }
+
     #[test]
     fn test_from_non_nil() {
         assert_eq!(
@@ -113,6 +120,10 @@ mod tests {
         assert_eq!(
             ValueTypeNonNil::from(lang_kira![1, 0]),
             ValueTypeNonNil::LanguageDirective
+        );
+        assert_eq!(
+            ValueTypeNonNil::from(proc!(1, &static_f1)),
+            ValueTypeNonNil::Procedure
         );
     }
 
