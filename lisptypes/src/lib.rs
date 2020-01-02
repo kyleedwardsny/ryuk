@@ -759,13 +759,49 @@ where
     Into::<Value<T2>>::into(v).into()
 }
 
+pub enum LispListItem<T>
+where
+    T: ValueTypes + ?Sized,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+{
+    Item(T::ValueRef),
+    Tail(T::ValueRef),
+}
+
+impl<T> LispListItem<T>
+where
+    T: ValueTypes + ?Sized,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+{
+    pub fn try_unwrap_item(self) -> Result<T::ValueRef> {
+        match self {
+            LispListItem::Item(v) => Result::Ok(v),
+            _ => Result::Err(Error::new(ErrorKind::IncorrectType, "Incorrect type")),
+        }
+    }
+
+    pub fn unwrap_item(self) -> T::ValueRef {
+        match self {
+            LispListItem::Item(v) => v,
+            _ => panic!("Expected LispListItem::Item"),
+        }
+    }
+
+    pub fn unwrap_tail(self) -> T::ValueRef {
+        match self {
+            LispListItem::Tail(v) => v,
+            _ => panic!("Expected LispListItem::Tail"),
+        }
+    }
+}
+
 pub struct LispList<T>
 where
     T: ValueTypes + ?Sized,
     for<'b> &'b <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'b u64>,
     T::ValueRef: Clone,
 {
-    ptr: T::ValueRef,
+    ptr: Option<T::ValueRef>,
 }
 
 impl<T> LispList<T>
@@ -775,11 +811,20 @@ where
     T::ValueRef: Clone,
 {
     pub fn new(ptr: T::ValueRef) -> Self {
-        Self { ptr }
+        Self {
+            ptr: LispList::<T>::filter_nil(ptr),
+        }
     }
 
-    pub fn take(self) -> T::ValueRef {
+    pub fn take(self) -> Option<T::ValueRef> {
         self.ptr
+    }
+
+    fn filter_nil(v: T::ValueRef) -> Option<T::ValueRef> {
+        match v.borrow() {
+            Value::Nil => Option::None,
+            _ => Option::Some(v),
+        }
     }
 }
 
@@ -789,21 +834,24 @@ where
     for<'b> &'b <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'b u64>,
     T::ValueRef: Clone,
 {
-    type Item = Result<T::ValueRef>;
+    type Item = LispListItem<T>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self.ptr.borrow() {
-            Value::Nil => Option::None,
-            Value::Cons(c) => {
-                let car = c.car.clone();
-                let cdr = c.cdr.clone();
-                self.ptr = cdr;
-                Option::Some(Result::Ok(car))
-            }
-            _ => Option::Some(Result::Err(Error::new(
-                ErrorKind::IncorrectType,
-                "Incorrect type",
-            ))),
+        match &self.ptr {
+            Option::Some(v) => match v.borrow() {
+                Value::Cons(c) => {
+                    let car = c.car.clone();
+                    let cdr = c.cdr.clone();
+                    self.ptr = LispList::<T>::filter_nil(cdr);
+                    Option::Some(LispListItem::Item(car))
+                }
+                _ => {
+                    let result = LispListItem::Tail(v.clone());
+                    self.ptr = Option::None;
+                    Option::Some(result)
+                }
+            },
+            Option::None => Option::None,
         }
     }
 }
@@ -1756,22 +1804,32 @@ mod tests {
 
         let mut i =
             LispList::<ValueTypesStatic>::new(list!(uqsym!("uqsym"), bool!(true), str!("str")));
-        assert_eq!(i.next().unwrap().unwrap(), uqsym!("uqsym"));
-        assert_eq!(i.next().unwrap().unwrap(), bool!(true));
-        assert_eq!(i.next().unwrap().unwrap(), str!("str"));
+        assert_eq!(i.next().unwrap().unwrap_item(), uqsym!("uqsym"));
+        assert_eq!(i.next().unwrap().unwrap_item(), bool!(true));
+        assert_eq!(i.next().unwrap().unwrap_item(), str!("str"));
         assert!(i.next().is_none());
+        assert_eq!(i.take(), Option::None);
 
         let mut i = LispList::<ValueTypesStatic>::new(cons!(uqsym!("uqsym"), bool!(true)));
-        assert_eq!(i.next().unwrap().unwrap(), uqsym!("uqsym"));
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            ErrorKind::IncorrectType
-        );
+        assert_eq!(i.next().unwrap().unwrap_item(), uqsym!("uqsym"));
+        assert_eq!(i.next().unwrap().unwrap_tail(), bool!(true));
+        assert!(i.next().is_none());
+        assert_eq!(i.take(), Option::None);
 
         let mut i =
             LispList::<ValueTypesStatic>::new(list!(uqsym!("uqsym"), bool!(true), str!("str")));
-        assert_eq!(i.next().unwrap().unwrap(), uqsym!("uqsym"));
-        assert_eq!(i.take(), list!(bool!(true), str!("str")));
+        assert_eq!(i.next().unwrap().unwrap_item(), uqsym!("uqsym"));
+        assert_eq!(i.take(), Option::Some(list!(bool!(true), str!("str"))));
+
+        let mut i =
+            LispList::<ValueTypesStatic>::new(list!(uqsym!("uqsym"), bool!(true), str!("str")));
+        assert_eq!(i.next().unwrap().unwrap_item(), uqsym!("uqsym"));
+        assert_eq!(i.next().unwrap().unwrap_item(), bool!(true));
+        assert_eq!(i.next().unwrap().unwrap_item(), str!("str"));
+        assert_eq!(i.take(), Option::None);
+
+        let i = LispList::<ValueTypesStatic>::new(nil!());
+        assert_eq!(i.take(), Option::None);
     }
 
     struct SimpleLayer {
@@ -1866,6 +1924,7 @@ mod tests {
             let mut result = String::new();
 
             for try_item in LispList::<ValueTypesRc>::new(args)
+                .map(|i| i.try_unwrap_item())
                 .map(env.map_evaluate())
                 .map(map_try_into::<ValueTypesRc, _, ValueString<String>>)
             {
