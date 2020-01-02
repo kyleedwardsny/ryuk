@@ -1,6 +1,7 @@
 [workspace]
 
 members = [
+    "lispcompiler",
     "lispparser",
     "lisptypes",
 ]
