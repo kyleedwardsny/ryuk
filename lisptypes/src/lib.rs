@@ -1038,6 +1038,18 @@ macro_rules! lang_other {
 }
 
 #[macro_export]
+macro_rules! proc {
+    ($id:expr, $proc:expr) => {{
+        const P: &$crate::Value<$crate::ValueTypesStatic> =
+            &$crate::Value::Procedure($crate::ValueProcedure {
+                id: $id,
+                proc: $proc,
+            });
+        P
+    }};
+}
+
+#[macro_export]
 macro_rules! list {
     () => { nil!() };
     ($e:expr) => { cons!($e, nil!()) };
@@ -1046,6 +1058,20 @@ macro_rules! list {
 
 #[cfg(test)]
 mod tests {
+    fn static_f1(
+        _: &mut (dyn super::Environment<super::ValueTypesStatic> + 'static),
+        _: &super::Value<super::ValueTypesStatic>,
+    ) -> super::Result<&'static super::Value<super::ValueTypesStatic>> {
+        super::Result::Ok(&super::Value::Nil)
+    }
+
+    fn static_f2(
+        _: &mut (dyn super::Environment<super::ValueTypesStatic> + 'static),
+        _: &super::Value<super::ValueTypesStatic>,
+    ) -> super::Result<&'static super::Value<super::ValueTypesStatic>> {
+        super::Result::Ok(&super::Value::String(super::ValueString("str")))
+    }
+
     #[test]
     fn test_nil_macro() {
         const NIL: &super::Value<super::ValueTypesStatic> = nil!();
@@ -1182,6 +1208,15 @@ mod tests {
                 assert_eq!(n, &"not-kira");
             }
             _ => panic!("Expected a Value::LanguageDirective with other"),
+        }
+    }
+
+    #[test]
+    fn test_proc_macro() {
+        const P: &super::Value<super::ValueTypesStatic> = proc!(1, &static_f1);
+        match &*P {
+            super::Value::Procedure(super::ValueProcedure { id, proc: _ }) => assert_eq!(*id, 1),
+            _ => panic!("Expected a Value::Procedure"),
         }
     }
 
@@ -1383,22 +1418,6 @@ mod tests {
         );
     }
 
-    fn static_f1(
-        _: &mut (dyn super::Environment<super::ValueTypesRc> + 'static),
-        _: <super::ValueTypesRc as super::ValueTypes>::ValueRef,
-    ) -> super::Result<<super::ValueTypesRc as super::ValueTypes>::ValueRef> {
-        super::Result::Ok(super::Rc::new(super::Value::Nil))
-    }
-
-    fn static_f2(
-        _: &mut (dyn super::Environment<super::ValueTypesRc> + 'static),
-        _: <super::ValueTypesRc as super::ValueTypes>::ValueRef,
-    ) -> super::Result<<super::ValueTypesRc as super::ValueTypes>::ValueRef> {
-        super::Result::Ok(super::Rc::new(super::Value::String(super::ValueString(
-            "str".to_string(),
-        ))))
-    }
-
     #[test]
     fn test_eq() {
         assert_eq!(nil!(), nil!());
@@ -1479,35 +1498,11 @@ mod tests {
         assert_ne!(lang_kira![1, 0], v![1, 0]);
         assert_ne!(lang_kira![1, 0], nil!());
 
-        let v11 = super::Rc::new(super::Value::<super::ValueTypesRc>::Procedure(
-            super::ValueProcedure {
-                id: 1,
-                proc: super::Rc::new(static_f1),
-            },
-        ));
-        let v12 = super::Rc::new(super::Value::<super::ValueTypesRc>::Procedure(
-            super::ValueProcedure {
-                id: 1,
-                proc: super::Rc::new(static_f2),
-            },
-        ));
-        let v21 = super::Rc::new(super::Value::<super::ValueTypesRc>::Procedure(
-            super::ValueProcedure {
-                id: 2,
-                proc: super::Rc::new(static_f1),
-            },
-        ));
-        let v22 = super::Rc::new(super::Value::<super::ValueTypesRc>::Procedure(
-            super::ValueProcedure {
-                id: 2,
-                proc: super::Rc::new(static_f2),
-            },
-        ));
-        assert_eq!(v11, v11);
-        assert_eq!(v11, v12);
-        assert_ne!(v11, v21);
-        assert_ne!(v11, v22);
-        assert_ne!(v11, super::Rc::new(super::Value::Nil));
+        assert_eq!(proc!(1, &static_f1), proc!(1, &static_f1));
+        assert_eq!(proc!(1, &static_f1), proc!(1, &static_f2));
+        assert_ne!(proc!(1, &static_f1), proc!(2, &static_f1));
+        assert_ne!(proc!(1, &static_f1), proc!(2, &static_f2));
+        assert_ne!(proc!(1, &static_f1), nil!());
     }
 
     #[test]
@@ -1634,19 +1629,16 @@ mod tests {
             ErrorKind::IncorrectType
         );
 
-        let v = Value::<ValueTypesRc>::Procedure(ValueProcedure::<ValueTypesRc> {
-            id: 1,
-            proc: Rc::new(static_f1),
-        });
+        let v = proc!(1, &static_f1);
         assert_eq!(
-            TryInto::<&ValueProcedure<ValueTypesRc>>::try_into(&v).unwrap(),
-            &ValueProcedure::<ValueTypesRc> {
+            TryInto::<&ValueProcedure<ValueTypesStatic>>::try_into(v).unwrap(),
+            &ValueProcedure::<ValueTypesStatic> {
                 id: 1,
-                proc: Rc::new(static_f1)
+                proc: &static_f1,
             }
         );
         assert_eq!(
-            TryInto::<()>::try_into(&v).unwrap_err().kind,
+            TryInto::<()>::try_into(v).unwrap_err().kind,
             ErrorKind::IncorrectType
         );
     }
@@ -1737,19 +1729,16 @@ mod tests {
             ErrorKind::IncorrectType
         );
 
-        let v = Value::<ValueTypesRc>::Procedure(ValueProcedure::<ValueTypesRc> {
-            id: 1,
-            proc: Rc::new(static_f1),
-        });
+        let v = proc!(1, &static_f1);
         assert_eq!(
-            TryInto::<ValueProcedure<ValueTypesRc>>::try_into(&v).unwrap(),
-            ValueProcedure::<ValueTypesRc> {
+            TryInto::<ValueProcedure<ValueTypesStatic>>::try_into(v).unwrap(),
+            ValueProcedure::<ValueTypesStatic> {
                 id: 1,
-                proc: Rc::new(static_f1)
+                proc: &static_f1,
             }
         );
         assert_eq!(
-            TryInto::<()>::try_into(&v).unwrap_err().kind,
+            TryInto::<()>::try_into(v).unwrap_err().kind,
             ErrorKind::IncorrectType
         );
     }
@@ -1784,16 +1773,16 @@ mod tests {
         let v: Value<ValueTypesStatic> = ValueString("str").into();
         assert_eq!(&v, str!("str"));
 
-        let v: Value<ValueTypesRc> = ValueProcedure::<ValueTypesRc> {
+        let v: Value<ValueTypesStatic> = ValueProcedure::<ValueTypesStatic> {
             id: 1,
-            proc: Rc::new(static_f1),
+            proc: &static_f1,
         }
         .into();
         assert_eq!(
             v,
-            Value::<ValueTypesRc>::Procedure(ValueProcedure {
+            Value::<ValueTypesStatic>::Procedure(ValueProcedure {
                 id: 1,
-                proc: Rc::new(static_f1)
+                proc: &static_f1,
             })
         );
     }
