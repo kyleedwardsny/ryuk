@@ -118,20 +118,6 @@ where
     }
 }
 
-impl<T> dyn Environment<T>
-where
-    T: ValueTypes + ?Sized,
-    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
-    T::ValueRef: Clone,
-{
-    pub fn map_evaluate<'a, V>(&'a mut self) -> (impl FnMut(Result<V>) -> Result<T::ValueRef> + 'a)
-    where
-        V: Into<T::ValueRef>,
-    {
-        move |v| self.evaluate(v?.into())
-    }
-}
-
 pub trait LayeredEnvironmentTypes
 where
     for<'a> &'a <<Self::ValueTypes as ValueTypes>::SemverTypes as SemverTypes>::Semver:
@@ -1913,8 +1899,7 @@ mod tests {
             let mut result = String::new();
 
             for try_item in LispList::<ValueTypesRc>::new(args)
-                .map(|i| i.try_unwrap_item())
-                .map(env.map_evaluate())
+                .map(|i| env.evaluate(i.try_unwrap_item()?))
                 .map(map_try_into::<ValueTypesRc, _, ValueString<String>>)
             {
                 let item = try_item?;
