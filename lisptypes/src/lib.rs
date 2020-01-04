@@ -4,6 +4,7 @@ use std::convert::{TryFrom, TryInto};
 use std::fmt::{Debug, Formatter};
 use std::rc::Rc;
 
+#[macro_export]
 macro_rules! eq_match {
     ($lhs: expr, $rhs:expr, { $(($lpat:pat, $rpat:pat) => $result:expr,)* }) => {
         match $lhs {
