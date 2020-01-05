@@ -59,9 +59,9 @@ where
 {
     type ValueRef: Borrow<Value<Self>> + Debug;
     type StringRef: Borrow<str>;
-    type Proc: Fn(&mut (dyn Environment<Self> + 'static), Self::ValueRef) -> Result<Self::ValueRef>
+    type Func: Fn(&mut (dyn Environment<Self> + 'static), Self::ValueRef) -> Result<Self::ValueRef>
         + ?Sized;
-    type ProcRef: Borrow<Self::Proc>;
+    type FuncRef: Borrow<Self::Func>;
     type SemverTypes: SemverTypes;
 }
 
@@ -114,7 +114,7 @@ where
 
     fn call_function(&mut self, c: &ValueCons<T>) -> Result<T::ValueRef> {
         match self.evaluate(c.car.clone())?.borrow() {
-            Value::Procedure(p) => p.proc.borrow()(self.as_dyn_mut(), c.cdr.clone()),
+            Value::Function(f) => f.func.borrow()(self.as_dyn_mut(), c.cdr.clone()),
             _ => Result::Err(Error::new(ErrorKind::NotAFunction, "Not a function")),
         }
     }
@@ -359,49 +359,52 @@ where
     }
 }
 
-pub struct ValueProcedure<T>
+pub struct ValueFunction<T>
 where
     T: ValueTypes + ?Sized,
     for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
 {
-    pub id: u32, // Needed to test for equality
-    pub proc: T::ProcRef,
+    pub name: ValueQualifiedSymbol<T::StringRef>,
+    pub func: T::FuncRef,
 }
 
-impl<T> Clone for ValueProcedure<T>
+impl<T> Clone for ValueFunction<T>
 where
     T: ValueTypes + ?Sized,
     for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
-    T::ProcRef: Clone,
+    T::FuncRef: Clone,
+    ValueQualifiedSymbol<T::StringRef>: Clone,
 {
     fn clone(&self) -> Self {
-        ValueProcedure {
-            id: self.id,
-            proc: self.proc.clone(),
+        ValueFunction {
+            name: self.name.clone(),
+            func: self.func.clone(),
         }
     }
 }
 
-impl<T1, T2> PartialEq<ValueProcedure<T2>> for ValueProcedure<T1>
+impl<T1, T2> PartialEq<ValueFunction<T2>> for ValueFunction<T1>
 where
     T1: ValueTypes + ?Sized,
     T2: ValueTypes + ?Sized,
     for<'a> &'a <T1::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
     for<'a> &'a <T2::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+    ValueQualifiedSymbol<T1::StringRef>: PartialEq<ValueQualifiedSymbol<T2::StringRef>>,
 {
-    fn eq(&self, rhs: &ValueProcedure<T2>) -> bool {
-        self.id == rhs.id
+    fn eq(&self, rhs: &ValueFunction<T2>) -> bool {
+        self.name == rhs.name
     }
 }
 
-impl<T> Debug for ValueProcedure<T>
+impl<T> Debug for ValueFunction<T>
 where
     T: ValueTypes + ?Sized,
     for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+    T::StringRef: Debug,
 {
     fn fmt(&self, fmt: &mut Formatter) -> std::result::Result<(), std::fmt::Error> {
-        fmt.debug_struct("ValueProcedure")
-            .field("id", &self.id)
+        fmt.debug_struct("ValueFunction")
+            .field("name", &self.name)
             .finish()
     }
 }
@@ -573,7 +576,7 @@ where
     String(ValueString<T::StringRef>),
     Semver(ValueSemver<T::SemverTypes>),
     LanguageDirective(ValueLanguageDirective<T::StringRef, T::SemverTypes>),
-    Procedure(ValueProcedure<T>),
+    Function(ValueFunction<T>),
 }
 
 macro_rules! try_from_value {
@@ -637,11 +640,11 @@ try_from_value!(
 );
 try_from_value_ref!(T, ValueSemver<T::SemverTypes>, Value::Semver(v) => v);
 try_from_value!(
-    T, ValueProcedure<T>,
-    (ValueProcedure<T>: Clone),
-    Value::Procedure(p) => (*p).clone()
+    T, ValueFunction<T>,
+    (ValueFunction<T>: Clone),
+    Value::Function(f) => (*f).clone()
 );
-try_from_value_ref!(T, ValueProcedure<T>, Value::Procedure(p) => p);
+try_from_value_ref!(T, ValueFunction<T>, Value::Function(p) => p);
 
 macro_rules! from_value_type {
     ($t:ident, $in:ty, $param:ident -> $result:expr) => {
@@ -664,7 +667,7 @@ from_value_type!(T, ValueCons<T>, c -> Value::Cons(c));
 from_value_type!(T, ValueBool, b -> Value::Bool(b));
 from_value_type!(T, ValueString<T::StringRef>, s -> Value::String(s));
 from_value_type!(T, ValueSemver<T::SemverTypes>, v -> Value::Semver(v));
-from_value_type!(T, ValueProcedure<T>, p -> Value::Procedure(p));
+from_value_type!(T, ValueFunction<T>, f -> Value::Function(f));
 
 impl<T1, T2> PartialEq<Value<T2>> for Value<T1>
 where
@@ -682,8 +685,8 @@ where
             (Value::Bool(b1), Value::Bool(b2)) => b1 == b2,
             (Value::String(s1), Value::String(s2)) => s1 == s2,
             (Value::Semver(v1), Value::Semver(v2)) => v1 == v2,
-            (Value::Procedure(p1), Value::Procedure(p2)) => p1 == p2,
             (Value::LanguageDirective(l1), Value::LanguageDirective(l2)) => l1 == l2,
+            (Value::Function(f1), Value::Function(f2)) => f1 == f2,
         })
     }
 }
@@ -730,7 +733,7 @@ where
                 }
                 ValueLanguageDirective::Other(n) => ValueLanguageDirective::Other(n.clone().into()),
             }),
-            Value::Procedure(_) => panic!("Cannot move procedures across value type boundaries"),
+            Value::Function(_) => panic!("Cannot move functions across value type boundaries"),
         }
     }
 }
@@ -756,7 +759,7 @@ pub enum ValueTypeNonList {
     String,
     Semver,
     LanguageDirective,
-    Procedure,
+    Function,
 }
 
 impl<T> From<&Value<T>> for ValueType
@@ -806,7 +809,7 @@ where
             Value::String(_) => ValueTypeNonList::String,
             Value::Semver(_) => ValueTypeNonList::Semver,
             Value::LanguageDirective(_) => ValueTypeNonList::LanguageDirective,
-            Value::Procedure(_) => ValueTypeNonList::Procedure,
+            Value::Function(_) => ValueTypeNonList::Function,
         }
     }
 }
@@ -1100,9 +1103,9 @@ pub struct ValueTypesRc;
 impl ValueTypes for ValueTypesRc {
     type ValueRef = Rc<Value<Self>>;
     type StringRef = String;
-    type Proc =
+    type Func =
         dyn Fn(&mut (dyn Environment<Self> + 'static), Self::ValueRef) -> Result<Self::ValueRef>;
-    type ProcRef = Rc<Self::Proc>;
+    type FuncRef = Rc<Self::Func>;
     type SemverTypes = SemverTypesVec;
 }
 
@@ -1127,11 +1130,11 @@ pub struct ValueTypesStatic;
 impl ValueTypes for ValueTypesStatic {
     type ValueRef = &'static Value<Self>;
     type StringRef = &'static str;
-    type Proc = &'static dyn Fn(
+    type Func = &'static dyn Fn(
         &mut (dyn Environment<Self> + 'static),
         Self::ValueRef,
     ) -> Result<Self::ValueRef>;
-    type ProcRef = Self::Proc;
+    type FuncRef = Self::Func;
     type SemverTypes = SemverTypesStatic;
 }
 
@@ -1255,12 +1258,12 @@ macro_rules! lang_other {
 }
 
 #[macro_export]
-macro_rules! proc {
-    ($id:expr, $proc:expr) => {{
+macro_rules! func {
+    ($name:expr, $func:expr) => {{
         const P: &$crate::Value<$crate::ValueTypesStatic> =
-            &$crate::Value::Procedure($crate::ValueProcedure {
-                id: $id,
-                proc: $proc,
+            &$crate::Value::Function($crate::ValueFunction {
+                name: $name,
+                func: $func,
             });
         P
     }};
@@ -1429,11 +1432,23 @@ mod tests {
     }
 
     #[test]
-    fn test_proc_macro() {
-        const P: &super::Value<super::ValueTypesStatic> = proc!(1, &static_f1);
+    fn test_func_macro() {
+        const P: &super::Value<super::ValueTypesStatic> = func!(
+            super::ValueQualifiedSymbol {
+                package: "p",
+                name: "f1"
+            },
+            &static_f1
+        );
         match &*P {
-            super::Value::Procedure(super::ValueProcedure { id, proc: _ }) => assert_eq!(*id, 1),
-            _ => panic!("Expected a Value::Procedure"),
+            super::Value::Function(super::ValueFunction { name, func: _ }) => assert_eq!(
+                name,
+                &super::ValueQualifiedSymbol::<&'static str> {
+                    package: "p",
+                    name: "f1"
+                }
+            ),
+            _ => panic!("Expected a Value::Function"),
         }
     }
 
@@ -1715,11 +1730,19 @@ mod tests {
         assert_ne!(lang_kira![1, 0], v![1, 0]);
         assert_ne!(lang_kira![1, 0], nil!());
 
-        assert_eq!(proc!(1, &static_f1), proc!(1, &static_f1));
-        assert_eq!(proc!(1, &static_f1), proc!(1, &static_f2));
-        assert_ne!(proc!(1, &static_f1), proc!(2, &static_f1));
-        assert_ne!(proc!(1, &static_f1), proc!(2, &static_f2));
-        assert_ne!(proc!(1, &static_f1), nil!());
+        const F1_NAME: super::ValueQualifiedSymbol<&'static str> = super::ValueQualifiedSymbol {
+            package: "p",
+            name: "f1",
+        };
+        const F2_NAME: super::ValueQualifiedSymbol<&'static str> = super::ValueQualifiedSymbol {
+            package: "p",
+            name: "f2",
+        };
+        assert_eq!(func!(F1_NAME, &static_f1), func!(F1_NAME, &static_f1));
+        assert_eq!(func!(F1_NAME, &static_f1), func!(F1_NAME, &static_f2));
+        assert_ne!(func!(F1_NAME, &static_f1), func!(F2_NAME, &static_f1));
+        assert_ne!(func!(F1_NAME, &static_f1), func!(F2_NAME, &static_f2));
+        assert_ne!(func!(F1_NAME, &static_f1), nil!());
     }
 
     #[test]
@@ -1846,12 +1869,16 @@ mod tests {
             ErrorKind::IncorrectType
         );
 
-        let v = proc!(1, &static_f1);
+        const F1_NAME: ValueQualifiedSymbol<&'static str> = ValueQualifiedSymbol {
+            package: "p",
+            name: "f1",
+        };
+        let v = func!(F1_NAME, &static_f1);
         assert_eq!(
-            TryInto::<&ValueProcedure<ValueTypesStatic>>::try_into(v).unwrap(),
-            &ValueProcedure::<ValueTypesStatic> {
-                id: 1,
-                proc: &static_f1,
+            TryInto::<&ValueFunction<ValueTypesStatic>>::try_into(v).unwrap(),
+            &ValueFunction::<ValueTypesStatic> {
+                name: F1_NAME,
+                func: &static_f1,
             }
         );
         assert_eq!(
@@ -1946,12 +1973,16 @@ mod tests {
             ErrorKind::IncorrectType
         );
 
-        let v = proc!(1, &static_f1);
+        const F1_NAME: ValueQualifiedSymbol<&'static str> = ValueQualifiedSymbol {
+            package: "p",
+            name: "f1",
+        };
+        let v = func!(F1_NAME, &static_f1);
         assert_eq!(
-            TryInto::<ValueProcedure<ValueTypesStatic>>::try_into(v).unwrap(),
-            ValueProcedure::<ValueTypesStatic> {
-                id: 1,
-                proc: &static_f1,
+            TryInto::<ValueFunction<ValueTypesStatic>>::try_into(v).unwrap(),
+            ValueFunction::<ValueTypesStatic> {
+                name: F1_NAME,
+                func: &static_f1,
             }
         );
         assert_eq!(
@@ -1990,16 +2021,20 @@ mod tests {
         let v: Value<ValueTypesStatic> = ValueString("str").into();
         assert_eq!(&v, str!("str"));
 
-        let v: Value<ValueTypesStatic> = ValueProcedure::<ValueTypesStatic> {
-            id: 1,
-            proc: &static_f1,
+        const F1_NAME: ValueQualifiedSymbol<&'static str> = ValueQualifiedSymbol {
+            package: "p",
+            name: "f1",
+        };
+        let v: Value<ValueTypesStatic> = ValueFunction::<ValueTypesStatic> {
+            name: F1_NAME.clone(),
+            func: &static_f1,
         }
         .into();
         assert_eq!(
             v,
-            Value::<ValueTypesStatic>::Procedure(ValueProcedure {
-                id: 1,
-                proc: &static_f1,
+            Value::<ValueTypesStatic>::Function(ValueFunction {
+                name: F1_NAME.clone(),
+                func: &static_f1,
             })
         );
     }
@@ -2161,9 +2196,12 @@ mod tests {
             Box::new(SimpleLayer {
                 package: "p1",
                 name: "concat",
-                value: Rc::new(Value::Procedure(ValueProcedure {
-                    id: 1,
-                    proc: Rc::new(concat),
+                value: Rc::new(Value::Function(ValueFunction {
+                    name: ValueQualifiedSymbol {
+                        package: "p1".to_string(),
+                        name: "concat".to_string(),
+                    },
+                    func: Rc::new(concat),
                 })),
             }),
             Box::new(PackageOnlyLayer {
@@ -2596,13 +2634,6 @@ mod tests {
         );
     }
 
-    fn static_m1(
-        _: &mut (dyn super::Environment<super::ValueTypesStatic> + 'static),
-        _: &super::Value<super::ValueTypesStatic>,
-    ) -> super::Result<&'static super::Value<super::ValueTypesStatic>> {
-        super::Result::Ok(&super::Value::Nil)
-    }
-
     #[test]
     fn test_from_non_list() {
         use super::*;
@@ -2627,8 +2658,14 @@ mod tests {
             ValueTypeNonList::LanguageDirective
         );
         assert_eq!(
-            ValueTypeNonList::from(proc!(1, &static_m1)),
-            ValueTypeNonList::Procedure
+            ValueTypeNonList::from(func!(
+                ValueQualifiedSymbol {
+                    package: "p",
+                    name: "f1"
+                },
+                &static_f1
+            )),
+            ValueTypeNonList::Function
         );
     }
 
