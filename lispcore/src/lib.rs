@@ -276,7 +276,6 @@ impl<T> Debug for ValueFunction<T>
 where
     T: ValueTypes + ?Sized,
     for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
-    T::StringRef: Debug,
 {
     fn fmt(&self, fmt: &mut Formatter) -> std::result::Result<(), std::fmt::Error> {
         fmt.debug_struct("ValueFunction")
