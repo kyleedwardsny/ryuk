@@ -1,4 +1,4 @@
-use ryuk_lisptypes::*;
+use ryuk_lispcore::*;
 use std::borrow::{Borrow, BorrowMut};
 use std::fmt::Formatter;
 use std::iter::Peekable;
