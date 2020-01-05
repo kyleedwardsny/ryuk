@@ -58,14 +58,20 @@ where
     for<'a> &'a <Self::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
 {
     type ValueRef: Borrow<Value<Self>> + Debug;
-    type StringRef: Borrow<str>;
+    type StringRef: Borrow<str> + Debug;
     type Func: Fn(
             &mut (dyn Environment<Self> + 'static),
-            &mut dyn Iterator<Item = Self::ValueRef>,
+            &mut (dyn Iterator<Item = Self::ValueRef> + 'static),
         ) -> Result<Self::ValueRef>
         + ?Sized;
     type FuncRef: Borrow<Self::Func>;
     type SemverTypes: SemverTypes;
+    type Macro: Fn(
+            &mut (dyn Environment<Self> + 'static),
+            Self::ValueRef,
+        ) -> Result<TryCompilationResult<Self>>
+        + ?Sized;
+    type MacroRef: Borrow<Self::Macro>;
 }
 
 pub trait Environment<T>
@@ -76,7 +82,33 @@ where
 {
     fn as_dyn_mut(&mut self) -> &mut (dyn Environment<T> + 'static);
 
-    // TODO
+    fn resolve_symbol_get_macro(
+        &self,
+        name: &ValueUnqualifiedSymbol<T::StringRef>,
+    ) -> Result<ValueQualifiedSymbol<T::StringRef>>;
+
+    fn get_macro(&self, name: &ValueQualifiedSymbol<T::StringRef>) -> Result<T::MacroRef>;
+
+    fn compile(&self, v: T::ValueRef) -> Result<CompilationResult<T>> {
+        let mut result = TryCompilationResult::<T>::Uncompiled(v);
+
+        loop {
+            match result {
+                TryCompilationResult::Uncompiled(v) => {
+                    result = match v.borrow() {
+                        _ => {
+                            let t = ValueType::from(v.borrow());
+                            TryCompilationResult::Compiled(CompilationResult {
+                                result: CompilationResultType::Literal(v),
+                                types: BTreeSet::from_iter(vec![t]),
+                            })
+                        }
+                    }
+                }
+                TryCompilationResult::Compiled(r) => return Result::Ok(r),
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -658,20 +690,6 @@ where
     }
 }
 
-pub trait CompilerTypes
-where
-    for<'a> &'a <<Self::ValueTypes as ValueTypes>::SemverTypes as SemverTypes>::Semver:
-        IntoIterator<Item = &'a u64>,
-    <Self::ValueTypes as ValueTypes>::StringRef: std::fmt::Debug,
-{
-    type ValueTypes: ValueTypes + ?Sized;
-    type Macro: Fn(
-            <Self::ValueTypes as ValueTypes>::ValueRef,
-        ) -> Result<TryCompilationResult<Self::ValueTypes>>
-        + ?Sized;
-    type MacroRef: Borrow<Self::Macro>;
-}
-
 #[derive(Debug)]
 pub enum CompilationResultType<T>
 where
@@ -756,59 +774,6 @@ where
             (TryCompilationResult::Uncompiled(r1), TryCompilationResult::Uncompiled(r2)) => r1 == r2,
         })
     }
-}
-
-pub trait Compiler<T>
-where
-    T: CompilerTypes + ?Sized,
-    for<'a> &'a <<T::ValueTypes as ValueTypes>::SemverTypes as SemverTypes>::Semver:
-        IntoIterator<Item = &'a u64>,
-    <T::ValueTypes as ValueTypes>::StringRef: std::fmt::Debug,
-    <T::ValueTypes as ValueTypes>::ValueRef: Clone,
-{
-    fn resolve_symbol_get_macro(
-        &self,
-        name: &ValueUnqualifiedSymbol<<T::ValueTypes as ValueTypes>::StringRef>,
-    ) -> Result<ValueQualifiedSymbol<<T::ValueTypes as ValueTypes>::StringRef>>;
-
-    fn get_macro(
-        &self,
-        name: &ValueQualifiedSymbol<<T::ValueTypes as ValueTypes>::StringRef>,
-    ) -> Result<T::MacroRef>;
-
-    fn compile(
-        &self,
-        v: <T::ValueTypes as ValueTypes>::ValueRef,
-    ) -> Result<CompilationResult<T::ValueTypes>> {
-        let mut result = TryCompilationResult::<T::ValueTypes>::Uncompiled(v);
-
-        loop {
-            match result {
-                TryCompilationResult::Uncompiled(v) => {
-                    result = match v.borrow() {
-                        _ => {
-                            let t = ValueType::from(v.borrow());
-                            TryCompilationResult::Compiled(CompilationResult {
-                                result: CompilationResultType::Literal(v),
-                                types: BTreeSet::from_iter(vec![t]),
-                            })
-                        }
-                    }
-                }
-                TryCompilationResult::Compiled(r) => return Result::Ok(r),
-            }
-        }
-    }
-}
-
-pub struct CompilerTypesRc;
-
-impl CompilerTypes for CompilerTypesRc {
-    type ValueTypes = ValueTypesRc;
-    type Macro = dyn Fn(
-        <Self::ValueTypes as ValueTypes>::ValueRef,
-    ) -> Result<TryCompilationResult<Self::ValueTypes>>;
-    type MacroRef = Rc<Self::Macro>;
 }
 
 pub fn value_type_convert<T1, T2>(v: T1::ValueRef) -> T2::ValueRef
@@ -949,10 +914,15 @@ impl ValueTypes for ValueTypesRc {
     type StringRef = String;
     type Func = dyn Fn(
         &mut (dyn Environment<Self> + 'static),
-        &mut dyn Iterator<Item = Self::ValueRef>,
+        &mut (dyn Iterator<Item = Self::ValueRef> + 'static),
     ) -> Result<Self::ValueRef>;
     type FuncRef = Rc<Self::Func>;
     type SemverTypes = SemverTypesVec;
+    type Macro = dyn Fn(
+        &mut (dyn Environment<Self> + 'static),
+        Self::ValueRef,
+    ) -> Result<TryCompilationResult<Self>>;
+    type MacroRef = Rc<Self::Macro>;
 }
 
 #[derive(Debug)]
@@ -971,10 +941,15 @@ impl ValueTypes for ValueTypesStatic {
     type StringRef = &'static str;
     type Func = &'static dyn Fn(
         &mut (dyn Environment<Self> + 'static),
-        &mut dyn Iterator<Item = Self::ValueRef>,
+        &mut (dyn Iterator<Item = Self::ValueRef> + 'static),
     ) -> Result<Self::ValueRef>;
     type FuncRef = Self::Func;
     type SemverTypes = SemverTypesStatic;
+    type Macro = &'static dyn Fn(
+        &mut (dyn Environment<Self> + 'static),
+        Self::ValueRef,
+    ) -> Result<TryCompilationResult<Self>>;
+    type MacroRef = Self::Macro;
 }
 
 #[macro_export]
@@ -1119,14 +1094,14 @@ macro_rules! list {
 mod tests {
     fn static_f1(
         _: &mut (dyn super::Environment<super::ValueTypesStatic> + 'static),
-        _: &mut dyn Iterator<Item = &'static super::Value<super::ValueTypesStatic>>,
+        _: &mut (dyn Iterator<Item = &'static super::Value<super::ValueTypesStatic>> + 'static),
     ) -> super::Result<&'static super::Value<super::ValueTypesStatic>> {
         super::Result::Ok(&super::Value::Nil)
     }
 
     fn static_f2(
         _: &mut (dyn super::Environment<super::ValueTypesStatic> + 'static),
-        _: &mut dyn Iterator<Item = &'static super::Value<super::ValueTypesStatic>>,
+        _: &mut (dyn Iterator<Item = &'static super::Value<super::ValueTypesStatic>> + 'static),
     ) -> super::Result<&'static super::Value<super::ValueTypesStatic>> {
         super::Result::Ok(&super::Value::String(super::ValueString("str")))
     }
@@ -1976,9 +1951,13 @@ mod tests {
         );
     }
 
-    struct SimpleCompiler;
+    struct SimpleEnvironment;
 
-    impl super::Compiler<super::CompilerTypesRc> for SimpleCompiler {
+    impl super::Environment<super::ValueTypesRc> for SimpleEnvironment {
+        fn as_dyn_mut(&mut self) -> &mut (dyn super::Environment<super::ValueTypesRc> + 'static) {
+            self as &mut (dyn super::Environment<super::ValueTypesRc> + 'static)
+        }
+
         fn resolve_symbol_get_macro(
             &self,
             _name: &super::ValueUnqualifiedSymbol<
@@ -1998,7 +1977,7 @@ mod tests {
             _name: &super::ValueQualifiedSymbol<
                 <super::ValueTypesRc as super::ValueTypes>::StringRef,
             >,
-        ) -> super::Result<<super::CompilerTypesRc as super::CompilerTypes>::MacroRef> {
+        ) -> super::Result<<super::ValueTypesRc as super::ValueTypes>::MacroRef> {
             super::Result::Err(super::Error::new(
                 super::ErrorKind::ValueNotDefined,
                 "Value not defined",
@@ -2007,14 +1986,14 @@ mod tests {
     }
 
     fn test_literal(
-        comp: &SimpleCompiler,
+        env: &SimpleEnvironment,
         code: <super::ValueTypesStatic as super::ValueTypes>::ValueRef,
         t: super::ValueType,
     ) {
         use super::*;
 
         assert_eq!(
-            comp.compile(value_type_convert::<ValueTypesStatic, ValueTypesRc>(code))
+            env.compile(value_type_convert::<ValueTypesStatic, ValueTypesRc>(code))
                 .unwrap(),
             CompilationResult::<ValueTypesRc> {
                 result: CompilationResultType::Literal(value_type_convert::<
@@ -2030,22 +2009,18 @@ mod tests {
     fn test_compile_literal() {
         use super::*;
 
-        let comp = SimpleCompiler;
-        test_literal(&comp, nil!(), ValueType::NonList(ValueTypeNonList::Nil));
+        let env = SimpleEnvironment;
+        test_literal(&env, nil!(), ValueType::NonList(ValueTypeNonList::Nil));
         test_literal(
-            &comp,
+            &env,
             bool!(true),
             ValueType::NonList(ValueTypeNonList::Bool),
         );
         test_literal(
-            &comp,
+            &env,
             str!("Hello world!"),
             ValueType::NonList(ValueTypeNonList::String),
         );
-        test_literal(
-            &comp,
-            v![1, 0],
-            ValueType::NonList(ValueTypeNonList::Semver),
-        );
+        test_literal(&env, v![1, 0], ValueType::NonList(ValueTypeNonList::Semver));
     }
 }
