@@ -77,8 +77,9 @@ where
 pub trait Environment<T>
 where
     T: ValueTypes + ?Sized,
-    T::ValueRef: Clone,
     for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+    T::ValueRef: Clone,
+    T::StringRef: Clone,
 {
     fn as_dyn_mut(&mut self) -> &mut (dyn Environment<T> + 'static);
 
@@ -89,13 +90,29 @@ where
 
     fn get_macro(&self, name: &ValueQualifiedSymbol<T::StringRef>) -> Result<T::MacroRef>;
 
-    fn compile(&self, v: T::ValueRef) -> Result<CompilationResult<T>> {
+    fn compile(&mut self, v: T::ValueRef) -> Result<CompilationResult<T>> {
         let mut result = TryCompilationResult::<T>::Uncompiled(v);
 
         loop {
             match result {
                 TryCompilationResult::Uncompiled(v) => {
                     result = match v.borrow() {
+                        Value::Cons(ValueCons { car, cdr }) => {
+                            let name = match car.borrow() {
+                                Value::UnqualifiedSymbol(name) => {
+                                    self.resolve_symbol_get_macro(name)?
+                                }
+                                Value::QualifiedSymbol(name) => (*name).clone(),
+                                _ => {
+                                    return Result::Err(Error::new(
+                                        ErrorKind::IncorrectType,
+                                        "Incorrect type",
+                                    ))
+                                }
+                            };
+                            let m = self.get_macro(&name)?;
+                            m.borrow()(self.as_dyn_mut(), cdr.clone())?
+                        }
                         _ => {
                             let t = ValueType::from(v.borrow());
                             TryCompilationResult::Compiled(CompilationResult {
@@ -1952,6 +1969,46 @@ mod tests {
 
     struct SimpleEnvironment;
 
+    fn simplemacro1(
+        _env: &mut (dyn super::Environment<super::ValueTypesRc> + 'static),
+        _v: <super::ValueTypesRc as super::ValueTypes>::ValueRef,
+    ) -> super::Result<super::TryCompilationResult<super::ValueTypesRc>> {
+        use std::iter::FromIterator;
+
+        Result::Ok(super::TryCompilationResult::Compiled(
+            super::CompilationResult {
+                result: super::CompilationResultType::Literal(super::value_type_convert::<
+                    super::ValueTypesStatic,
+                    super::ValueTypesRc,
+                >(str!(
+                    "Hello world!"
+                ))),
+                types: super::BTreeSet::from_iter(vec![super::ValueType::NonList(
+                    super::ValueTypeNonList::String,
+                )]),
+            },
+        ))
+    }
+
+    fn simplemacro2(
+        _env: &mut (dyn super::Environment<super::ValueTypesRc> + 'static),
+        _v: <super::ValueTypesRc as super::ValueTypes>::ValueRef,
+    ) -> super::Result<super::TryCompilationResult<super::ValueTypesRc>> {
+        use std::iter::FromIterator;
+
+        Result::Ok(super::TryCompilationResult::Compiled(
+            super::CompilationResult {
+                result: super::CompilationResultType::Literal(super::value_type_convert::<
+                    super::ValueTypesStatic,
+                    super::ValueTypesRc,
+                >(bool!(true))),
+                types: super::BTreeSet::from_iter(vec![super::ValueType::NonList(
+                    super::ValueTypeNonList::Bool,
+                )]),
+            },
+        ))
+    }
+
     impl super::Environment<super::ValueTypesRc> for SimpleEnvironment {
         fn as_dyn_mut(&mut self) -> &mut (dyn super::Environment<super::ValueTypesRc> + 'static) {
             self as &mut (dyn super::Environment<super::ValueTypesRc> + 'static)
@@ -1959,48 +2016,67 @@ mod tests {
 
         fn resolve_symbol_get_macro(
             &self,
-            _name: &super::ValueUnqualifiedSymbol<
+            name: &super::ValueUnqualifiedSymbol<
                 <super::ValueTypesRc as super::ValueTypes>::StringRef,
             >,
         ) -> super::Result<
             super::ValueQualifiedSymbol<<super::ValueTypesRc as super::ValueTypes>::StringRef>,
         > {
-            super::Result::Err(super::Error::new(
-                super::ErrorKind::NoPackageForSymbol,
-                "No package for symbol",
-            ))
+            super::Result::Ok(super::ValueQualifiedSymbol {
+                package: "p".to_string(),
+                name: name.0.clone(),
+            })
         }
 
         fn get_macro(
             &self,
-            _name: &super::ValueQualifiedSymbol<
+            name: &super::ValueQualifiedSymbol<
                 <super::ValueTypesRc as super::ValueTypes>::StringRef,
             >,
         ) -> super::Result<<super::ValueTypesRc as super::ValueTypes>::MacroRef> {
-            super::Result::Err(super::Error::new(
-                super::ErrorKind::ValueNotDefined,
-                "Value not defined",
-            ))
+            use std::borrow::Borrow;
+
+            match (name.package.borrow(), name.name.borrow()) {
+                ("p", "simplemacro1") => super::Result::Ok(super::Rc::new(simplemacro1)),
+                ("p", "simplemacro2") => super::Result::Ok(super::Rc::new(simplemacro2)),
+                _ => super::Result::Err(super::Error::new(
+                    super::ErrorKind::ValueNotDefined,
+                    "Value not defined",
+                )),
+            }
         }
     }
 
-    fn test_literal(
-        env: &SimpleEnvironment,
+    fn test_compile(
+        env: &mut SimpleEnvironment,
         code: <super::ValueTypesStatic as super::ValueTypes>::ValueRef,
-        t: super::ValueType,
+        result: super::CompilationResultType<super::ValueTypesRc>,
+        types: super::BTreeSet<super::ValueType>,
     ) {
         use super::*;
 
         assert_eq!(
             env.compile(value_type_convert::<ValueTypesStatic, ValueTypesRc>(code))
                 .unwrap(),
-            CompilationResult::<ValueTypesRc> {
-                result: CompilationResultType::Literal(value_type_convert::<
-                    ValueTypesStatic,
-                    ValueTypesRc,
-                >(code)),
-                types: BTreeSet::from_iter(vec![t]),
-            }
+            CompilationResult::<ValueTypesRc> { result, types }
+        );
+    }
+
+    fn test_literal(
+        env: &mut SimpleEnvironment,
+        code: <super::ValueTypesStatic as super::ValueTypes>::ValueRef,
+        result: <super::ValueTypesStatic as super::ValueTypes>::ValueRef,
+        t: super::ValueType,
+    ) {
+        use super::*;
+
+        test_compile(
+            env,
+            code,
+            CompilationResultType::Literal(value_type_convert::<ValueTypesStatic, ValueTypesRc>(
+                result,
+            )),
+            BTreeSet::from_iter(vec![t]),
         );
     }
 
@@ -2008,18 +2084,79 @@ mod tests {
     fn test_compile_literal() {
         use super::*;
 
-        let env = SimpleEnvironment;
-        test_literal(&env, nil!(), ValueType::NonList(ValueTypeNonList::Nil));
+        let mut env = SimpleEnvironment;
         test_literal(
-            &env,
+            &mut env,
+            nil!(),
+            nil!(),
+            ValueType::NonList(ValueTypeNonList::Nil),
+        );
+        test_literal(
+            &mut env,
+            bool!(true),
             bool!(true),
             ValueType::NonList(ValueTypeNonList::Bool),
         );
         test_literal(
-            &env,
+            &mut env,
+            str!("Hello world!"),
             str!("Hello world!"),
             ValueType::NonList(ValueTypeNonList::String),
         );
-        test_literal(&env, v![1, 0], ValueType::NonList(ValueTypeNonList::Semver));
+        test_literal(
+            &mut env,
+            v![1, 0],
+            v![1, 0],
+            ValueType::NonList(ValueTypeNonList::Semver),
+        );
+    }
+
+    #[test]
+    fn test_compile_macro() {
+        use super::*;
+
+        let mut env = SimpleEnvironment;
+
+        test_literal(
+            &mut env,
+            list!(uqsym!("simplemacro1")),
+            str!("Hello world!"),
+            ValueType::NonList(ValueTypeNonList::String),
+        );
+        test_literal(
+            &mut env,
+            list!(uqsym!("simplemacro2")),
+            bool!(true),
+            ValueType::NonList(ValueTypeNonList::Bool),
+        );
+        assert_eq!(
+            env.compile(value_type_convert::<ValueTypesStatic, ValueTypesRc>(list!(
+                uqsym!("simplemacro3")
+            )))
+            .unwrap_err()
+            .kind,
+            ErrorKind::ValueNotDefined
+        );
+
+        test_literal(
+            &mut env,
+            list!(qsym!("p", "simplemacro1")),
+            str!("Hello world!"),
+            ValueType::NonList(ValueTypeNonList::String),
+        );
+        test_literal(
+            &mut env,
+            list!(qsym!("p", "simplemacro2")),
+            bool!(true),
+            ValueType::NonList(ValueTypeNonList::Bool),
+        );
+        assert_eq!(
+            env.compile(value_type_convert::<ValueTypesStatic, ValueTypesRc>(list!(
+                qsym!("p", "simplemacro3")
+            )))
+            .unwrap_err()
+            .kind,
+            ErrorKind::ValueNotDefined
+        );
     }
 }
