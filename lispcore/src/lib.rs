@@ -32,10 +32,7 @@ pub enum ErrorKind {
 }
 
 impl Error {
-    pub fn new<E>(kind: ErrorKind, error: E) -> Error
-    where
-        E: Into<Box<dyn std::error::Error>>,
-    {
+    pub fn new(kind: ErrorKind, error: impl Into<Box<dyn std::error::Error>>) -> Error {
         Error {
             kind,
             error: error.into(),
