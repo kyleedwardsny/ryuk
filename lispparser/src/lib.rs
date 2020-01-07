@@ -52,7 +52,6 @@ where
     T: ValueTypes + ?Sized,
     for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
     I: Iterator<Item = char>,
-    Value<T>: Into<T::ValueRef>,
     String: Into<T::StringRef>,
 {
     reader: Peekable<I>,
@@ -64,7 +63,6 @@ where
     T: ValueTypes + ?Sized,
     for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
     I: Iterator<Item = char>,
-    Value<T>: Into<T::ValueRef>,
     String: Into<T::StringRef>,
 {
     pub fn new(reader: Peekable<I>) -> Self {
@@ -81,13 +79,13 @@ where
     for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
     for<'a> <T::SemverTypes as SemverTypes>::Semver: Extend<&'a u64>,
     I: Iterator<Item = char>,
-    Value<T>: Into<T::ValueRef>,
     String: Into<T::StringRef>,
     &'static str: Into<T::StringRef>,
+    Cons<T>: Into<T::ConsRef>,
     <T::SemverTypes as SemverTypes>::SemverRef:
         Default + BorrowMut<<T::SemverTypes as SemverTypes>::Semver>,
 {
-    type Item = Result<T::ValueRef>;
+    type Item = Result<Value<T>>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match read_impl(&mut self.reader) {
@@ -137,7 +135,7 @@ where
     T: ValueTypes + ?Sized,
     for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
 {
-    Value(T::ValueRef),
+    Value(Value<T>),
     InvalidToken(String),
     EndDelimiter,
 }
@@ -151,9 +149,9 @@ where
     for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
     for<'a> <T::SemverTypes as SemverTypes>::Semver: Extend<&'a u64>,
     I: Iterator<Item = char>,
-    Value<T>: Into<T::ValueRef>,
     String: Into<T::StringRef>,
     &'static str: Into<T::StringRef>,
+    Cons<T>: Into<T::ConsRef>,
     <T::SemverTypes as SemverTypes>::SemverRef:
         Default + BorrowMut<<T::SemverTypes as SemverTypes>::Semver>,
 {
@@ -180,26 +178,26 @@ where
     }
 }
 
-fn read_list<T, I>(peekable: &mut Peekable<I>, allow_dot: bool) -> Result<T::ValueRef>
+fn read_list<T, I>(peekable: &mut Peekable<I>, allow_dot: bool) -> Result<Value<T>>
 where
     T: ValueTypes + ?Sized,
     for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
     for<'a> <T::SemverTypes as SemverTypes>::Semver: Extend<&'a u64>,
     I: Iterator<Item = char>,
-    Value<T>: Into<T::ValueRef>,
     String: Into<T::StringRef>,
     &'static str: Into<T::StringRef>,
+    Cons<T>: Into<T::ConsRef>,
     <T::SemverTypes as SemverTypes>::SemverRef:
         Default + BorrowMut<<T::SemverTypes as SemverTypes>::Semver>,
 {
     match read_delimited(peekable, ')')? {
-        ReadDelimitedResult::Value(v) => Result::Ok(
-            Value::<T>::Cons(ValueCons {
+        ReadDelimitedResult::Value(v) => Result::Ok(Value::<T>::Cons(ValueCons(
+            Cons {
                 car: v,
                 cdr: read_list(peekable, true)?,
-            })
+            }
             .into(),
-        ),
+        ))),
         ReadDelimitedResult::InvalidToken(t) => match (allow_dot, &*t) {
             (true, ".") => match read_delimited(peekable, ')')? {
                 ReadDelimitedResult::Value(cdr) => match read_delimited::<T, I>(peekable, ')')? {
@@ -253,7 +251,7 @@ where
     for<'a> &'a V::Semver: IntoIterator<Item = &'a u64>,
     for<'a> V::Semver: Extend<&'a u64>,
     I: Iterator<Item = char>,
-    S: Borrow<str>,
+    S: Borrow<str> + Clone,
     String: Into<S>,
     V::SemverRef: Default + BorrowMut<V::Semver>,
 {
@@ -272,13 +270,12 @@ where
     }
 }
 
-fn read_macro<T, I>(peekable: &mut Peekable<I>) -> Result<T::ValueRef>
+fn read_macro<T, I>(peekable: &mut Peekable<I>) -> Result<Value<T>>
 where
     T: ValueTypes + ?Sized,
     for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
     for<'a> <T::SemverTypes as SemverTypes>::Semver: Extend<&'a u64>,
     I: Iterator<Item = char>,
-    Value<T>: Into<T::ValueRef>,
     String: Into<T::StringRef>,
     <T::SemverTypes as SemverTypes>::SemverRef:
         Default + BorrowMut<<T::SemverTypes as SemverTypes>::Semver>,
@@ -359,7 +356,7 @@ where
     T: ValueTypes + ?Sized,
     for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
 {
-    Value(T::ValueRef),
+    Value(Value<T>),
     InvalidToken(String),
     EndOfFile,
 }
@@ -370,9 +367,9 @@ where
     for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
     for<'a> <T::SemverTypes as SemverTypes>::Semver: Extend<&'a u64>,
     I: Iterator<Item = char>,
-    Value<T>: Into<T::ValueRef>,
     String: Into<T::StringRef>,
     &'static str: Into<T::StringRef>,
+    Cons<T>: Into<T::ConsRef>,
     <T::SemverTypes as SemverTypes>::SemverRef:
         Default + BorrowMut<<T::SemverTypes as SemverTypes>::Semver>,
 {
@@ -392,21 +389,25 @@ where
         } else if c == '\'' {
             peekable.next();
             match read_impl(peekable)? {
-                ReadImplResult::Value(v) => Result::Ok(ReadImplResult::Value(
-                    Value::Cons(ValueCons {
-                        car: Value::QualifiedSymbol(ValueQualifiedSymbol {
-                            package: "std".into(),
-                            name: "quote".into(),
-                        })
+                ReadImplResult::Value(v) => {
+                    Result::Ok(ReadImplResult::Value(Value::Cons(ValueCons(
+                        Cons {
+                            car: Value::QualifiedSymbol(ValueQualifiedSymbol {
+                                package: "std".into(),
+                                name: "quote".into(),
+                            })
+                            .into(),
+                            cdr: Value::Cons(ValueCons(
+                                Cons {
+                                    car: v,
+                                    cdr: Value::Nil.into(),
+                                }
+                                .into(),
+                            )),
+                        }
                         .into(),
-                        cdr: Value::Cons(ValueCons {
-                            car: v,
-                            cdr: Value::Nil.into(),
-                        })
-                        .into(),
-                    })
-                    .into(),
-                )),
+                    ))))
+                }
                 ReadImplResult::InvalidToken(t) => Result::Err(Error::new(
                     ErrorKind::InvalidToken,
                     format!("Invalid token: '{}'", t),
@@ -565,10 +566,10 @@ mod tests {
     fn test_read_unqualified_symbol() {
         let s = "uqsym1 UQSYM2\nUqSym3  \n   uqsym4";
         let mut i = LispParser::<ValueTypesRc, _>::new(s.chars().peekable());
-        assert_eq!(*i.next().unwrap().unwrap(), *uqsym!("uqsym1"));
-        assert_eq!(*i.next().unwrap().unwrap(), *uqsym!("uqsym2"));
-        assert_eq!(*i.next().unwrap().unwrap(), *uqsym!("uqsym3"));
-        assert_eq!(*i.next().unwrap().unwrap(), *uqsym!("uqsym4"));
+        assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("uqsym1"));
+        assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("uqsym2"));
+        assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("uqsym3"));
+        assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("uqsym4"));
         assert!(i.next().is_none());
     }
 
@@ -576,15 +577,15 @@ mod tests {
     fn test_read_qualified_symbol() {
         let s = "pa1:qsym1 PA2:QSYM2\nPa3:QSym3  \n   pa4:qsym4 pa5: qsym5 pa6::qsym6";
         let mut i = LispParser::<ValueTypesRc, _>::new(s.chars().peekable());
-        assert_eq!(*i.next().unwrap().unwrap(), *qsym!("pa1", "qsym1"));
-        assert_eq!(*i.next().unwrap().unwrap(), *qsym!("pa2", "qsym2"));
-        assert_eq!(*i.next().unwrap().unwrap(), *qsym!("pa3", "qsym3"));
-        assert_eq!(*i.next().unwrap().unwrap(), *qsym!("pa4", "qsym4"));
+        assert_eq!(i.next().unwrap().unwrap(), v_qsym!("pa1", "qsym1"));
+        assert_eq!(i.next().unwrap().unwrap(), v_qsym!("pa2", "qsym2"));
+        assert_eq!(i.next().unwrap().unwrap(), v_qsym!("pa3", "qsym3"));
+        assert_eq!(i.next().unwrap().unwrap(), v_qsym!("pa4", "qsym4"));
         assert_eq!(
             i.next().unwrap().unwrap_err().kind,
             crate::ErrorKind::InvalidToken
         );
-        assert_eq!(*i.next().unwrap().unwrap(), *uqsym!("qsym5"));
+        assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("qsym5"));
         assert_eq!(
             i.next().unwrap().unwrap_err().kind,
             crate::ErrorKind::InvalidToken
@@ -593,7 +594,7 @@ mod tests {
             i.next().unwrap().unwrap_err().kind,
             crate::ErrorKind::InvalidCharacter
         );
-        assert_eq!(*i.next().unwrap().unwrap(), *uqsym!("qsym6"));
+        assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("qsym6"));
         assert!(i.next().is_none());
     }
 
@@ -601,9 +602,9 @@ mod tests {
     fn test_read_bool() {
         let s = "#t #f\n#t  ";
         let mut i = LispParser::<ValueTypesRc, _>::new(s.chars().peekable());
-        assert_eq!(*i.next().unwrap().unwrap(), *bool!(true));
-        assert_eq!(*i.next().unwrap().unwrap(), *bool!(false));
-        assert_eq!(*i.next().unwrap().unwrap(), *bool!(true));
+        assert_eq!(i.next().unwrap().unwrap(), v_bool!(true));
+        assert_eq!(i.next().unwrap().unwrap(), v_bool!(false));
+        assert_eq!(i.next().unwrap().unwrap(), v_bool!(true));
         assert!(i.next().is_none());
     }
 
@@ -630,9 +631,9 @@ mod tests {
     fn test_read_string() {
         let s = "\"a\"  \"b \\\"\" \"\\n\n\\\\c\"  \"d";
         let mut i = LispParser::<ValueTypesRc, _>::new(s.chars().peekable());
-        assert_eq!(*i.next().unwrap().unwrap(), *str!("a"));
-        assert_eq!(*i.next().unwrap().unwrap(), *str!("b \""));
-        assert_eq!(*i.next().unwrap().unwrap(), *str!("n\n\\c"));
+        assert_eq!(i.next().unwrap().unwrap(), v_str!("a"));
+        assert_eq!(i.next().unwrap().unwrap(), v_str!("b \""));
+        assert_eq!(i.next().unwrap().unwrap(), v_str!("n\n\\c"));
         assert_eq!(
             i.next().unwrap().unwrap_err().kind,
             crate::ErrorKind::EndOfFile
@@ -645,8 +646,8 @@ mod tests {
         let s = "'a '";
         let mut i = LispParser::<ValueTypesRc, _>::new(s.chars().peekable());
         assert_eq!(
-            *i.next().unwrap().unwrap(),
-            *list!(qsym!("std", "quote"), uqsym!("a"))
+            i.next().unwrap().unwrap(),
+            v_list!(v_qsym!("std", "quote"), v_uqsym!("a"))
         );
         assert_eq!(
             i.next().unwrap().unwrap_err().kind,
@@ -659,9 +660,9 @@ mod tests {
     fn test_read_v() {
         let s = "#v1.5  #v3\n#v2.5.4   #v3.05 #va.2 #V1.5";
         let mut i = LispParser::<ValueTypesRc, _>::new(s.chars().peekable());
-        assert_eq!(*i.next().unwrap().unwrap(), *v![1, 5]);
-        assert_eq!(*i.next().unwrap().unwrap(), *v![3]);
-        assert_eq!(*i.next().unwrap().unwrap(), *v![2, 5, 4]);
+        assert_eq!(i.next().unwrap().unwrap(), v_v![1, 5]);
+        assert_eq!(i.next().unwrap().unwrap(), v_v![3]);
+        assert_eq!(i.next().unwrap().unwrap(), v_v![2, 5, 4]);
         assert_eq!(
             i.next().unwrap().unwrap_err().kind,
             crate::ErrorKind::InvalidSemverComponent
@@ -681,9 +682,9 @@ mod tests {
     fn test_read_lang() {
         let s = "#lang kira/1.0 #lang\nnot-kira #lang Kira/1.0  \n  #lang ( #lang kira/1.a #Lang kira/1.0\n#lang kira/1.01";
         let mut i = LispParser::<ValueTypesRc, _>::new(s.chars().peekable());
-        assert_eq!(*i.next().unwrap().unwrap(), *lang_kira![1, 0]);
-        assert_eq!(*i.next().unwrap().unwrap(), *lang_other!("not-kira"));
-        assert_eq!(*i.next().unwrap().unwrap(), *lang_other!("Kira/1.0"));
+        assert_eq!(i.next().unwrap().unwrap(), v_lang_kira![1, 0]);
+        assert_eq!(i.next().unwrap().unwrap(), v_lang_other!("not-kira"));
+        assert_eq!(i.next().unwrap().unwrap(), v_lang_other!("Kira/1.0"));
         assert_eq!(
             i.next().unwrap().unwrap_err().kind,
             crate::ErrorKind::InvalidToken
@@ -696,7 +697,7 @@ mod tests {
             i.next().unwrap().unwrap_err().kind,
             crate::ErrorKind::InvalidToken
         );
-        assert_eq!(*i.next().unwrap().unwrap(), *uqsym!("kira/1.0"));
+        assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("kira/1.0"));
         assert_eq!(
             i.next().unwrap().unwrap_err().kind,
             crate::ErrorKind::InvalidSemverComponent
@@ -709,24 +710,24 @@ mod tests {
         let s = "(s1 s2 p3:s3)(p4:s4\n ' p5:s5 s6 ) ( s7 () \"s8\") (#t . #f) ( s9 . s10 s11 ( . (a a:. (a";
         let mut i = LispParser::<ValueTypesRc, _>::new(s.chars().peekable());
         assert_eq!(
-            *i.next().unwrap().unwrap(),
-            *list!(uqsym!("s1"), uqsym!("s2"), qsym!("p3", "s3"))
+            i.next().unwrap().unwrap(),
+            v_list!(v_uqsym!("s1"), v_uqsym!("s2"), v_qsym!("p3", "s3"))
         );
         assert_eq!(
-            *i.next().unwrap().unwrap(),
-            *list!(
-                qsym!("p4", "s4"),
-                list!(qsym!("std", "quote"), qsym!("p5", "s5")),
-                uqsym!("s6")
+            i.next().unwrap().unwrap(),
+            v_list!(
+                v_qsym!("p4", "s4"),
+                v_list!(v_qsym!("std", "quote"), v_qsym!("p5", "s5")),
+                v_uqsym!("s6")
             )
         );
         assert_eq!(
-            *i.next().unwrap().unwrap(),
-            *list!(uqsym!("s7"), nil!(), str!("s8"))
+            i.next().unwrap().unwrap(),
+            v_list!(v_uqsym!("s7"), v_nil!(), v_str!("s8"))
         );
         assert_eq!(
-            *i.next().unwrap().unwrap(),
-            *cons!(bool!(true), bool!(false))
+            i.next().unwrap().unwrap(),
+            v_cons!(v_bool!(true), v_bool!(false))
         );
         assert_eq!(
             i.next().unwrap().unwrap_err().kind,
@@ -751,9 +752,9 @@ mod tests {
     fn test_comment() {
         let s = " #t;Hello\n  #f ; world! #t\n \"a;b\"";
         let mut i = LispParser::<ValueTypesRc, _>::new(s.chars().peekable());
-        assert_eq!(*i.next().unwrap().unwrap(), *bool!(true));
-        assert_eq!(*i.next().unwrap().unwrap(), *bool!(false));
-        assert_eq!(*i.next().unwrap().unwrap(), *str!("a;b"));
+        assert_eq!(i.next().unwrap().unwrap(), v_bool!(true));
+        assert_eq!(i.next().unwrap().unwrap(), v_bool!(false));
+        assert_eq!(i.next().unwrap().unwrap(), v_str!("a;b"));
         assert!(i.next().is_none());
     }
 
@@ -763,7 +764,7 @@ mod tests {
         let mut num = 0;
         for v in LispParser::<ValueTypesRc, _>::new(s.chars().peekable()) {
             num += 1;
-            assert_eq!(*v.unwrap(), *nil!());
+            assert_eq!(v.unwrap(), v_nil!());
         }
         assert_eq!(num, 3);
     }
