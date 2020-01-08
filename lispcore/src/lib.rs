@@ -693,6 +693,7 @@ try_from_value!(T, ValueCons<T>, Value::Cons(c) => c);
 try_from_value!(T, ValueBool, Value::Bool(b) => b);
 try_from_value!(T, ValueString<T::StringRef>, Value::String(s) => s);
 try_from_value!(T, ValueSemver<T::SemverTypes>, Value::Semver(v) => v);
+try_from_value!(T, ValueLanguageDirective<T::StringRef, T::SemverTypes>, Value::LanguageDirective(l) => l);
 try_from_value!(T, ValueFunction<T>, Value::Function(p) => p);
 
 macro_rules! from_value_type {
@@ -716,6 +717,7 @@ from_value_type!(T, ValueCons<T>, c -> Value::Cons(c));
 from_value_type!(T, ValueBool, b -> Value::Bool(b));
 from_value_type!(T, ValueString<T::StringRef>, s -> Value::String(s));
 from_value_type!(T, ValueSemver<T::SemverTypes>, v -> Value::Semver(v));
+from_value_type!(T, ValueLanguageDirective<T::StringRef, T::SemverTypes>, l -> Value::LanguageDirective(l));
 from_value_type!(T, ValueFunction<T>, f -> Value::Function(f));
 
 impl<T1, T2> PartialEq<Value<T2>> for Value<T1>
@@ -1691,6 +1693,20 @@ mod tests {
             ErrorKind::IncorrectType
         );
 
+        let v = v_lang_kira![1, 0];
+        assert_eq!(
+            TryInto::<&ValueLanguageDirective<&'static str, SemverTypesStatic>>::try_into(&v)
+                .unwrap(),
+            &ValueLanguageDirective::<&'static str, SemverTypesStatic>::Kira(ValueSemver {
+                major: 1u64,
+                rest: &[0u64] as &[u64]
+            })
+        );
+        assert_eq!(
+            TryInto::<()>::try_into(&v).unwrap_err().kind,
+            ErrorKind::IncorrectType
+        );
+
         const F1_NAME: ValueQualifiedSymbol<&'static str> = ValueQualifiedSymbol {
             package: "p",
             name: "f1",
@@ -1802,6 +1818,20 @@ mod tests {
             ErrorKind::IncorrectType
         );
 
+        let v = v_lang_kira![1, 0];
+        assert_eq!(
+            TryInto::<ValueLanguageDirective<&'static str, SemverTypesStatic>>::try_into(v.clone())
+                .unwrap(),
+            ValueLanguageDirective::<&'static str, SemverTypesStatic>::Kira(ValueSemver {
+                major: 1u64,
+                rest: &[0u64] as &[u64]
+            })
+        );
+        assert_eq!(
+            TryInto::<()>::try_into(v).unwrap_err().kind,
+            ErrorKind::IncorrectType
+        );
+
         const F1_NAME: ValueQualifiedSymbol<&'static str> = ValueQualifiedSymbol {
             package: "p",
             name: "f1",
@@ -1849,6 +1879,20 @@ mod tests {
 
         let v: Value<ValueTypesStatic> = ValueString("str").into();
         assert_eq!(v, v_str!("str"));
+
+        let v: Value<ValueTypesStatic> = ValueSemver {
+            major: 1,
+            rest: &[0u64] as &[u64],
+        }
+        .into();
+        assert_eq!(v, v_v![1, 0]);
+
+        let v: Value<ValueTypesStatic> = ValueLanguageDirective::Kira(ValueSemver {
+            major: 1,
+            rest: &[0u64] as &[u64],
+        })
+        .into();
+        assert_eq!(v, v_lang_kira![1, 0]);
 
         const F1_NAME: ValueQualifiedSymbol<&'static str> = ValueQualifiedSymbol {
             package: "p",
