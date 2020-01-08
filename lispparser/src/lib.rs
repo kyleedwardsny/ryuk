@@ -258,8 +258,18 @@ where
     skip_whitespace(peekable)?;
 
     match read_token(peekable)? {
-        ReadTokenResult::ValidToken(t) => Result::Ok(if t.starts_with("kira/") {
-            ValueLanguageDirective::Kira(parse_semver(&t[5..])?)
+        ReadTokenResult::ValidToken(t) => Result::Ok(if t == "kira" {
+            skip_whitespace(peekable)?;
+            let token = read_token(peekable)?;
+            match token {
+                ReadTokenResult::ValidToken(t) => ValueLanguageDirective::Kira(parse_semver(&t)?),
+                ReadTokenResult::InvalidToken(t) => {
+                    return Result::Err(Error::new(
+                        ErrorKind::InvalidToken,
+                        format!("Invalid token: '{}'", t),
+                    ))
+                }
+            }
         } else {
             ValueLanguageDirective::Other(t.into())
         }),
@@ -680,11 +690,12 @@ mod tests {
 
     #[test]
     fn test_read_lang() {
-        let s = "#lang kira/1.0 #lang\nnot-kira #lang Kira/1.0  \n  #lang ( #lang kira/1.a #Lang kira/1.0\n#lang kira/1.01";
+        let s = "#lang kira 1.0 #lang\nnot-kira #lang Kira 1.0  \n  #lang ( #lang kira 1.a #Lang kira 1.0\n#lang kira 1.01";
         let mut i = LispParser::<ValueTypesRc, _>::new(s.chars().peekable());
         assert_eq!(i.next().unwrap().unwrap(), v_lang_kira![1, 0]);
         assert_eq!(i.next().unwrap().unwrap(), v_lang_other!("not-kira"));
-        assert_eq!(i.next().unwrap().unwrap(), v_lang_other!("Kira/1.0"));
+        assert_eq!(i.next().unwrap().unwrap(), v_lang_other!("Kira"));
+        assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("1.0"));
         assert_eq!(
             i.next().unwrap().unwrap_err().kind,
             crate::ErrorKind::InvalidToken
@@ -697,7 +708,8 @@ mod tests {
             i.next().unwrap().unwrap_err().kind,
             crate::ErrorKind::InvalidToken
         );
-        assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("kira/1.0"));
+        assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("kira"));
+        assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("1.0"));
         assert_eq!(
             i.next().unwrap().unwrap_err().kind,
             crate::ErrorKind::InvalidSemverComponent
