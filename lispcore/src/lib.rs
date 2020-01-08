@@ -318,53 +318,6 @@ where
     }
 }
 
-pub struct ValueFunction<T>
-where
-    T: ValueTypes + ?Sized,
-    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
-{
-    pub name: ValueQualifiedSymbol<T::StringRef>,
-    pub func: T::FuncRef,
-}
-
-impl<T1, T2> PartialEq<ValueFunction<T2>> for ValueFunction<T1>
-where
-    T1: ValueTypes + ?Sized,
-    T2: ValueTypes + ?Sized,
-    for<'a> &'a <T1::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
-    for<'a> &'a <T2::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
-    ValueQualifiedSymbol<T1::StringRef>: PartialEq<ValueQualifiedSymbol<T2::StringRef>>,
-{
-    fn eq(&self, rhs: &ValueFunction<T2>) -> bool {
-        self.name == rhs.name
-    }
-}
-
-impl<T> Clone for ValueFunction<T>
-where
-    T: ValueTypes + ?Sized,
-    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
-{
-    fn clone(&self) -> Self {
-        Self {
-            name: self.name.clone(),
-            func: self.func.clone(),
-        }
-    }
-}
-
-impl<T> Debug for ValueFunction<T>
-where
-    T: ValueTypes + ?Sized,
-    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
-{
-    fn fmt(&self, fmt: &mut Formatter) -> std::result::Result<(), std::fmt::Error> {
-        fmt.debug_struct("ValueFunction")
-            .field("name", &self.name)
-            .finish()
-    }
-}
-
 pub trait SemverTypes: Debug
 where
     for<'a> &'a Self::Semver: IntoIterator<Item = &'a u64>,
@@ -548,6 +501,53 @@ where
             (ValueLanguageDirective::Kira(v1), ValueLanguageDirective::Kira(v2)) => v1 == v2,
             (ValueLanguageDirective::Other(n1), ValueLanguageDirective::Other(n2)) => n1.borrow() == n2.borrow(),
         })
+    }
+}
+
+pub struct ValueFunction<T>
+where
+    T: ValueTypes + ?Sized,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+{
+    pub name: ValueQualifiedSymbol<T::StringRef>,
+    pub func: T::FuncRef,
+}
+
+impl<T1, T2> PartialEq<ValueFunction<T2>> for ValueFunction<T1>
+where
+    T1: ValueTypes + ?Sized,
+    T2: ValueTypes + ?Sized,
+    for<'a> &'a <T1::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+    for<'a> &'a <T2::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+    ValueQualifiedSymbol<T1::StringRef>: PartialEq<ValueQualifiedSymbol<T2::StringRef>>,
+{
+    fn eq(&self, rhs: &ValueFunction<T2>) -> bool {
+        self.name == rhs.name
+    }
+}
+
+impl<T> Clone for ValueFunction<T>
+where
+    T: ValueTypes + ?Sized,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+{
+    fn clone(&self) -> Self {
+        Self {
+            name: self.name.clone(),
+            func: self.func.clone(),
+        }
+    }
+}
+
+impl<T> Debug for ValueFunction<T>
+where
+    T: ValueTypes + ?Sized,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+{
+    fn fmt(&self, fmt: &mut Formatter) -> std::result::Result<(), std::fmt::Error> {
+        fmt.debug_struct("ValueFunction")
+            .field("name", &self.name)
+            .finish()
     }
 }
 
