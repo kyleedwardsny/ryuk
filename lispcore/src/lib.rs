@@ -1009,10 +1009,30 @@ macro_rules! v_nil {
 }
 
 #[macro_export]
+macro_rules! uqsym {
+    ($name:expr) => {{
+        const S: $crate::ValueUnqualifiedSymbol<&'static str> =
+            $crate::ValueUnqualifiedSymbol($name);
+        S
+    }};
+}
+
+#[macro_export]
 macro_rules! v_uqsym {
     ($name:expr) => {{
         const S: $crate::Value<$crate::ValueTypesStatic> =
-            $crate::Value::UnqualifiedSymbol($crate::ValueUnqualifiedSymbol($name));
+            $crate::Value::UnqualifiedSymbol(uqsym!($name));
+        S
+    }};
+}
+
+#[macro_export]
+macro_rules! qsym {
+    ($package:expr, $name:expr) => {{
+        const S: $crate::ValueQualifiedSymbol<&'static str> = $crate::ValueQualifiedSymbol {
+            package: $package,
+            name: $name,
+        };
         S
     }};
 }
@@ -1021,54 +1041,91 @@ macro_rules! v_uqsym {
 macro_rules! v_qsym {
     ($package:expr, $name:expr) => {{
         const S: $crate::Value<$crate::ValueTypesStatic> =
-            $crate::Value::QualifiedSymbol($crate::ValueQualifiedSymbol {
-                package: $package,
-                name: $name,
-            });
+            $crate::Value::QualifiedSymbol(qsym!($package, $name));
         S
+    }};
+}
+
+#[macro_export]
+macro_rules! cons {
+    ($car:expr, $cdr:expr) => {{
+        const C: $crate::ValueCons<$crate::ValueTypesStatic> = $crate::ValueCons(&$crate::Cons {
+            car: $car,
+            cdr: $cdr,
+        });
+        C
     }};
 }
 
 #[macro_export]
 macro_rules! v_cons {
     ($car:expr, $cdr:expr) => {{
-        const C: $crate::Value<$crate::ValueTypesStatic> =
-            $crate::Value::Cons($crate::ValueCons(&$crate::Cons {
-                car: $car,
-                cdr: $cdr,
-            }));
+        const C: $crate::Value<$crate::ValueTypesStatic> = $crate::Value::Cons(cons!($car, $cdr));
         C
+    }};
+}
+
+#[macro_export]
+macro_rules! bool {
+    ($b:expr) => {{
+        const B: $crate::ValueBool = $crate::ValueBool($b);
+        B
     }};
 }
 
 #[macro_export]
 macro_rules! v_bool {
     ($b:expr) => {{
-        const B: $crate::Value<$crate::ValueTypesStatic> =
-            $crate::Value::Bool($crate::ValueBool($b));
+        const B: $crate::Value<$crate::ValueTypesStatic> = $crate::Value::Bool(bool!($b));
         B
+    }};
+}
+
+#[macro_export]
+macro_rules! str {
+    ($s:expr) => {{
+        const S: $crate::ValueString<&'static str> = $crate::ValueString($s);
+        S
     }};
 }
 
 #[macro_export]
 macro_rules! v_str {
     ($s:expr) => {{
-        const S: $crate::Value<$crate::ValueTypesStatic> =
-            $crate::Value::String($crate::ValueString($s));
+        const S: $crate::Value<$crate::ValueTypesStatic> = $crate::Value::String(str!($s));
         S
     }};
 }
 
 #[macro_export]
-macro_rules! v_vref {
-    ($major: expr, $rest:expr) => {{
-        const V: $crate::Value<$crate::ValueTypesStatic> =
-            $crate::Value::Semver($crate::ValueSemver {
-                major: $major as u64,
-                rest: $rest as &[u64],
-            });
+macro_rules! vref {
+    ($major:expr, $rest:expr) => {{
+        const V: $crate::ValueSemver<$crate::SemverTypesStatic> = $crate::ValueSemver {
+            major: $major as u64,
+            rest: $rest as &[u64],
+        };
         V
     }};
+}
+
+#[macro_export]
+macro_rules! v_vref {
+    ($major:expr, $rest:expr) => {{
+        const V: $crate::Value<$crate::ValueTypesStatic> =
+            $crate::Value::Semver(vref!($major, $rest));
+        V
+    }};
+}
+
+#[macro_export]
+macro_rules! v {
+    [$major:expr] => {
+        vref!($major, &[])
+    };
+
+    [$major:expr, $($rest:expr),*] => {
+        vref!($major, &[$($rest as u64),*])
+    };
 }
 
 #[macro_export]
@@ -1083,7 +1140,7 @@ macro_rules! v_v {
 }
 
 #[macro_export]
-macro_rules! v_lang_ref {
+macro_rules! v_lang {
     ($lang:expr) => {{
         const L: $crate::Value<$crate::ValueTypesStatic> = $crate::Value::LanguageDirective($lang);
         L
@@ -1091,12 +1148,30 @@ macro_rules! v_lang_ref {
 }
 
 #[macro_export]
+macro_rules! lang_kira_ref {
+    ($major:expr, $rest:expr) => {
+        $crate::ValueLanguageDirective::Kira($crate::ValueSemver {
+            major: $major as u64,
+            rest: $rest as &[u64],
+        })
+    };
+}
+
+#[macro_export]
 macro_rules! v_lang_kira_ref {
     ($major:expr, $rest:expr) => {
-        v_lang_ref!($crate::ValueLanguageDirective::Kira($crate::ValueSemver {
-            major: $major as u64,
-            rest: $rest as &[u64]
-        }))
+        v_lang!(lang_kira_ref!($major, $rest))
+    };
+}
+
+#[macro_export]
+macro_rules! lang_kira {
+    [$major:expr] => {
+        lang_kira_ref!($major, &[])
+    };
+
+    [$major:expr, $($rest:expr),*] => {
+        lang_kira_ref!($major, &[$($rest as u64),*])
     };
 }
 
@@ -1112,21 +1187,36 @@ macro_rules! v_lang_kira {
 }
 
 #[macro_export]
+macro_rules! lang_other {
+    ($name:expr) => {
+        $crate::ValueLanguageDirective::Other($name)
+    };
+}
+
+#[macro_export]
 macro_rules! v_lang_other {
     ($name:expr) => {
-        v_lang_ref!($crate::ValueLanguageDirective::Other($name))
+        v_lang!(lang_other!($name))
     };
+}
+
+#[macro_export]
+macro_rules! func {
+    ($name:expr, $func:expr) => {{
+        const F: $crate::ValueFunction<$crate::ValueTypesStatic> = $crate::ValueFunction {
+            name: $name,
+            func: $func,
+        };
+        F
+    }};
 }
 
 #[macro_export]
 macro_rules! v_func {
     ($name:expr, $func:expr) => {{
-        const P: $crate::Value<$crate::ValueTypesStatic> =
-            $crate::Value::Function($crate::ValueFunction {
-                name: $name,
-                func: $func,
-            });
-        P
+        const F: $crate::Value<$crate::ValueTypesStatic> =
+            $crate::Value::Function(func!($name, $func));
+        F
     }};
 }
 
@@ -1160,6 +1250,12 @@ mod tests {
     }
 
     #[test]
+    fn test_uqsym_macro() {
+        const UQSYM: super::ValueUnqualifiedSymbol<&'static str> = uqsym!("uqsym");
+        assert_eq!(UQSYM.0, "uqsym");
+    }
+
+    #[test]
     fn test_v_uqsym_macro() {
         const UQSYM: super::Value<super::ValueTypesStatic> = v_uqsym!("uqsym");
         match UQSYM {
@@ -1169,15 +1265,32 @@ mod tests {
     }
 
     #[test]
+    fn test_qsym_macro() {
+        const QSYM: super::ValueQualifiedSymbol<&'static str> = qsym!("package", "qsym");
+        assert_eq!(QSYM.package, "package");
+        assert_eq!(QSYM.name, "qsym");
+    }
+
+    #[test]
     fn test_v_qsym_macro() {
-        const UQSYM: super::Value<super::ValueTypesStatic> = v_qsym!("package", "qsym");
-        match UQSYM {
+        const QSYM: super::Value<super::ValueTypesStatic> = v_qsym!("package", "qsym");
+        match QSYM {
             super::Value::QualifiedSymbol(s) => {
                 assert_eq!(s.package, "package");
                 assert_eq!(s.name, "qsym");
             }
             _ => panic!("Expected a Value::UnqualifiedSymbol"),
         }
+    }
+
+    #[test]
+    fn test_cons_macro() {
+        const CONS: super::ValueCons<super::ValueTypesStatic> = cons!(v_uqsym!("uqsym"), v_nil!());
+        match &CONS.0.car {
+            super::Value::UnqualifiedSymbol(s) => assert_eq!(s.0, "uqsym"),
+            _ => panic!("Expected a Value::UnqualifiedSymbol"),
+        }
+        assert_eq!(CONS.0.cdr, super::Value::<super::ValueTypesStatic>::Nil);
     }
 
     #[test]
@@ -1196,6 +1309,15 @@ mod tests {
     }
 
     #[test]
+    fn test_bool_macro() {
+        const BOOL1: super::ValueBool = bool!(true);
+        assert_eq!(BOOL1.0, true);
+
+        const BOOL2: super::ValueBool = bool!(false);
+        assert_eq!(BOOL2.0, false);
+    }
+
+    #[test]
     fn test_v_bool_macro() {
         const BOOL1: super::Value<super::ValueTypesStatic> = v_bool!(true);
         match BOOL1 {
@@ -1210,12 +1332,29 @@ mod tests {
     }
 
     #[test]
+    fn test_str_macro() {
+        const S: super::ValueString<&'static str> = str!("str");
+        assert_eq!(S.0, "str");
+    }
+
+    #[test]
     fn test_v_str_macro() {
         const S: super::Value<super::ValueTypesStatic> = v_str!("str");
         match S {
             super::Value::String(s) => assert_eq!(s.0, "str"),
             _ => panic!("Expected a Value::String"),
         }
+    }
+
+    #[test]
+    fn test_vref_macro() {
+        const V1: super::ValueSemver<super::SemverTypesStatic> = vref!(1u64, &[0u64]);
+        assert_eq!(V1.major, 1);
+        assert_eq!(V1.rest, &[0]);
+
+        const V2: super::ValueSemver<super::SemverTypesStatic> = vref!(4u64, &[]);
+        assert_eq!(V2.major, 4);
+        assert_eq!(V2.rest, &[]);
     }
 
     #[test]
@@ -1240,6 +1379,17 @@ mod tests {
     }
 
     #[test]
+    fn test_v_macro() {
+        const V1: super::ValueSemver<super::SemverTypesStatic> = v![2, 1];
+        assert_eq!(V1.major, 2);
+        assert_eq!(V1.rest, &[1]);
+
+        const V2: super::ValueSemver<super::SemverTypesStatic> = v![3];
+        assert_eq!(V2.major, 3);
+        assert_eq!(V2.rest, &[]);
+    }
+
+    #[test]
     fn test_v_v_macro() {
         const V1: super::Value<super::ValueTypesStatic> = v_v![2, 1];
         match V1 {
@@ -1257,6 +1407,29 @@ mod tests {
                 assert_eq!(v.rest, &[]);
             }
             _ => panic!("Expected a Value::Semver"),
+        }
+    }
+
+    #[test]
+    fn test_lang_kira_macro() {
+        const L1: super::ValueLanguageDirective<&'static str, super::SemverTypesStatic> =
+            lang_kira![1];
+        match L1 {
+            super::ValueLanguageDirective::Kira(v) => {
+                assert_eq!(v.major, 1);
+                assert_eq!(v.rest, &[]);
+            }
+            _ => panic!("Expected a Value::LanguageDirective with Kira"),
+        }
+
+        const L2: super::ValueLanguageDirective<&'static str, super::SemverTypesStatic> =
+            lang_kira![1, 0];
+        match L2 {
+            super::ValueLanguageDirective::Kira(v) => {
+                assert_eq!(v.major, 1);
+                assert_eq!(v.rest, &[0]);
+            }
+            _ => panic!("Expected a Value::LanguageDirective with Kira"),
         }
     }
 
@@ -1282,6 +1455,18 @@ mod tests {
     }
 
     #[test]
+    fn test_lang_other_macro() {
+        const L1: super::ValueLanguageDirective<&'static str, super::SemverTypesStatic> =
+            lang_other!("not-kira");
+        match L1 {
+            super::ValueLanguageDirective::Other(n) => {
+                assert_eq!(n, "not-kira");
+            }
+            _ => panic!("Expected a Value::LanguageDirective with other"),
+        }
+    }
+
+    #[test]
     fn test_v_lang_other_macro() {
         const L1: super::Value<super::ValueTypesStatic> = v_lang_other!("not-kira");
         match L1 {
@@ -1293,15 +1478,33 @@ mod tests {
     }
 
     #[test]
-    fn test_v_func_macro() {
-        const P: super::Value<super::ValueTypesStatic> = v_func!(
+    fn test_func_macro() {
+        const F: super::ValueFunction<super::ValueTypesStatic> = func!(
             super::ValueQualifiedSymbol {
                 package: "p",
                 name: "f1"
             },
             &static_f1
         );
-        match P {
+        assert_eq!(
+            F.name,
+            super::ValueQualifiedSymbol::<&'static str> {
+                package: "p",
+                name: "f1"
+            }
+        );
+    }
+
+    #[test]
+    fn test_v_func_macro() {
+        const F: super::Value<super::ValueTypesStatic> = v_func!(
+            super::ValueQualifiedSymbol {
+                package: "p",
+                name: "f1"
+            },
+            &static_f1
+        );
+        match F {
             super::Value::Function(super::ValueFunction { name, func: _ }) => assert_eq!(
                 name,
                 super::ValueQualifiedSymbol::<&'static str> {
@@ -1314,7 +1517,7 @@ mod tests {
     }
 
     #[test]
-    fn test_list_macro() {
+    fn test_v_list_macro() {
         const LIST1: super::Value<super::ValueTypesStatic> = v_list!();
         assert_eq!(LIST1, super::Value::<super::ValueTypesStatic>::Nil);
 
