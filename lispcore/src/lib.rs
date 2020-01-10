@@ -646,9 +646,7 @@ where
     type Item = LispListItem<T>;
 
     fn into_iter(self) -> Self::IntoIter {
-        LispList {
-            val: LispList::filter_nil(self),
-        }
+        LispList { val: self }
     }
 }
 
@@ -905,7 +903,7 @@ where
     T: ValueTypes + ?Sized,
     for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
 {
-    val: Option<Value<T>>,
+    val: Value<T>,
 }
 
 impl<T> LispList<T>
@@ -914,15 +912,8 @@ where
     for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
     Value<T>: Clone,
 {
-    pub fn take(self) -> Option<Value<T>> {
+    pub fn take(self) -> Value<T> {
         self.val
-    }
-
-    fn filter_nil(v: Value<T>) -> Option<Value<T>> {
-        match v {
-            Value::Nil => Option::None,
-            _ => Option::Some(v),
-        }
     }
 }
 
@@ -936,21 +927,19 @@ where
 
     fn next(&mut self) -> Option<Self::Item> {
         match &self.val {
-            Option::Some(v) => match v {
-                Value::Cons(ValueCons(c)) => {
-                    let cons = c.borrow();
-                    let car = cons.car.clone();
-                    let cdr = cons.cdr.clone();
-                    self.val = LispList::<T>::filter_nil(cdr);
-                    Option::Some(LispListItem::Item(car))
-                }
-                _ => {
-                    let result = LispListItem::Tail(v.clone());
-                    self.val = Option::None;
-                    Option::Some(result)
-                }
-            },
-            Option::None => Option::None,
+            Value::Nil => Option::None,
+            Value::Cons(ValueCons(c)) => {
+                let cons = c.borrow();
+                let car = cons.car.clone();
+                let cdr = cons.cdr.clone();
+                self.val = cdr;
+                Option::Some(LispListItem::Item(car))
+            }
+            _ => {
+                let result = LispListItem::Tail(self.val.clone());
+                self.val = Value::Nil;
+                Option::Some(result)
+            }
         }
     }
 }
@@ -1927,29 +1916,26 @@ mod tests {
         assert_eq!(i.next().unwrap().unwrap_item(), v_bool!(true));
         assert_eq!(i.next().unwrap().unwrap_item(), v_str!("str"));
         assert!(i.next().is_none());
-        assert_eq!(i.take(), Option::None);
+        assert_eq!(i.take(), v_nil!());
 
         let mut i = v_cons!(v_uqsym!("uqsym"), v_bool!(true)).into_iter();
         assert_eq!(i.next().unwrap().unwrap_item(), v_uqsym!("uqsym"));
         assert_eq!(i.next().unwrap().unwrap_tail(), v_bool!(true));
         assert!(i.next().is_none());
-        assert_eq!(i.take(), Option::None);
+        assert_eq!(i.take(), v_nil!());
 
         let mut i = v_list!(v_uqsym!("uqsym"), v_bool!(true), v_str!("str")).into_iter();
         assert_eq!(i.next().unwrap().unwrap_item(), v_uqsym!("uqsym"));
-        assert_eq!(
-            i.take(),
-            Option::Some(v_list!(v_bool!(true), v_str!("str")))
-        );
+        assert_eq!(i.take(), v_list!(v_bool!(true), v_str!("str")));
 
         let mut i = v_list!(v_uqsym!("uqsym"), v_bool!(true), v_str!("str")).into_iter();
         assert_eq!(i.next().unwrap().unwrap_item(), v_uqsym!("uqsym"));
         assert_eq!(i.next().unwrap().unwrap_item(), v_bool!(true));
         assert_eq!(i.next().unwrap().unwrap_item(), v_str!("str"));
-        assert_eq!(i.take(), Option::None);
+        assert_eq!(i.take(), v_nil!());
 
         let i = v_nil!().into_iter();
-        assert_eq!(i.take(), Option::None);
+        assert_eq!(i.take(), v_nil!());
     }
 
     #[test]
