@@ -1002,119 +1002,102 @@ impl ValueTypes for ValueTypesStatic {
 
 #[macro_export]
 macro_rules! v_nil {
-    () => {{
-        const N: $crate::Value<$crate::ValueTypesStatic> = $crate::Value::Nil;
-        N
-    }};
+    () => {
+        $crate::Value::<$crate::ValueTypesStatic>::Nil
+    };
 }
 
 #[macro_export]
 macro_rules! uqsym {
-    ($name:expr) => {{
-        const S: $crate::ValueUnqualifiedSymbol<&'static str> =
-            $crate::ValueUnqualifiedSymbol($name);
-        S
-    }};
+    ($name:expr) => {
+        $crate::ValueUnqualifiedSymbol::<&'static str>($name)
+    };
 }
 
 #[macro_export]
 macro_rules! v_uqsym {
-    ($name:expr) => {{
-        const S: $crate::Value<$crate::ValueTypesStatic> =
-            $crate::Value::UnqualifiedSymbol(uqsym!($name));
-        S
-    }};
+    ($name:expr) => {
+        $crate::Value::<$crate::ValueTypesStatic>::UnqualifiedSymbol(uqsym!($name))
+    };
 }
 
 #[macro_export]
 macro_rules! qsym {
-    ($package:expr, $name:expr) => {{
-        const S: $crate::ValueQualifiedSymbol<&'static str> = $crate::ValueQualifiedSymbol {
+    ($package:expr, $name:expr) => {
+        $crate::ValueQualifiedSymbol::<&'static str> {
             package: $package,
             name: $name,
-        };
-        S
-    }};
+        }
+    };
 }
 
 #[macro_export]
 macro_rules! v_qsym {
-    ($package:expr, $name:expr) => {{
-        const S: $crate::Value<$crate::ValueTypesStatic> =
-            $crate::Value::QualifiedSymbol(qsym!($package, $name));
-        S
-    }};
+    ($package:expr, $name:expr) => {
+        $crate::Value::<$crate::ValueTypesStatic>::QualifiedSymbol(qsym!($package, $name))
+    };
 }
 
 #[macro_export]
 macro_rules! cons {
-    ($car:expr, $cdr:expr) => {{
-        const C: $crate::ValueCons<$crate::ValueTypesStatic> = $crate::ValueCons(&$crate::Cons {
+    ($car:expr, $cdr:expr) => {
+        $crate::ValueCons::<$crate::ValueTypesStatic>(&$crate::Cons {
             car: $car,
             cdr: $cdr,
-        });
-        C
-    }};
+        })
+    };
 }
 
 #[macro_export]
 macro_rules! v_cons {
-    ($car:expr, $cdr:expr) => {{
-        const C: $crate::Value<$crate::ValueTypesStatic> = $crate::Value::Cons(cons!($car, $cdr));
-        C
-    }};
+    ($car:expr, $cdr:expr) => {
+        $crate::Value::<$crate::ValueTypesStatic>::Cons(cons!($car, $cdr))
+    };
 }
 
 #[macro_export]
 macro_rules! bool {
-    ($b:expr) => {{
-        const B: $crate::ValueBool = $crate::ValueBool($b);
-        B
-    }};
+    ($b:expr) => {
+        $crate::ValueBool($b)
+    };
 }
 
 #[macro_export]
 macro_rules! v_bool {
-    ($b:expr) => {{
-        const B: $crate::Value<$crate::ValueTypesStatic> = $crate::Value::Bool(bool!($b));
-        B
-    }};
+    ($b:expr) => {
+        $crate::Value::<$crate::ValueTypesStatic>::Bool(bool!($b))
+    };
 }
 
 #[macro_export]
 macro_rules! str {
-    ($s:expr) => {{
-        const S: $crate::ValueString<&'static str> = $crate::ValueString($s);
-        S
-    }};
+    ($s:expr) => {
+        $crate::ValueString::<&'static str>($s)
+    };
 }
 
 #[macro_export]
 macro_rules! v_str {
-    ($s:expr) => {{
-        const S: $crate::Value<$crate::ValueTypesStatic> = $crate::Value::String(str!($s));
-        S
-    }};
+    ($s:expr) => {
+        $crate::Value::<$crate::ValueTypesStatic>::String(str!($s))
+    };
 }
 
 #[macro_export]
 macro_rules! vref {
-    ($major:expr, $rest:expr) => {{
-        const V: $crate::ValueSemver<$crate::SemverTypesStatic> = $crate::ValueSemver {
+    ($major:expr, $rest:expr) => {
+        $crate::ValueSemver::<$crate::SemverTypesStatic> {
             major: $major as u64,
             rest: $rest as &[u64],
-        };
-        V
-    }};
+        }
+    };
 }
 
 #[macro_export]
 macro_rules! v_vref {
-    ($major:expr, $rest:expr) => {{
-        const V: $crate::Value<$crate::ValueTypesStatic> =
-            $crate::Value::Semver(vref!($major, $rest));
-        V
-    }};
+    ($major:expr, $rest:expr) => {
+        $crate::Value::<$crate::ValueTypesStatic>::Semver(vref!($major, $rest))
+    };
 }
 
 #[macro_export]
@@ -1141,19 +1124,17 @@ macro_rules! v_v {
 
 #[macro_export]
 macro_rules! v_lang {
-    ($lang:expr) => {{
-        const L: $crate::Value<$crate::ValueTypesStatic> = $crate::Value::LanguageDirective($lang);
-        L
-    }};
+    ($lang:expr) => {
+        $crate::Value::<$crate::ValueTypesStatic>::LanguageDirective($lang)
+    };
 }
 
 #[macro_export]
 macro_rules! lang_kira_ref {
     ($major:expr, $rest:expr) => {
-        $crate::ValueLanguageDirective::Kira($crate::ValueSemver {
-            major: $major as u64,
-            rest: $rest as &[u64],
-        })
+        $crate::ValueLanguageDirective::<&'static str, $crate::SemverTypesStatic>::Kira(vref!(
+            $major, $rest
+        ))
     };
 }
 
@@ -1189,7 +1170,7 @@ macro_rules! v_lang_kira {
 #[macro_export]
 macro_rules! lang_other {
     ($name:expr) => {
-        $crate::ValueLanguageDirective::Other($name)
+        $crate::ValueLanguageDirective::<&'static str, $crate::SemverTypesStatic>::Other($name)
     };
 }
 
@@ -1202,22 +1183,19 @@ macro_rules! v_lang_other {
 
 #[macro_export]
 macro_rules! func {
-    ($name:expr, $func:expr) => {{
-        const F: $crate::ValueFunction<$crate::ValueTypesStatic> = $crate::ValueFunction {
+    ($name:expr, $func:expr) => {
+        $crate::ValueFunction::<$crate::ValueTypesStatic> {
             name: $name,
             func: $func,
-        };
-        F
-    }};
+        }
+    };
 }
 
 #[macro_export]
 macro_rules! v_func {
-    ($name:expr, $func:expr) => {{
-        const F: $crate::Value<$crate::ValueTypesStatic> =
-            $crate::Value::Function(func!($name, $func));
-        F
-    }};
+    ($name:expr, $func:expr) => {
+        $crate::Value::<$crate::ValueTypesStatic>::Function(func!($name, $func))
+    };
 }
 
 #[macro_export]
