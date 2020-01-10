@@ -522,28 +522,13 @@ mod tests {
 
     #[test]
     fn test_parse_semver() {
-        assert_eq!(
-            parse_semver::<SemverTypesVec>("1").unwrap(),
-            ValueSemver::<SemverTypesVec> {
-                major: 1u64,
-                rest: vec![]
-            },
-        );
+        assert_eq!(parse_semver::<SemverTypesVec>("1").unwrap(), v![1]);
 
-        assert_eq!(
-            parse_semver::<SemverTypesVec>("2.0").unwrap(),
-            ValueSemver::<SemverTypesVec> {
-                major: 2u64,
-                rest: vec![0u64]
-            },
-        );
+        assert_eq!(parse_semver::<SemverTypesVec>("2.0").unwrap(), v![2, 0]);
 
         assert_eq!(
             parse_semver::<SemverTypesVec>("3.5.10").unwrap(),
-            ValueSemver::<SemverTypesVec> {
-                major: 3u64,
-                rest: vec![5u64, 10u64]
-            },
+            v![3, 5, 10]
         );
 
         assert_eq!(
