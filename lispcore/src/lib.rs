@@ -936,9 +936,9 @@ where
                 Option::Some(LispListItem::Item(car))
             }
             _ => {
-                let result = LispListItem::Tail(self.val.clone());
-                self.val = Value::Nil;
-                Option::Some(result)
+                let mut result = Value::Nil;
+                std::mem::swap(&mut self.val, &mut result);
+                Option::Some(LispListItem::Tail(result))
             }
         }
     }
