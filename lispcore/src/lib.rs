@@ -605,7 +605,7 @@ where
                     items: BTreeSet::from_iter(vec![cons.car.value_type()]),
                     tail: BTreeSet::from_iter(vec![ValueTypeNonList::Nil]),
                 };
-                for item in LispList::<T>::new(cons.cdr.clone()) {
+                for item in cons.cdr.clone().to_list() {
                     match item {
                         LispListItem::Item(i) => {
                             l.items.insert(i.value_type());
@@ -633,6 +633,12 @@ where
             Value::Semver(_) => ValueTypeNonList::Semver,
             Value::LanguageDirective(_) => ValueTypeNonList::LanguageDirective,
             Value::Function(_) => ValueTypeNonList::Function,
+        }
+    }
+
+    pub fn to_list(self) -> LispList<T> {
+        LispList {
+            val: LispList::filter_nil(self),
         }
     }
 }
@@ -899,12 +905,6 @@ where
     for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
     Value<T>: Clone,
 {
-    pub fn new(val: Value<T>) -> Self {
-        Self {
-            val: LispList::<T>::filter_nil(val),
-        }
-    }
-
     pub fn take(self) -> Option<Value<T>> {
         self.val
     }
@@ -1910,48 +1910,36 @@ mod tests {
     }
 
     #[test]
-    fn test_lisp_list() {
+    fn test_to_list() {
         use super::*;
 
-        let mut i = LispList::<ValueTypesStatic>::new(v_list!(
-            v_uqsym!("uqsym"),
-            v_bool!(true),
-            v_str!("str")
-        ));
+        let mut i = v_list!(v_uqsym!("uqsym"), v_bool!(true), v_str!("str")).to_list();
         assert_eq!(i.next().unwrap().unwrap_item(), v_uqsym!("uqsym"));
         assert_eq!(i.next().unwrap().unwrap_item(), v_bool!(true));
         assert_eq!(i.next().unwrap().unwrap_item(), v_str!("str"));
         assert!(i.next().is_none());
         assert_eq!(i.take(), Option::None);
 
-        let mut i = LispList::<ValueTypesStatic>::new(v_cons!(v_uqsym!("uqsym"), v_bool!(true)));
+        let mut i = v_cons!(v_uqsym!("uqsym"), v_bool!(true)).to_list();
         assert_eq!(i.next().unwrap().unwrap_item(), v_uqsym!("uqsym"));
         assert_eq!(i.next().unwrap().unwrap_tail(), v_bool!(true));
         assert!(i.next().is_none());
         assert_eq!(i.take(), Option::None);
 
-        let mut i = LispList::<ValueTypesStatic>::new(v_list!(
-            v_uqsym!("uqsym"),
-            v_bool!(true),
-            v_str!("str")
-        ));
+        let mut i = v_list!(v_uqsym!("uqsym"), v_bool!(true), v_str!("str")).to_list();
         assert_eq!(i.next().unwrap().unwrap_item(), v_uqsym!("uqsym"));
         assert_eq!(
             i.take(),
             Option::Some(v_list!(v_bool!(true), v_str!("str")))
         );
 
-        let mut i = LispList::<ValueTypesStatic>::new(v_list!(
-            v_uqsym!("uqsym"),
-            v_bool!(true),
-            v_str!("str")
-        ));
+        let mut i = v_list!(v_uqsym!("uqsym"), v_bool!(true), v_str!("str")).to_list();
         assert_eq!(i.next().unwrap().unwrap_item(), v_uqsym!("uqsym"));
         assert_eq!(i.next().unwrap().unwrap_item(), v_bool!(true));
         assert_eq!(i.next().unwrap().unwrap_item(), v_str!("str"));
         assert_eq!(i.take(), Option::None);
 
-        let i = LispList::<ValueTypesStatic>::new(v_nil!());
+        let i = v_nil!().to_list();
         assert_eq!(i.take(), Option::None);
     }
 
