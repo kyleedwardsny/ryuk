@@ -605,7 +605,7 @@ where
                     items: BTreeSet::from_iter(vec![cons.car.value_type()]),
                     tail: BTreeSet::from_iter(vec![ValueTypeNonList::Nil]),
                 };
-                for item in cons.cdr.clone().to_list() {
+                for item in cons.cdr.clone().into_iter() {
                     match item {
                         LispListItem::Item(i) => {
                             l.items.insert(i.value_type());
@@ -635,8 +635,17 @@ where
             Value::Function(_) => ValueTypeNonList::Function,
         }
     }
+}
 
-    pub fn to_list(self) -> LispList<T> {
+impl<T> IntoIterator for Value<T>
+where
+    T: ValueTypes + ?Sized,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+{
+    type IntoIter = LispList<T>;
+    type Item = LispListItem<T>;
+
+    fn into_iter(self) -> Self::IntoIter {
         LispList {
             val: LispList::filter_nil(self),
         }
@@ -1910,36 +1919,36 @@ mod tests {
     }
 
     #[test]
-    fn test_to_list() {
+    fn test_into_iter() {
         use super::*;
 
-        let mut i = v_list!(v_uqsym!("uqsym"), v_bool!(true), v_str!("str")).to_list();
+        let mut i = v_list!(v_uqsym!("uqsym"), v_bool!(true), v_str!("str")).into_iter();
         assert_eq!(i.next().unwrap().unwrap_item(), v_uqsym!("uqsym"));
         assert_eq!(i.next().unwrap().unwrap_item(), v_bool!(true));
         assert_eq!(i.next().unwrap().unwrap_item(), v_str!("str"));
         assert!(i.next().is_none());
         assert_eq!(i.take(), Option::None);
 
-        let mut i = v_cons!(v_uqsym!("uqsym"), v_bool!(true)).to_list();
+        let mut i = v_cons!(v_uqsym!("uqsym"), v_bool!(true)).into_iter();
         assert_eq!(i.next().unwrap().unwrap_item(), v_uqsym!("uqsym"));
         assert_eq!(i.next().unwrap().unwrap_tail(), v_bool!(true));
         assert!(i.next().is_none());
         assert_eq!(i.take(), Option::None);
 
-        let mut i = v_list!(v_uqsym!("uqsym"), v_bool!(true), v_str!("str")).to_list();
+        let mut i = v_list!(v_uqsym!("uqsym"), v_bool!(true), v_str!("str")).into_iter();
         assert_eq!(i.next().unwrap().unwrap_item(), v_uqsym!("uqsym"));
         assert_eq!(
             i.take(),
             Option::Some(v_list!(v_bool!(true), v_str!("str")))
         );
 
-        let mut i = v_list!(v_uqsym!("uqsym"), v_bool!(true), v_str!("str")).to_list();
+        let mut i = v_list!(v_uqsym!("uqsym"), v_bool!(true), v_str!("str")).into_iter();
         assert_eq!(i.next().unwrap().unwrap_item(), v_uqsym!("uqsym"));
         assert_eq!(i.next().unwrap().unwrap_item(), v_bool!(true));
         assert_eq!(i.next().unwrap().unwrap_item(), v_str!("str"));
         assert_eq!(i.take(), Option::None);
 
-        let i = v_nil!().to_list();
+        let i = v_nil!().into_iter();
         assert_eq!(i.take(), Option::None);
     }
 
