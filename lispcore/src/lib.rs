@@ -1457,13 +1457,8 @@ mod tests {
 
     #[test]
     fn test_func_macro() {
-        const F: super::ValueFunction<super::ValueTypesStatic> = func!(
-            super::ValueQualifiedSymbol {
-                package: "p",
-                name: "f1"
-            },
-            &static_f1
-        );
+        const F: super::ValueFunction<super::ValueTypesStatic> =
+            func!(qsym!("p", "f1"), &static_f1);
         assert_eq!(
             F.name,
             super::ValueQualifiedSymbol::<&'static str> {
@@ -1475,13 +1470,7 @@ mod tests {
 
     #[test]
     fn test_v_func_macro() {
-        const F: super::Value<super::ValueTypesStatic> = v_func!(
-            super::ValueQualifiedSymbol {
-                package: "p",
-                name: "f1"
-            },
-            &static_f1
-        );
+        const F: super::Value<super::ValueTypesStatic> = v_func!(qsym!("p", "f1"), &static_f1);
         match F {
             super::Value::Function(super::ValueFunction { name, func: _ }) => assert_eq!(
                 name,
@@ -1570,126 +1559,17 @@ mod tests {
         use super::*;
         use more_asserts::*;
 
-        assert_eq!(
-            ValueSemver::<SemverTypesStatic> {
-                major: 1u64,
-                rest: &[0u64] as &[u64]
-            },
-            ValueSemver::<SemverTypesStatic> {
-                major: 1u64,
-                rest: &[0u64] as &[u64]
-            },
-        );
-
-        assert_ne!(
-            ValueSemver::<SemverTypesStatic> {
-                major: 1u64,
-                rest: &[0u64] as &[u64]
-            },
-            ValueSemver::<SemverTypesStatic> {
-                major: 1u64,
-                rest: &[0u64, 0u64] as &[u64]
-            },
-        );
-
-        assert_lt!(
-            ValueSemver::<SemverTypesStatic> {
-                major: 1u64,
-                rest: &[0u64] as &[u64]
-            },
-            ValueSemver::<SemverTypesStatic> {
-                major: 1u64,
-                rest: &[0u64, 0u64] as &[u64]
-            },
-        );
-
-        assert_lt!(
-            ValueSemver::<SemverTypesStatic> {
-                major: 1u64,
-                rest: &[0u64] as &[u64]
-            },
-            ValueSemver::<SemverTypesStatic> {
-                major: 1u64,
-                rest: &[1u64] as &[u64]
-            },
-        );
-
-        assert_lt!(
-            ValueSemver::<SemverTypesStatic> {
-                major: 1u64,
-                rest: &[1u64] as &[u64]
-            },
-            ValueSemver::<SemverTypesStatic> {
-                major: 2u64,
-                rest: &[0u64] as &[u64]
-            },
-        );
-
-        assert_lt!(
-            ValueSemver::<SemverTypesStatic> {
-                major: 1u64,
-                rest: &[1u64] as &[u64]
-            },
-            ValueSemver::<SemverTypesStatic> {
-                major: 2u64,
-                rest: &[] as &[u64]
-            },
-        );
-
-        assert_ne!(
-            ValueSemver::<SemverTypesStatic> {
-                major: 1u64,
-                rest: &[0u64, 0u64] as &[u64]
-            },
-            ValueSemver::<SemverTypesStatic> {
-                major: 1u64,
-                rest: &[0u64] as &[u64]
-            },
-        );
-
-        assert_gt!(
-            ValueSemver::<SemverTypesStatic> {
-                major: 1u64,
-                rest: &[0u64, 0u64] as &[u64]
-            },
-            ValueSemver::<SemverTypesStatic> {
-                major: 1u64,
-                rest: &[0u64] as &[u64]
-            },
-        );
-
-        assert_gt!(
-            ValueSemver::<SemverTypesStatic> {
-                major: 1u64,
-                rest: &[1u64] as &[u64]
-            },
-            ValueSemver::<SemverTypesStatic> {
-                major: 1u64,
-                rest: &[0u64] as &[u64]
-            },
-        );
-
-        assert_gt!(
-            ValueSemver::<SemverTypesStatic> {
-                major: 2u64,
-                rest: &[0u64] as &[u64]
-            },
-            ValueSemver::<SemverTypesStatic> {
-                major: 1u64,
-                rest: &[1u64] as &[u64]
-            },
-        );
-
-        assert_gt!(
-            ValueSemver::<SemverTypesStatic> {
-                major: 2u64,
-                rest: &[] as &[u64]
-            },
-            ValueSemver::<SemverTypesStatic> {
-                major: 1u64,
-                rest: &[1u64] as &[u64]
-            },
-        );
+        assert_eq!(v![1, 0], v![1, 0]);
+        assert_ne!(v![1, 0], v![1, 0, 0]);
+        assert_lt!(v![1, 0], v![1, 0, 0]);
+        assert_lt!(v![1, 0], v![1, 1]);
+        assert_lt!(v![1, 1], v![2, 0]);
+        assert_lt!(v![1, 1], v![2]);
+        assert_ne!(v![1, 0, 0], v![1, 0]);
+        assert_gt!(v![1, 0, 0], v![1, 0]);
+        assert_gt!(v![1, 1], v![1, 0]);
+        assert_gt!(v![2, 0], v![1, 1]);
+        assert_gt!(v![2], v![1, 1]);
     }
 
     #[test]
@@ -1775,19 +1655,23 @@ mod tests {
         assert_ne!(v_lang_kira![1, 0], v_v![1, 0]);
         assert_ne!(v_lang_kira![1, 0], v_nil!());
 
-        const F1_NAME: super::ValueQualifiedSymbol<&'static str> = super::ValueQualifiedSymbol {
-            package: "p",
-            name: "f1",
-        };
-        const F2_NAME: super::ValueQualifiedSymbol<&'static str> = super::ValueQualifiedSymbol {
-            package: "p",
-            name: "f2",
-        };
-        assert_eq!(v_func!(F1_NAME, &static_f1), v_func!(F1_NAME, &static_f1));
-        assert_eq!(v_func!(F1_NAME, &static_f1), v_func!(F1_NAME, &static_f2));
-        assert_ne!(v_func!(F1_NAME, &static_f1), v_func!(F2_NAME, &static_f1));
-        assert_ne!(v_func!(F1_NAME, &static_f1), v_func!(F2_NAME, &static_f2));
-        assert_ne!(v_func!(F1_NAME, &static_f1), v_nil!());
+        assert_eq!(
+            v_func!(qsym!("p", "f1"), &static_f1),
+            v_func!(qsym!("p", "f1"), &static_f1)
+        );
+        assert_eq!(
+            v_func!(qsym!("p", "f1"), &static_f1),
+            v_func!(qsym!("p", "f1"), &static_f2)
+        );
+        assert_ne!(
+            v_func!(qsym!("p", "f1"), &static_f1),
+            v_func!(qsym!("p", "f2"), &static_f1)
+        );
+        assert_ne!(
+            v_func!(qsym!("p", "f1"), &static_f1),
+            v_func!(qsym!("p", "f2"), &static_f2)
+        );
+        assert_ne!(v_func!(qsym!("p", "f1"), &static_f1), v_nil!());
     }
 
     #[test]
@@ -1808,7 +1692,7 @@ mod tests {
         assert_eq!(
             TryInto::<&ValueUnqualifiedSymbol<<ValueTypesStatic as ValueTypes>::StringRef>>::try_into(&v)
                 .unwrap(),
-            &ValueUnqualifiedSymbol("uqsym")
+            &uqsym!("uqsym")
         );
         assert_eq!(
             TryInto::<()>::try_into(&v).unwrap_err().kind,
@@ -1819,7 +1703,7 @@ mod tests {
         assert_eq!(
             TryInto::<&ValueQualifiedSymbol<<ValueTypesStatic as ValueTypes>::StringRef>>::try_into(&v)
                 .unwrap(),
-            &ValueQualifiedSymbol { package: "p", name: "qsym" }
+            &qsym!("p", "qsym")
         );
         assert_eq!(
             TryInto::<()>::try_into(&v).unwrap_err().kind,
@@ -1829,10 +1713,7 @@ mod tests {
         let v = v_cons!(v_nil!(), v_nil!());
         assert_eq!(
             TryInto::<&ValueCons<ValueTypesStatic>>::try_into(&v).unwrap(),
-            &ValueCons::<ValueTypesStatic>(&Cons {
-                car: v_nil!(),
-                cdr: v_nil!()
-            })
+            &cons!(v_nil!(), v_nil!())
         );
         assert_eq!(
             TryInto::<()>::try_into(&v).unwrap_err().kind,
@@ -1840,10 +1721,7 @@ mod tests {
         );
 
         let v = v_bool!(true);
-        assert_eq!(
-            TryInto::<&ValueBool>::try_into(&v).unwrap(),
-            &ValueBool(true)
-        );
+        assert_eq!(TryInto::<&ValueBool>::try_into(&v).unwrap(), &bool!(true));
         assert_eq!(
             TryInto::<()>::try_into(&v).unwrap_err().kind,
             ErrorKind::IncorrectType
@@ -1853,7 +1731,7 @@ mod tests {
         assert_eq!(
             TryInto::<&ValueString<<ValueTypesStatic as ValueTypes>::StringRef>>::try_into(&v)
                 .unwrap(),
-            &ValueString("str")
+            &str!("str")
         );
         assert_eq!(
             TryInto::<()>::try_into(&v).unwrap_err().kind,
@@ -1864,10 +1742,7 @@ mod tests {
         assert_eq!(
             TryInto::<&ValueSemver<<ValueTypesStatic as ValueTypes>::SemverTypes>>::try_into(&v)
                 .unwrap(),
-            &ValueSemver::<<ValueTypesStatic as ValueTypes>::SemverTypes> {
-                major: 1u64,
-                rest: &[0u64] as &[u64]
-            }
+            &v![1, 0]
         );
         assert_eq!(
             TryInto::<()>::try_into(&v).unwrap_err().kind,
@@ -1878,27 +1753,17 @@ mod tests {
         assert_eq!(
             TryInto::<&ValueLanguageDirective<&'static str, SemverTypesStatic>>::try_into(&v)
                 .unwrap(),
-            &ValueLanguageDirective::<&'static str, SemverTypesStatic>::Kira(ValueSemver {
-                major: 1u64,
-                rest: &[0u64] as &[u64]
-            })
+            &lang_kira![1, 0]
         );
         assert_eq!(
             TryInto::<()>::try_into(&v).unwrap_err().kind,
             ErrorKind::IncorrectType
         );
 
-        const F1_NAME: ValueQualifiedSymbol<&'static str> = ValueQualifiedSymbol {
-            package: "p",
-            name: "f1",
-        };
-        let v = v_func!(F1_NAME, &static_f1);
+        let v = v_func!(qsym!("p", "f1"), &static_f1);
         assert_eq!(
             TryInto::<&ValueFunction<ValueTypesStatic>>::try_into(&v).unwrap(),
-            &ValueFunction::<ValueTypesStatic> {
-                name: F1_NAME,
-                func: &static_f1,
-            }
+            &func!(qsym!("p", "f1"), &static_f1)
         );
         assert_eq!(
             TryInto::<()>::try_into(&v).unwrap_err().kind,
@@ -1924,7 +1789,7 @@ mod tests {
         assert_eq!(
             TryInto::<ValueUnqualifiedSymbol<<ValueTypesStatic as ValueTypes>::StringRef>>::try_into(v.clone())
                 .unwrap(),
-            ValueUnqualifiedSymbol("uqsym")
+            uqsym!("uqsym")
         );
         assert_eq!(
             TryInto::<()>::try_into(v).unwrap_err().kind,
@@ -1937,10 +1802,7 @@ mod tests {
                 v.clone()
             )
             .unwrap(),
-            ValueQualifiedSymbol {
-                package: "p",
-                name: "qsym"
-            }
+            qsym!("p", "qsym")
         );
         assert_eq!(
             TryInto::<()>::try_into(v).unwrap_err().kind,
@@ -1950,10 +1812,7 @@ mod tests {
         let v = v_cons!(v_nil!(), v_nil!());
         assert_eq!(
             TryInto::<ValueCons<ValueTypesStatic>>::try_into(v.clone()).unwrap(),
-            ValueCons::<ValueTypesStatic>(&Cons {
-                car: v_nil!(),
-                cdr: v_nil!()
-            })
+            cons!(v_nil!(), v_nil!())
         );
         assert_eq!(
             TryInto::<()>::try_into(v).unwrap_err().kind,
@@ -1963,7 +1822,7 @@ mod tests {
         let v = v_bool!(true);
         assert_eq!(
             TryInto::<ValueBool>::try_into(v.clone()).unwrap(),
-            ValueBool(true)
+            bool!(true)
         );
         assert_eq!(
             TryInto::<()>::try_into(v).unwrap_err().kind,
@@ -1976,7 +1835,7 @@ mod tests {
                 v.clone()
             )
             .unwrap(),
-            ValueString("str")
+            str!("str")
         );
         assert_eq!(
             TryInto::<()>::try_into(v).unwrap_err().kind,
@@ -1989,10 +1848,7 @@ mod tests {
                 v.clone()
             )
             .unwrap(),
-            ValueSemver::<<ValueTypesStatic as ValueTypes>::SemverTypes> {
-                major: 1u64,
-                rest: &[0u64] as &[u64]
-            }
+            v![1, 0]
         );
         assert_eq!(
             TryInto::<()>::try_into(v).unwrap_err().kind,
@@ -2003,27 +1859,17 @@ mod tests {
         assert_eq!(
             TryInto::<ValueLanguageDirective<&'static str, SemverTypesStatic>>::try_into(v.clone())
                 .unwrap(),
-            ValueLanguageDirective::<&'static str, SemverTypesStatic>::Kira(ValueSemver {
-                major: 1u64,
-                rest: &[0u64] as &[u64]
-            })
+            lang_kira![1, 0]
         );
         assert_eq!(
             TryInto::<()>::try_into(v).unwrap_err().kind,
             ErrorKind::IncorrectType
         );
 
-        const F1_NAME: ValueQualifiedSymbol<&'static str> = ValueQualifiedSymbol {
-            package: "p",
-            name: "f1",
-        };
-        let v = v_func!(F1_NAME, &static_f1);
+        let v = v_func!(qsym!("p", "f1"), &static_f1);
         assert_eq!(
             TryInto::<ValueFunction<ValueTypesStatic>>::try_into(v.clone()).unwrap(),
-            ValueFunction::<ValueTypesStatic> {
-                name: F1_NAME,
-                func: &static_f1,
-            }
+            func!(qsym!("p", "f1"), &static_f1)
         );
         assert_eq!(
             TryInto::<()>::try_into(v).unwrap_err().kind,
@@ -2038,59 +1884,29 @@ mod tests {
         let v: Value<ValueTypesStatic> = ().into();
         assert_eq!(v, v_nil!());
 
-        let v: Value<ValueTypesStatic> = ValueUnqualifiedSymbol("uqsym").into();
+        let v: Value<ValueTypesStatic> = uqsym!("uqsym").into();
         assert_eq!(v, v_uqsym!("uqsym"));
 
-        let v: Value<ValueTypesStatic> = ValueQualifiedSymbol {
-            package: "p",
-            name: "qsym",
-        }
-        .into();
+        let v: Value<ValueTypesStatic> = qsym!("p", "qsym").into();
         assert_eq!(v, v_qsym!("p", "qsym"));
 
-        let v: Value<ValueTypesStatic> = ValueCons(&Cons {
-            car: v_nil!(),
-            cdr: v_nil!(),
-        })
-        .into();
+        let v: Value<ValueTypesStatic> = cons!(v_nil!(), v_nil!()).into();
         assert_eq!(v, v_cons!(v_nil!(), v_nil!()));
 
-        let v: Value<ValueTypesStatic> = ValueBool(true).into();
+        let v: Value<ValueTypesStatic> = bool!(true).into();
         assert_eq!(v, v_bool!(true));
 
-        let v: Value<ValueTypesStatic> = ValueString("str").into();
+        let v: Value<ValueTypesStatic> = str!("str").into();
         assert_eq!(v, v_str!("str"));
 
-        let v: Value<ValueTypesStatic> = ValueSemver {
-            major: 1,
-            rest: &[0u64] as &[u64],
-        }
-        .into();
+        let v: Value<ValueTypesStatic> = v![1, 0].into();
         assert_eq!(v, v_v![1, 0]);
 
-        let v: Value<ValueTypesStatic> = ValueLanguageDirective::Kira(ValueSemver {
-            major: 1,
-            rest: &[0u64] as &[u64],
-        })
-        .into();
+        let v: Value<ValueTypesStatic> = lang_kira![1, 0].into();
         assert_eq!(v, v_lang_kira![1, 0]);
 
-        const F1_NAME: ValueQualifiedSymbol<&'static str> = ValueQualifiedSymbol {
-            package: "p",
-            name: "f1",
-        };
-        let v: Value<ValueTypesStatic> = ValueFunction::<ValueTypesStatic> {
-            name: F1_NAME.clone(),
-            func: &static_f1,
-        }
-        .into();
-        assert_eq!(
-            v,
-            Value::<ValueTypesStatic>::Function(ValueFunction {
-                name: F1_NAME.clone(),
-                func: &static_f1,
-            })
-        );
+        let v: Value<ValueTypesStatic> = func!(qsym!("p", "f1"), &static_f1).into();
+        assert_eq!(v, v_func!(qsym!("p", "f1"), &static_f1));
     }
 
     #[test]
@@ -2172,14 +1988,7 @@ mod tests {
             ValueType::NonList(ValueTypeNonList::LanguageDirective)
         );
         assert_eq!(
-            v_func!(
-                ValueQualifiedSymbol {
-                    package: "p",
-                    name: "f1"
-                },
-                &static_f1
-            )
-            .value_type(),
+            v_func!(qsym!("p", "f1"), &static_f1).value_type(),
             ValueType::NonList(ValueTypeNonList::Function)
         );
         assert_eq!(
