@@ -56,19 +56,7 @@ where
 {
     type ConsRef: Borrow<Cons<Self>> + Clone + Debug;
     type StringRef: Borrow<str> + Clone + Debug;
-    type Func: Fn(
-            &mut (dyn Environment<Self> + 'static),
-            &mut (dyn Iterator<Item = Value<Self>> + 'static),
-        ) -> Result<Value<Self>>
-        + ?Sized;
-    type FuncRef: Borrow<Self::Func> + Clone;
     type SemverTypes: SemverTypes + ?Sized;
-    type Macro: Fn(
-            &mut (dyn Environment<Self> + 'static),
-            Value<Self>,
-        ) -> Result<TryCompilationResult<Self>>
-        + ?Sized;
-    type MacroRef: Borrow<Self::Macro> + Clone;
 }
 
 pub trait Environment<T>
@@ -523,50 +511,28 @@ where
     }
 }
 
-pub struct ValueFunction<T>
+#[derive(Debug)]
+pub struct ValueFunction<S>(pub ValueQualifiedSymbol<S>)
 where
-    T: ValueTypes + ?Sized,
-    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
-{
-    pub name: ValueQualifiedSymbol<T::StringRef>,
-    pub func: T::FuncRef,
-}
+    S: Borrow<str> + Clone;
 
-impl<T1, T2> PartialEq<ValueFunction<T2>> for ValueFunction<T1>
+impl<S1, S2> PartialEq<ValueFunction<S2>> for ValueFunction<S1>
 where
-    T1: ValueTypes + ?Sized,
-    T2: ValueTypes + ?Sized,
-    for<'a> &'a <T1::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
-    for<'a> &'a <T2::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
-    ValueQualifiedSymbol<T1::StringRef>: PartialEq<ValueQualifiedSymbol<T2::StringRef>>,
+    S1: Borrow<str> + Clone,
+    S2: Borrow<str> + Clone,
+    ValueQualifiedSymbol<S1>: PartialEq<ValueQualifiedSymbol<S2>>,
 {
-    fn eq(&self, rhs: &ValueFunction<T2>) -> bool {
-        self.name == rhs.name
+    fn eq(&self, rhs: &ValueFunction<S2>) -> bool {
+        self.0 == rhs.0
     }
 }
 
-impl<T> Clone for ValueFunction<T>
+impl<S> Clone for ValueFunction<S>
 where
-    T: ValueTypes + ?Sized,
-    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+    S: Borrow<str> + Clone,
 {
     fn clone(&self) -> Self {
-        Self {
-            name: self.name.clone(),
-            func: self.func.clone(),
-        }
-    }
-}
-
-impl<T> Debug for ValueFunction<T>
-where
-    T: ValueTypes + ?Sized,
-    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
-{
-    fn fmt(&self, fmt: &mut Formatter) -> std::result::Result<(), std::fmt::Error> {
-        fmt.debug_struct("ValueFunction")
-            .field("name", &self.name)
-            .finish()
+        Self(self.0.clone())
     }
 }
 
@@ -584,7 +550,7 @@ where
     String(ValueString<T::StringRef>),
     Semver(ValueSemver<T::SemverTypes>),
     LanguageDirective(ValueLanguageDirective<T::StringRef, T::SemverTypes>),
-    Function(ValueFunction<T>),
+    Function(ValueFunction<T::StringRef>),
 }
 
 impl<T> Value<T>
@@ -726,7 +692,7 @@ try_from_value!(T, ValueBool, Value::Bool(b) => b);
 try_from_value!(T, ValueString<T::StringRef>, Value::String(s) => s);
 try_from_value!(T, ValueSemver<T::SemverTypes>, Value::Semver(v) => v);
 try_from_value!(T, ValueLanguageDirective<T::StringRef, T::SemverTypes>, Value::LanguageDirective(l) => l);
-try_from_value!(T, ValueFunction<T>, Value::Function(p) => p);
+try_from_value!(T, ValueFunction<T::StringRef>, Value::Function(f) => f);
 
 macro_rules! from_value_type {
     ($t:ident, $in:ty, $param:ident -> $result:expr) => {
@@ -750,7 +716,7 @@ from_value_type!(T, ValueBool, b -> Value::Bool(b));
 from_value_type!(T, ValueString<T::StringRef>, s -> Value::String(s));
 from_value_type!(T, ValueSemver<T::SemverTypes>, v -> Value::Semver(v));
 from_value_type!(T, ValueLanguageDirective<T::StringRef, T::SemverTypes>, l -> Value::LanguageDirective(l));
-from_value_type!(T, ValueFunction<T>, f -> Value::Function(f));
+from_value_type!(T, ValueFunction<T::StringRef>, f -> Value::Function(f));
 
 impl<T1, T2> PartialEq<Value<T2>> for Value<T1>
 where
@@ -977,17 +943,7 @@ pub struct ValueTypesRc;
 impl ValueTypes for ValueTypesRc {
     type ConsRef = Rc<Cons<Self>>;
     type StringRef = String;
-    type Func = dyn Fn(
-        &mut (dyn Environment<Self> + 'static),
-        &mut (dyn Iterator<Item = Value<Self>> + 'static),
-    ) -> Result<Value<Self>>;
-    type FuncRef = Rc<Self::Func>;
     type SemverTypes = SemverTypesVec;
-    type Macro = dyn Fn(
-        &mut (dyn Environment<Self> + 'static),
-        Value<Self>,
-    ) -> Result<TryCompilationResult<Self>>;
-    type MacroRef = Rc<Self::Macro>;
 }
 
 #[derive(Debug)]
@@ -1004,17 +960,7 @@ pub struct ValueTypesStatic;
 impl ValueTypes for ValueTypesStatic {
     type ConsRef = &'static Cons<Self>;
     type StringRef = &'static str;
-    type Func = &'static dyn Fn(
-        &mut (dyn Environment<Self> + 'static),
-        &mut (dyn Iterator<Item = Value<Self>> + 'static),
-    ) -> Result<Value<Self>>;
-    type FuncRef = Self::Func;
     type SemverTypes = SemverTypesStatic;
-    type Macro = &'static dyn Fn(
-        &mut (dyn Environment<Self> + 'static),
-        Value<Self>,
-    ) -> Result<TryCompilationResult<Self>>;
-    type MacroRef = Self::Macro;
 }
 
 #[macro_export]
@@ -1200,18 +1146,15 @@ macro_rules! v_lang_other {
 
 #[macro_export]
 macro_rules! func {
-    ($name:expr, $func:expr) => {
-        $crate::ValueFunction::<$crate::ValueTypesStatic> {
-            name: $name,
-            func: $func,
-        }
+    ($name:expr) => {
+        $crate::ValueFunction::<&'static str>($name)
     };
 }
 
 #[macro_export]
 macro_rules! v_func {
-    ($name:expr, $func:expr) => {
-        $crate::Value::<$crate::ValueTypesStatic>::Function(func!($name, $func))
+    ($name:expr) => {
+        $crate::Value::<$crate::ValueTypesStatic>::Function(func!($name))
     };
 }
 
@@ -1224,20 +1167,6 @@ macro_rules! v_list {
 
 #[cfg(test)]
 mod tests {
-    fn static_f1(
-        _: &mut (dyn super::Environment<super::ValueTypesStatic> + 'static),
-        _: &mut (dyn Iterator<Item = super::Value<super::ValueTypesStatic>> + 'static),
-    ) -> super::Result<super::Value<super::ValueTypesStatic>> {
-        super::Result::Ok(super::Value::Nil)
-    }
-
-    fn static_f2(
-        _: &mut (dyn super::Environment<super::ValueTypesStatic> + 'static),
-        _: &mut (dyn Iterator<Item = super::Value<super::ValueTypesStatic>> + 'static),
-    ) -> super::Result<super::Value<super::ValueTypesStatic>> {
-        super::Result::Ok(super::Value::String(super::ValueString("str")))
-    }
-
     #[test]
     fn test_v_nil_macro() {
         const NIL: super::Value<super::ValueTypesStatic> = v_nil!();
@@ -1474,10 +1403,9 @@ mod tests {
 
     #[test]
     fn test_func_macro() {
-        const F: super::ValueFunction<super::ValueTypesStatic> =
-            func!(qsym!("p", "f1"), &static_f1);
+        const F: super::ValueFunction<&'static str> = func!(qsym!("p", "f1"));
         assert_eq!(
-            F.name,
+            F.0,
             super::ValueQualifiedSymbol::<&'static str> {
                 package: "p",
                 name: "f1"
@@ -1487,9 +1415,9 @@ mod tests {
 
     #[test]
     fn test_v_func_macro() {
-        const F: super::Value<super::ValueTypesStatic> = v_func!(qsym!("p", "f1"), &static_f1);
+        const F: super::Value<super::ValueTypesStatic> = v_func!(qsym!("p", "f1"));
         match F {
-            super::Value::Function(super::ValueFunction { name, func: _ }) => assert_eq!(
+            super::Value::Function(super::ValueFunction(name)) => assert_eq!(
                 name,
                 super::ValueQualifiedSymbol::<&'static str> {
                     package: "p",
@@ -1672,23 +1600,10 @@ mod tests {
         assert_ne!(v_lang_kira![1, 0], v_v![1, 0]);
         assert_ne!(v_lang_kira![1, 0], v_nil!());
 
-        assert_eq!(
-            v_func!(qsym!("p", "f1"), &static_f1),
-            v_func!(qsym!("p", "f1"), &static_f1)
-        );
-        assert_eq!(
-            v_func!(qsym!("p", "f1"), &static_f1),
-            v_func!(qsym!("p", "f1"), &static_f2)
-        );
-        assert_ne!(
-            v_func!(qsym!("p", "f1"), &static_f1),
-            v_func!(qsym!("p", "f2"), &static_f1)
-        );
-        assert_ne!(
-            v_func!(qsym!("p", "f1"), &static_f1),
-            v_func!(qsym!("p", "f2"), &static_f2)
-        );
-        assert_ne!(v_func!(qsym!("p", "f1"), &static_f1), v_nil!());
+        assert_eq!(v_func!(qsym!("p", "f1")), v_func!(qsym!("p", "f1")));
+        assert_ne!(v_func!(qsym!("p", "f1")), v_func!(qsym!("p", "f2")));
+        assert_ne!(v_func!(qsym!("p", "f1")), v_qsym!("p", "f1"));
+        assert_ne!(v_func!(qsym!("p", "f1")), v_nil!());
     }
 
     #[test]
@@ -1777,10 +1692,10 @@ mod tests {
             ErrorKind::IncorrectType
         );
 
-        let v = v_func!(qsym!("p", "f1"), &static_f1);
+        let v = v_func!(qsym!("p", "f1"));
         assert_eq!(
-            TryInto::<&ValueFunction<ValueTypesStatic>>::try_into(&v).unwrap(),
-            &func!(qsym!("p", "f1"), &static_f1)
+            TryInto::<&ValueFunction<&'static str>>::try_into(&v).unwrap(),
+            &func!(qsym!("p", "f1"))
         );
         assert_eq!(
             TryInto::<()>::try_into(&v).unwrap_err().kind,
@@ -1883,10 +1798,10 @@ mod tests {
             ErrorKind::IncorrectType
         );
 
-        let v = v_func!(qsym!("p", "f1"), &static_f1);
+        let v = v_func!(qsym!("p", "f1"));
         assert_eq!(
-            TryInto::<ValueFunction<ValueTypesStatic>>::try_into(v.clone()).unwrap(),
-            func!(qsym!("p", "f1"), &static_f1)
+            TryInto::<ValueFunction<&'static str>>::try_into(v.clone()).unwrap(),
+            func!(qsym!("p", "f1"))
         );
         assert_eq!(
             TryInto::<()>::try_into(v).unwrap_err().kind,
@@ -1922,8 +1837,8 @@ mod tests {
         let v: Value<ValueTypesStatic> = lang_kira![1, 0].into();
         assert_eq!(v, v_lang_kira![1, 0]);
 
-        let v: Value<ValueTypesStatic> = func!(qsym!("p", "f1"), &static_f1).into();
-        assert_eq!(v, v_func!(qsym!("p", "f1"), &static_f1));
+        let v: Value<ValueTypesStatic> = func!(qsym!("p", "f1")).into();
+        assert_eq!(v, v_func!(qsym!("p", "f1")));
     }
 
     #[test]
@@ -1990,7 +1905,7 @@ mod tests {
             ValueType::NonList(ValueTypeNonList::LanguageDirective)
         );
         assert_eq!(
-            v_func!(qsym!("p", "f1"), &static_f1).value_type(),
+            v_func!(qsym!("p", "f1")).value_type(),
             ValueType::NonList(ValueTypeNonList::Function)
         );
         assert_eq!(
