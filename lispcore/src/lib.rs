@@ -23,14 +23,6 @@ pub struct Error {
     pub error: Box<dyn std::error::Error>,
 }
 
-#[derive(Debug, PartialEq)]
-pub enum ErrorKind {
-    IncorrectType,
-    ValueNotDefined,
-    NotAFunction,
-    NoPackageForSymbol,
-}
-
 impl Error {
     pub fn new(kind: ErrorKind, error: impl Into<Box<dyn std::error::Error>>) -> Error {
         Error {
@@ -38,6 +30,15 @@ impl Error {
             error: error.into(),
         }
     }
+}
+
+#[derive(Debug, PartialEq)]
+pub enum ErrorKind {
+    IncorrectType,
+    ValueNotDefined,
+    NotAFunction,
+    NoPackageForSymbol,
+    IncorrectParams,
 }
 
 impl std::error::Error for Error {}
@@ -71,6 +72,41 @@ where
         &self,
         name: &ValueUnqualifiedSymbol<T::StringRef>,
     ) -> Option<ValueQualifiedSymbol<T::StringRef>>;
+
+    fn compile_function(
+        &self,
+        name: &ValueQualifiedSymbol<T::StringRef>,
+        params: &mut dyn Iterator<Item = &BTreeSet<ValueType>>,
+    ) -> Option<Result<BTreeSet<ValueType>>>;
+
+    fn compile_function_from_macro(
+        &mut self,
+        name: &ValueQualifiedSymbol<T::StringRef>,
+        params: LispList<T>,
+    ) -> Option<Result<TryCompilationResult<T>>> {
+        let mut compiled_params = Vec::new();
+        for item in params.map(|v| self.compile(v.try_unwrap_item()?)) {
+            match item {
+                Result::Ok(r) => compiled_params.push(r),
+                Result::Err(e) => return Option::Some(Result::Err(e)),
+            }
+        }
+
+        Option::Some(
+            match self
+                .compile_function(name, &mut (&compiled_params).into_iter().map(|p| &p.types))?
+            {
+                Result::Ok(r) => Result::Ok(TryCompilationResult::Compiled(CompilationResult {
+                    result: CompilationResultType::FunctionCall {
+                        name: ValueFunction(name.clone()),
+                        params: compiled_params,
+                    },
+                    types: r,
+                })),
+                Result::Err(e) => Result::Err(e),
+            },
+        )
+    }
 
     fn compile_macro(
         &mut self,
@@ -516,6 +552,19 @@ pub struct ValueFunction<S>(pub ValueQualifiedSymbol<S>)
 where
     S: Borrow<str> + Clone;
 
+impl<S> ValueFunction<S>
+where
+    S: Borrow<str> + Clone,
+{
+    pub fn convert<S2>(&self) -> ValueFunction<S2>
+    where
+        S2: Borrow<str> + Clone,
+        for<'a> &'a str: Into<S2>,
+    {
+        ValueFunction(self.0.convert())
+    }
+}
+
 impl<S1, S2> PartialEq<ValueFunction<S2>> for ValueFunction<S1>
 where
     S1: Borrow<str> + Clone,
@@ -578,7 +627,7 @@ where
             Value::LanguageDirective(l) => {
                 Value::LanguageDirective(l.convert::<T2::StringRef, T2::SemverTypes>())
             }
-            Value::Function(_) => panic!("Cannot convert function types"),
+            Value::Function(f) => Value::Function(f.convert::<T2::StringRef>()),
         }
     }
 
@@ -746,19 +795,19 @@ where
     }
 }
 
-#[derive(Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum ValueType {
     List(ValueTypeList),
     NonList(ValueTypeNonList),
 }
 
-#[derive(Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct ValueTypeList {
     pub items: BTreeSet<ValueType>,
     pub tail: BTreeSet<ValueTypeNonList>,
 }
 
-#[derive(Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum ValueTypeNonList {
     Nil,
     UnqualifiedSymbol,
@@ -778,7 +827,10 @@ where
 {
     Literal(Value<T>),
     SymbolDeref(ValueQualifiedSymbol<T::StringRef>),
-    FunctionCall,
+    FunctionCall {
+        name: ValueFunction<T::StringRef>,
+        params: Vec<CompilationResult<T>>,
+    },
 }
 
 impl<T1, T2> PartialEq<CompilationResultType<T2>> for CompilationResultType<T1>
@@ -793,7 +845,7 @@ where
         eq_match!(self, rhs, {
             (CompilationResultType::Literal(l1), CompilationResultType::Literal(l2)) => l1 == l2,
             (CompilationResultType::SymbolDeref(s1), CompilationResultType::SymbolDeref(s2)) => s1 == s2,
-            (CompilationResultType::FunctionCall, CompilationResultType::FunctionCall) => true,
+            (CompilationResultType::FunctionCall { name: name1, params: params1 }, CompilationResultType::FunctionCall { name: name2, params: params2 }) => name1 == name2 && params1 == params2,
         })
     }
 }
@@ -1965,6 +2017,30 @@ mod tests {
         ))
     }
 
+    fn compile_simplefunc1(
+        params: &mut dyn Iterator<Item = &super::BTreeSet<super::ValueType>>,
+    ) -> super::Result<super::BTreeSet<super::ValueType>> {
+        use super::*;
+
+        let result = match params.next() {
+            Option::Some(p) => (*p).clone(),
+            Option::None => {
+                return Result::Err(Error::new(
+                    ErrorKind::IncorrectParams,
+                    "Incorrect parameters",
+                ))
+            }
+        };
+
+        match params.next() {
+            Option::None => Result::Ok(result),
+            Option::Some(_) => Result::Err(Error::new(
+                ErrorKind::IncorrectParams,
+                "Incorrect parameters",
+            )),
+        }
+    }
+
     impl super::Environment<super::ValueTypesRc> for SimpleEnvironment {
         fn as_dyn_mut(&mut self) -> &mut (dyn super::Environment<super::ValueTypesRc> + 'static) {
             self as &mut (dyn super::Environment<super::ValueTypesRc> + 'static)
@@ -1986,16 +2062,28 @@ mod tests {
 
         fn compile_macro(
             &mut self,
-            name: &super::ValueQualifiedSymbol<
-                <super::ValueTypesRc as super::ValueTypes>::StringRef,
-            >,
-            _v: super::LispList<super::ValueTypesRc>,
+            name: &super::ValueQualifiedSymbol<String>,
+            v: super::LispList<super::ValueTypesRc>,
         ) -> Option<super::Result<super::TryCompilationResult<super::ValueTypesRc>>> {
             use std::borrow::Borrow;
 
             match (name.package.borrow(), name.name.borrow()) {
                 ("p", "simplemacro1") => Option::Some(simplemacro1()),
                 ("p", "simplemacro2") => Option::Some(simplemacro2()),
+                ("p", "simplefunc1") => self.compile_function_from_macro(name, v),
+                _ => Option::None,
+            }
+        }
+
+        fn compile_function(
+            &self,
+            name: &super::ValueQualifiedSymbol<String>,
+            params: &mut dyn Iterator<Item = &super::BTreeSet<super::ValueType>>,
+        ) -> Option<super::Result<super::BTreeSet<super::ValueType>>> {
+            use std::borrow::Borrow;
+
+            match (name.package.borrow(), name.name.borrow()) {
+                ("p", "simplefunc1") => Option::Some(compile_simplefunc1(params)),
                 _ => Option::None,
             }
         }
@@ -2028,6 +2116,26 @@ mod tests {
             code,
             CompilationResultType::Literal(result.convert()),
             BTreeSet::from_iter(vec![t]),
+        );
+    }
+
+    fn test_function(
+        env: &mut SimpleEnvironment,
+        code: super::Value<super::ValueTypesStatic>,
+        name: super::ValueFunction<&'static str>,
+        params: Vec<super::CompilationResult<super::ValueTypesRc>>,
+        types: super::BTreeSet<super::ValueType>,
+    ) {
+        use super::*;
+
+        test_compile(
+            env,
+            code,
+            CompilationResultType::FunctionCall {
+                name: name.convert(),
+                params,
+            },
+            types,
         );
     }
 
@@ -2104,6 +2212,67 @@ mod tests {
                 .unwrap_err()
                 .kind,
             ErrorKind::ValueNotDefined
+        );
+    }
+
+    #[test]
+    fn test_compile_function() {
+        use super::*;
+
+        let mut env = SimpleEnvironment;
+
+        test_function(
+            &mut env,
+            v_list!(v_uqsym!("simplefunc1"), v_str!("Hello world!")),
+            func!(qsym!("p", "simplefunc1")),
+            vec![CompilationResult {
+                result: CompilationResultType::Literal(v_str!("Hello world!").convert()),
+                types: BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::String)]),
+            }],
+            BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::String)]),
+        );
+        test_function(
+            &mut env,
+            v_list!(v_uqsym!("simplefunc1"), v_bool!(true)),
+            func!(qsym!("p", "simplefunc1")),
+            vec![CompilationResult {
+                result: CompilationResultType::Literal(v_bool!(true).convert()),
+                types: BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::Bool)]),
+            }],
+            BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::Bool)]),
+        );
+        assert_eq!(
+            env.compile(v_list!(v_uqsym!("simplefunc1")).convert())
+                .unwrap_err()
+                .kind,
+            ErrorKind::IncorrectParams
+        );
+
+        test_function(
+            &mut env,
+            v_list!(v_qsym!("p", "simplefunc1"), v_str!("Hello world!")),
+            func!(qsym!("p", "simplefunc1")),
+            vec![CompilationResult {
+                result: CompilationResultType::Literal(v_str!("Hello world!").convert()),
+                types: BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::String)]),
+            }],
+            BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::String)]),
+        );
+        test_function(
+            &mut env,
+            v_list!(v_qsym!("p", "simplefunc1"), v_bool!(true)),
+            func!(qsym!("p", "simplefunc1")),
+            vec![CompilationResult {
+                result: CompilationResultType::Literal(v_bool!(true).convert()),
+                types: BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::Bool)]),
+            }],
+            BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::Bool)]),
+        );
+        assert_eq!(
+            env.compile(v_list!(v_qsym!("p", "simplefunc1")).convert())
+                .unwrap_err()
+                .kind,
+            ErrorKind::IncorrectParams
         );
     }
 }
