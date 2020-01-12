@@ -12,7 +12,7 @@ macro_rules! eq_match {
             $($lpat => match $rhs {
                 $rpat => $result,
                 _ => false,
-            },)*
+            }),*
         }
     };
 }
@@ -844,8 +844,14 @@ where
     fn eq(&self, rhs: &CompilationResultType<T2>) -> bool {
         eq_match!(self, rhs, {
             (CompilationResultType::Literal(l1), CompilationResultType::Literal(l2)) => l1 == l2,
-            (CompilationResultType::SymbolDeref(s1), CompilationResultType::SymbolDeref(s2)) => s1 == s2,
-            (CompilationResultType::FunctionCall { name: name1, params: params1 }, CompilationResultType::FunctionCall { name: name2, params: params2 }) => name1 == name2 && params1 == params2,
+            (
+                CompilationResultType::SymbolDeref(s1),
+                CompilationResultType::SymbolDeref(s2)
+            ) => s1 == s2,
+            (
+                CompilationResultType::FunctionCall { name: name1, params: params1 },
+                CompilationResultType::FunctionCall { name: name2, params: params2 }
+            ) => name1 == name2 && params1 == params2,
         })
     }
 }
