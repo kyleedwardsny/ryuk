@@ -82,9 +82,13 @@ where
     fn resolve_symbol_get_macro(
         &self,
         name: &ValueUnqualifiedSymbol<T::StringRef>,
-    ) -> Result<ValueQualifiedSymbol<T::StringRef>>;
+    ) -> Option<ValueQualifiedSymbol<T::StringRef>>;
 
-    fn get_macro(&self, name: &ValueQualifiedSymbol<T::StringRef>) -> Result<T::MacroRef>;
+    fn compile_macro(
+        &mut self,
+        name: &ValueQualifiedSymbol<T::StringRef>,
+        params: LispList<T>,
+    ) -> Option<Result<TryCompilationResult<T>>>;
 
     fn compile(&mut self, v: Value<T>) -> Result<CompilationResult<T>> {
         let mut result = TryCompilationResult::<T>::Uncompiled(v);
@@ -97,7 +101,15 @@ where
                             let cons = c.borrow();
                             let name = match &cons.car {
                                 Value::UnqualifiedSymbol(name) => {
-                                    self.resolve_symbol_get_macro(name)?
+                                    match self.resolve_symbol_get_macro(name) {
+                                        Option::Some(name) => name,
+                                        Option::None => {
+                                            return Result::Err(Error::new(
+                                                ErrorKind::ValueNotDefined,
+                                                "Value not defined",
+                                            ))
+                                        }
+                                    }
                                 }
                                 Value::QualifiedSymbol(name) => (*name).clone(),
                                 _ => {
@@ -107,8 +119,15 @@ where
                                     ))
                                 }
                             };
-                            let m = self.get_macro(&name)?;
-                            m.borrow()(self.as_dyn_mut(), cons.cdr.clone())?
+                            match self.compile_macro(&name, cons.cdr.clone().into_iter()) {
+                                Option::Some(r) => r?,
+                                Option::None => {
+                                    return Result::Err(Error::new(
+                                        ErrorKind::ValueNotDefined,
+                                        "Value not defined",
+                                    ))
+                                }
+                            }
                         }
                         _ => {
                             let t = v.value_type();
@@ -2005,10 +2024,7 @@ mod tests {
 
     struct SimpleEnvironment;
 
-    fn simplemacro1(
-        _env: &mut (dyn super::Environment<super::ValueTypesRc> + 'static),
-        _v: super::Value<super::ValueTypesRc>,
-    ) -> super::Result<super::TryCompilationResult<super::ValueTypesRc>> {
+    fn simplemacro1() -> super::Result<super::TryCompilationResult<super::ValueTypesRc>> {
         use std::iter::FromIterator;
 
         Result::Ok(super::TryCompilationResult::Compiled(
@@ -2021,10 +2037,7 @@ mod tests {
         ))
     }
 
-    fn simplemacro2(
-        _env: &mut (dyn super::Environment<super::ValueTypesRc> + 'static),
-        _v: super::Value<super::ValueTypesRc>,
-    ) -> super::Result<super::TryCompilationResult<super::ValueTypesRc>> {
+    fn simplemacro2() -> super::Result<super::TryCompilationResult<super::ValueTypesRc>> {
         use std::iter::FromIterator;
 
         Result::Ok(super::TryCompilationResult::Compiled(
@@ -2047,30 +2060,28 @@ mod tests {
             name: &super::ValueUnqualifiedSymbol<
                 <super::ValueTypesRc as super::ValueTypes>::StringRef,
             >,
-        ) -> super::Result<
+        ) -> Option<
             super::ValueQualifiedSymbol<<super::ValueTypesRc as super::ValueTypes>::StringRef>,
         > {
-            super::Result::Ok(super::ValueQualifiedSymbol {
+            Option::Some(super::ValueQualifiedSymbol {
                 package: "p".to_string(),
                 name: name.0.clone(),
             })
         }
 
-        fn get_macro(
-            &self,
+        fn compile_macro(
+            &mut self,
             name: &super::ValueQualifiedSymbol<
                 <super::ValueTypesRc as super::ValueTypes>::StringRef,
             >,
-        ) -> super::Result<<super::ValueTypesRc as super::ValueTypes>::MacroRef> {
+            _v: super::LispList<super::ValueTypesRc>,
+        ) -> Option<super::Result<super::TryCompilationResult<super::ValueTypesRc>>> {
             use std::borrow::Borrow;
 
             match (name.package.borrow(), name.name.borrow()) {
-                ("p", "simplemacro1") => super::Result::Ok(super::Rc::new(simplemacro1)),
-                ("p", "simplemacro2") => super::Result::Ok(super::Rc::new(simplemacro2)),
-                _ => super::Result::Err(super::Error::new(
-                    super::ErrorKind::ValueNotDefined,
-                    "Value not defined",
-                )),
+                ("p", "simplemacro1") => Option::Some(simplemacro1()),
+                ("p", "simplemacro2") => Option::Some(simplemacro2()),
+                _ => Option::None,
             }
         }
     }
