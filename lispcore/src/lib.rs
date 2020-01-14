@@ -108,6 +108,12 @@ where
         )
     }
 
+    fn evaluate_function(
+        &mut self,
+        name: &ValueQualifiedSymbol<T::StringRef>,
+        params: Vec<Value<T>>,
+    ) -> Result<Value<T>>;
+
     fn compile_macro(
         &mut self,
         name: &ValueQualifiedSymbol<T::StringRef>,
@@ -831,6 +837,26 @@ where
         name: ValueFunction<T::StringRef>,
         params: Vec<CompilationResultType<T>>,
     },
+}
+
+impl<T> CompilationResultType<T>
+where
+    T: ValueTypes + ?Sized,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+{
+    pub fn evaluate(&self, env: &mut dyn Environment<T>) -> Result<Value<T>> {
+        match self {
+            CompilationResultType::Literal(l) => Result::Ok(l.clone()),
+            CompilationResultType::SymbolDeref(s) => Result::Ok(Value::QualifiedSymbol(s.clone())),
+            CompilationResultType::FunctionCall { name, params } => {
+                let params: Vec<Value<T>> = params
+                    .into_iter()
+                    .map(|p| p.evaluate(env))
+                    .collect::<Result<Vec<Value<T>>>>()?;
+                env.evaluate_function(&name.0, params)
+            }
+        }
+    }
 }
 
 impl<T1, T2> PartialEq<CompilationResultType<T2>> for CompilationResultType<T1>
@@ -2047,9 +2073,51 @@ mod tests {
         }
     }
 
+    fn simplefunc1(
+        _env: &mut dyn super::Environment<super::ValueTypesRc>,
+        params: Vec<super::Value<super::ValueTypesRc>>,
+    ) -> super::Result<super::Value<super::ValueTypesRc>> {
+        use super::*;
+
+        let mut params = params.into_iter();
+        let result = match params.next() {
+            Option::Some(p) => p,
+            Option::None => {
+                return Result::Err(Error::new(
+                    ErrorKind::IncorrectParams,
+                    "Incorrect parameters",
+                ))
+            }
+        };
+
+        match params.next() {
+            Option::None => Result::Ok(result),
+            Option::Some(_) => Result::Err(Error::new(
+                ErrorKind::IncorrectParams,
+                "Incorrect parameters",
+            )),
+        }
+    }
+
     impl super::Environment<super::ValueTypesRc> for SimpleEnvironment {
         fn as_dyn_mut(&mut self) -> &mut (dyn super::Environment<super::ValueTypesRc> + 'static) {
             self as &mut (dyn super::Environment<super::ValueTypesRc> + 'static)
+        }
+
+        fn evaluate_function(
+            &mut self,
+            name: &super::ValueQualifiedSymbol<
+                <super::ValueTypesRc as super::ValueTypes>::StringRef,
+            >,
+            params: Vec<super::Value<super::ValueTypesRc>>,
+        ) -> super::Result<super::Value<super::ValueTypesRc>> {
+            use super::*;
+            use std::borrow::Borrow;
+
+            match (name.package.borrow(), name.name.borrow()) {
+                ("p", "simplefunc1") => simplefunc1(self, params),
+                _ => Result::Err(Error::new(ErrorKind::ValueNotDefined, "Value not defined")),
+            }
         }
 
         fn resolve_symbol_get_macro(
@@ -2272,5 +2340,26 @@ mod tests {
                 .kind,
             ErrorKind::IncorrectParams
         );
+    }
+
+    #[test]
+    fn test_evaluate_function() {
+        use super::*;
+
+        let mut env = SimpleEnvironment;
+
+        let comp = CompilationResultType::FunctionCall {
+            name: func!(qsym!("p", "simplefunc1")).convert(),
+            params: vec![CompilationResultType::Literal(
+                v_str!("Hello world!").convert(),
+            )],
+        };
+        assert_eq!(comp.evaluate(&mut env).unwrap(), v_str!("Hello world!"));
+
+        let comp = CompilationResultType::FunctionCall {
+            name: func!(qsym!("p", "simplefunc1")).convert(),
+            params: vec![CompilationResultType::Literal(v_bool!(true).convert())],
+        };
+        assert_eq!(comp.evaluate(&mut env).unwrap(), v_bool!(true));
     }
 }
