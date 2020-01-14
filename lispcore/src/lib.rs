@@ -99,7 +99,7 @@ where
                 Result::Ok(r) => Result::Ok(TryCompilationResult::Compiled(CompilationResult {
                     result: CompilationResultType::FunctionCall {
                         name: ValueFunction(name.clone()),
-                        params: compiled_params,
+                        params: compiled_params.into_iter().map(|p| p.result).collect(),
                     },
                     types: r,
                 })),
@@ -829,7 +829,7 @@ where
     SymbolDeref(ValueQualifiedSymbol<T::StringRef>),
     FunctionCall {
         name: ValueFunction<T::StringRef>,
-        params: Vec<CompilationResult<T>>,
+        params: Vec<CompilationResultType<T>>,
     },
 }
 
@@ -2129,7 +2129,7 @@ mod tests {
         env: &mut SimpleEnvironment,
         code: super::Value<super::ValueTypesStatic>,
         name: super::ValueFunction<&'static str>,
-        params: Vec<super::CompilationResult<super::ValueTypesRc>>,
+        params: Vec<super::CompilationResultType<super::ValueTypesRc>>,
         types: super::BTreeSet<super::ValueType>,
     ) {
         use super::*;
@@ -2231,20 +2231,16 @@ mod tests {
             &mut env,
             v_list!(v_uqsym!("simplefunc1"), v_str!("Hello world!")),
             func!(qsym!("p", "simplefunc1")),
-            vec![CompilationResult {
-                result: CompilationResultType::Literal(v_str!("Hello world!").convert()),
-                types: BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::String)]),
-            }],
+            vec![CompilationResultType::Literal(
+                v_str!("Hello world!").convert(),
+            )],
             BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::String)]),
         );
         test_function(
             &mut env,
             v_list!(v_uqsym!("simplefunc1"), v_bool!(true)),
             func!(qsym!("p", "simplefunc1")),
-            vec![CompilationResult {
-                result: CompilationResultType::Literal(v_bool!(true).convert()),
-                types: BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::Bool)]),
-            }],
+            vec![CompilationResultType::Literal(v_bool!(true).convert())],
             BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::Bool)]),
         );
         assert_eq!(
@@ -2258,20 +2254,16 @@ mod tests {
             &mut env,
             v_list!(v_qsym!("p", "simplefunc1"), v_str!("Hello world!")),
             func!(qsym!("p", "simplefunc1")),
-            vec![CompilationResult {
-                result: CompilationResultType::Literal(v_str!("Hello world!").convert()),
-                types: BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::String)]),
-            }],
+            vec![CompilationResultType::Literal(
+                v_str!("Hello world!").convert(),
+            )],
             BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::String)]),
         );
         test_function(
             &mut env,
             v_list!(v_qsym!("p", "simplefunc1"), v_bool!(true)),
             func!(qsym!("p", "simplefunc1")),
-            vec![CompilationResult {
-                result: CompilationResultType::Literal(v_bool!(true).convert()),
-                types: BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::Bool)]),
-            }],
+            vec![CompilationResultType::Literal(v_bool!(true).convert())],
             BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::Bool)]),
         );
         assert_eq!(
