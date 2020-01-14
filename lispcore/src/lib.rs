@@ -2343,6 +2343,19 @@ mod tests {
     }
 
     #[test]
+    fn test_evaluate_literal() {
+        use super::*;
+
+        let mut env = SimpleEnvironment;
+
+        let comp = CompilationResultType::Literal(v_str!("Hello world!").convert());
+        assert_eq!(comp.evaluate(&mut env).unwrap(), v_str!("Hello world!"));
+
+        let comp = CompilationResultType::Literal(v_bool!(true).convert());
+        assert_eq!(comp.evaluate(&mut env).unwrap(), v_bool!(true));
+    }
+
+    #[test]
     fn test_evaluate_function() {
         use super::*;
 
