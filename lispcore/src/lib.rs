@@ -834,7 +834,33 @@ where
 }
 
 #[derive(Debug)]
-pub struct FunctionCall<T>
+struct Literal<T>(Value<T>)
+where
+    T: ValueTypes + ?Sized,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>;
+
+impl<T> Literal<T>
+where
+    T: ValueTypes + ?Sized,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+{
+    pub fn new(value: Value<T>) -> Self {
+        Literal(value)
+    }
+}
+
+impl<T> CompilationResultType<T> for Literal<T>
+where
+    T: ValueTypes + ?Sized + 'static,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+{
+    fn evaluate(&mut self, _env: &mut dyn Environment<T>) -> Result<Value<T>> {
+        Result::Ok(self.0.clone())
+    }
+}
+
+#[derive(Debug)]
+struct FunctionCall<T>
 where
     T: ValueTypes + ?Sized,
     for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
@@ -869,32 +895,6 @@ where
             .map(|p| BorrowMut::<dyn CompilationResultType<T>>::borrow_mut(p).evaluate(env))
             .collect::<Result<Vec<Value<T>>>>()?;
         env.evaluate_function(&self.name.0, params)
-    }
-}
-
-#[derive(Debug)]
-pub struct Literal<T>(Value<T>)
-where
-    T: ValueTypes + ?Sized,
-    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>;
-
-impl<T> Literal<T>
-where
-    T: ValueTypes + ?Sized,
-    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
-{
-    pub fn new(value: Value<T>) -> Self {
-        Literal(value)
-    }
-}
-
-impl<T> CompilationResultType<T> for Literal<T>
-where
-    T: ValueTypes + ?Sized + 'static,
-    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
-{
-    fn evaluate(&mut self, _env: &mut dyn Environment<T>) -> Result<Value<T>> {
-        Result::Ok(self.0.clone())
     }
 }
 
