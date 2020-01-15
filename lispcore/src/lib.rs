@@ -2157,6 +2157,38 @@ mod tests {
     }
 
     #[test]
+    fn test_evaluate_literal() {
+        use super::*;
+
+        let mut env = SimpleEnvironment;
+
+        let mut comp = Literal::new(v_str!("Hello world!").convert());
+        assert_eq!(comp.evaluate(&mut env).unwrap(), v_str!("Hello world!"));
+
+        let mut comp = Literal::new(v_bool!(true).convert());
+        assert_eq!(comp.evaluate(&mut env).unwrap(), v_bool!(true));
+    }
+
+    #[test]
+    fn test_evaluate_function() {
+        use super::*;
+
+        let mut env = SimpleEnvironment;
+
+        let mut comp = FunctionCall::new(
+            func!(qsym!("p", "simplefunc1")).convert(),
+            vec![Box::new(Literal::new(v_str!("Hello world!").convert()))],
+        );
+        assert_eq!(comp.evaluate(&mut env).unwrap(), v_str!("Hello world!"));
+
+        let mut comp = FunctionCall::new(
+            func!(qsym!("p", "simplefunc1")).convert(),
+            vec![Box::new(Literal::new(v_bool!(true).convert()))],
+        );
+        assert_eq!(comp.evaluate(&mut env).unwrap(), v_bool!(true));
+    }
+
+    #[test]
     fn test_compile_and_evaluate_literal() {
         use super::*;
 
@@ -2275,37 +2307,5 @@ mod tests {
                 .kind,
             ErrorKind::IncorrectParams
         );
-    }
-
-    #[test]
-    fn test_evaluate_literal() {
-        use super::*;
-
-        let mut env = SimpleEnvironment;
-
-        let mut comp = Literal::new(v_str!("Hello world!").convert());
-        assert_eq!(comp.evaluate(&mut env).unwrap(), v_str!("Hello world!"));
-
-        let mut comp = Literal::new(v_bool!(true).convert());
-        assert_eq!(comp.evaluate(&mut env).unwrap(), v_bool!(true));
-    }
-
-    #[test]
-    fn test_evaluate_function() {
-        use super::*;
-
-        let mut env = SimpleEnvironment;
-
-        let mut comp = FunctionCall::new(
-            func!(qsym!("p", "simplefunc1")).convert(),
-            vec![Box::new(Literal::new(v_str!("Hello world!").convert()))],
-        );
-        assert_eq!(comp.evaluate(&mut env).unwrap(), v_str!("Hello world!"));
-
-        let mut comp = FunctionCall::new(
-            func!(qsym!("p", "simplefunc1")).convert(),
-            vec![Box::new(Literal::new(v_bool!(true).convert()))],
-        );
-        assert_eq!(comp.evaluate(&mut env).unwrap(), v_bool!(true));
     }
 }
