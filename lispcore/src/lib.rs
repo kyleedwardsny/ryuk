@@ -62,7 +62,7 @@ where
 
 pub trait Environment<T>
 where
-    T: ValueTypes + ?Sized,
+    T: ValueTypes + ?Sized + 'static,
     for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
     Value<T>: Clone,
 {
@@ -97,10 +97,10 @@ where
                 .compile_function(name, &mut (&compiled_params).into_iter().map(|p| &p.types))?
             {
                 Result::Ok(r) => Result::Ok(TryCompilationResult::Compiled(CompilationResult {
-                    result: CompilationResultType::FunctionCall {
-                        name: ValueFunction(name.clone()),
-                        params: compiled_params.into_iter().map(|p| p.result).collect(),
-                    },
+                    result: Box::new(FunctionCall::new(
+                        ValueFunction(name.clone()),
+                        compiled_params.into_iter().map(|p| p.result).collect(),
+                    )),
                     types: r,
                 })),
                 Result::Err(e) => Result::Err(e),
@@ -162,7 +162,7 @@ where
                         _ => {
                             let t = v.value_type();
                             TryCompilationResult::Compiled(CompilationResult {
-                                result: CompilationResultType::Literal(v),
+                                result: Box::new(Literal::new(v)),
                                 types: BTreeSet::from_iter(vec![t]),
                             })
                         }
@@ -825,60 +825,76 @@ pub enum ValueTypeNonList {
     Function,
 }
 
-#[derive(Debug)]
-pub enum CompilationResultType<T>
+pub trait CompilationResultType<T>: Debug
 where
-    T: ValueTypes + ?Sized,
+    T: ValueTypes + ?Sized + 'static,
     for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
 {
-    Literal(Value<T>),
-    SymbolDeref(ValueQualifiedSymbol<T::StringRef>),
-    FunctionCall {
-        name: ValueFunction<T::StringRef>,
-        params: Vec<CompilationResultType<T>>,
-    },
+    fn evaluate(&mut self, env: &mut dyn Environment<T>) -> Result<Value<T>>;
 }
 
-impl<T> CompilationResultType<T>
+#[derive(Debug)]
+pub struct FunctionCall<T>
 where
     T: ValueTypes + ?Sized,
     for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
 {
-    pub fn evaluate(&self, env: &mut dyn Environment<T>) -> Result<Value<T>> {
-        match self {
-            CompilationResultType::Literal(l) => Result::Ok(l.clone()),
-            CompilationResultType::SymbolDeref(s) => Result::Ok(Value::QualifiedSymbol(s.clone())),
-            CompilationResultType::FunctionCall { name, params } => {
-                let params: Vec<Value<T>> = params
-                    .into_iter()
-                    .map(|p| p.evaluate(env))
-                    .collect::<Result<Vec<Value<T>>>>()?;
-                env.evaluate_function(&name.0, params)
-            }
-        }
+    name: ValueFunction<T::StringRef>,
+    params: Vec<Box<dyn CompilationResultType<T>>>,
+}
+
+impl<T> FunctionCall<T>
+where
+    T: ValueTypes + ?Sized,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+{
+    pub fn new(
+        name: ValueFunction<T::StringRef>,
+        params: Vec<Box<dyn CompilationResultType<T>>>,
+    ) -> Self {
+        FunctionCall { name, params }
     }
 }
 
-impl<T1, T2> PartialEq<CompilationResultType<T2>> for CompilationResultType<T1>
+impl<T> CompilationResultType<T> for FunctionCall<T>
 where
-    T1: ValueTypes + ?Sized,
-    T2: ValueTypes + ?Sized,
-    for<'a> &'a <T1::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
-    for<'a> &'a <T2::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
-    Value<T1>: PartialEq<Value<T2>>,
+    T: ValueTypes + ?Sized + 'static,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
 {
-    fn eq(&self, rhs: &CompilationResultType<T2>) -> bool {
-        eq_match!(self, rhs, {
-            (CompilationResultType::Literal(l1), CompilationResultType::Literal(l2)) => l1 == l2,
-            (
-                CompilationResultType::SymbolDeref(s1),
-                CompilationResultType::SymbolDeref(s2)
-            ) => s1 == s2,
-            (
-                CompilationResultType::FunctionCall { name: name1, params: params1 },
-                CompilationResultType::FunctionCall { name: name2, params: params2 }
-            ) => name1 == name2 && params1 == params2,
-        })
+    fn evaluate(&mut self, env: &mut dyn Environment<T>) -> Result<Value<T>> {
+        use std::borrow::BorrowMut;
+
+        let params = (&mut self.params)
+            .into_iter()
+            .map(|p| BorrowMut::<dyn CompilationResultType<T>>::borrow_mut(p).evaluate(env))
+            .collect::<Result<Vec<Value<T>>>>()?;
+        env.evaluate_function(&self.name.0, params)
+    }
+}
+
+#[derive(Debug)]
+pub struct Literal<T>(Value<T>)
+where
+    T: ValueTypes + ?Sized,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>;
+
+impl<T> Literal<T>
+where
+    T: ValueTypes + ?Sized,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+{
+    pub fn new(value: Value<T>) -> Self {
+        Literal(value)
+    }
+}
+
+impl<T> CompilationResultType<T> for Literal<T>
+where
+    T: ValueTypes + ?Sized + 'static,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+{
+    fn evaluate(&mut self, _env: &mut dyn Environment<T>) -> Result<Value<T>> {
+        Result::Ok(self.0.clone())
     }
 }
 
@@ -888,21 +904,8 @@ where
     T: ValueTypes + ?Sized,
     for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
 {
-    pub result: CompilationResultType<T>,
+    pub result: Box<dyn CompilationResultType<T> + 'static>,
     pub types: BTreeSet<ValueType>,
-}
-
-impl<T1, T2> PartialEq<CompilationResult<T2>> for CompilationResult<T1>
-where
-    T1: ValueTypes + ?Sized,
-    T2: ValueTypes + ?Sized,
-    for<'a> &'a <T1::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
-    for<'a> &'a <T2::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
-    CompilationResultType<T1>: PartialEq<CompilationResultType<T2>>,
-{
-    fn eq(&self, rhs: &CompilationResult<T2>) -> bool {
-        self.result == rhs.result && self.types == rhs.types
-    }
 }
 
 pub enum TryCompilationResult<T>
@@ -912,23 +915,6 @@ where
 {
     Compiled(CompilationResult<T>),
     Uncompiled(Value<T>),
-}
-
-impl<T1, T2> PartialEq<TryCompilationResult<T2>> for TryCompilationResult<T1>
-where
-    T1: ValueTypes + ?Sized,
-    T2: ValueTypes + ?Sized,
-    for<'a> &'a <T1::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
-    for<'a> &'a <T2::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
-    CompilationResult<T1>: PartialEq<CompilationResult<T2>>,
-    Value<T1>: PartialEq<Value<T2>>,
-{
-    fn eq(&self, rhs: &TryCompilationResult<T2>) -> bool {
-        eq_match!(self, rhs, {
-            (TryCompilationResult::Compiled(r1), TryCompilationResult::Compiled(r2)) => r1 == r2,
-            (TryCompilationResult::Uncompiled(r1), TryCompilationResult::Uncompiled(r2)) => r1 == r2,
-        })
-    }
 }
 
 pub enum LispListItem<T>
@@ -2024,29 +2010,23 @@ mod tests {
     struct SimpleEnvironment;
 
     fn simplemacro1() -> super::Result<super::TryCompilationResult<super::ValueTypesRc>> {
+        use super::*;
         use std::iter::FromIterator;
 
-        Result::Ok(super::TryCompilationResult::Compiled(
-            super::CompilationResult {
-                result: super::CompilationResultType::Literal(v_str!("Hello world!").convert()),
-                types: super::BTreeSet::from_iter(vec![super::ValueType::NonList(
-                    super::ValueTypeNonList::String,
-                )]),
-            },
-        ))
+        Result::Ok(TryCompilationResult::Compiled(CompilationResult {
+            result: Box::new(Literal(v_str!("Hello world!").convert())),
+            types: BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::String)]),
+        }))
     }
 
     fn simplemacro2() -> super::Result<super::TryCompilationResult<super::ValueTypesRc>> {
+        use super::*;
         use std::iter::FromIterator;
 
-        Result::Ok(super::TryCompilationResult::Compiled(
-            super::CompilationResult {
-                result: super::CompilationResultType::Literal(v_bool!(true).convert()),
-                types: super::BTreeSet::from_iter(vec![super::ValueType::NonList(
-                    super::ValueTypeNonList::Bool,
-                )]),
-            },
-        ))
+        Result::Ok(TryCompilationResult::Compiled(CompilationResult {
+            result: Box::new(Literal::new(v_bool!(true).convert())),
+            types: BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::Bool)]),
+        }))
     }
 
     fn compile_simplefunc1(
@@ -2163,104 +2143,67 @@ mod tests {
         }
     }
 
-    fn test_compile(
-        env: &mut SimpleEnvironment,
-        code: super::Value<super::ValueTypesStatic>,
-        result: super::CompilationResultType<super::ValueTypesRc>,
-        types: super::BTreeSet<super::ValueType>,
-    ) {
-        use super::*;
-
-        assert_eq!(
-            env.compile(code.convert()).unwrap(),
-            CompilationResult::<ValueTypesRc> { result, types }
-        );
-    }
-
-    fn test_literal(
+    fn test_compile_and_evaluate(
         env: &mut SimpleEnvironment,
         code: super::Value<super::ValueTypesStatic>,
         result: super::Value<super::ValueTypesStatic>,
-        t: super::ValueType,
-    ) {
-        use super::*;
-
-        test_compile(
-            env,
-            code,
-            CompilationResultType::Literal(result.convert()),
-            BTreeSet::from_iter(vec![t]),
-        );
-    }
-
-    fn test_function(
-        env: &mut SimpleEnvironment,
-        code: super::Value<super::ValueTypesStatic>,
-        name: super::ValueFunction<&'static str>,
-        params: Vec<super::CompilationResultType<super::ValueTypesRc>>,
         types: super::BTreeSet<super::ValueType>,
     ) {
         use super::*;
 
-        test_compile(
-            env,
-            code,
-            CompilationResultType::FunctionCall {
-                name: name.convert(),
-                params,
-            },
-            types,
+        let mut comp = env.compile(code.convert()).unwrap();
+        assert_eq!(comp.types, types);
+        assert_eq!(comp.result.evaluate(env).unwrap(), result);
+    }
+
+    #[test]
+    fn test_compile_and_evaluate_literal() {
+        use super::*;
+
+        let mut env = SimpleEnvironment;
+        test_compile_and_evaluate(
+            &mut env,
+            v_nil!(),
+            v_nil!(),
+            BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::Nil)]),
+        );
+        test_compile_and_evaluate(
+            &mut env,
+            v_bool!(true),
+            v_bool!(true),
+            BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::Bool)]),
+        );
+        test_compile_and_evaluate(
+            &mut env,
+            v_str!("Hello world!"),
+            v_str!("Hello world!"),
+            BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::String)]),
+        );
+        test_compile_and_evaluate(
+            &mut env,
+            v_v![1, 0],
+            v_v![1, 0],
+            BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::Semver)]),
         );
     }
 
     #[test]
-    fn test_compile_literal() {
-        use super::*;
-
-        let mut env = SimpleEnvironment;
-        test_literal(
-            &mut env,
-            v_nil!(),
-            v_nil!(),
-            ValueType::NonList(ValueTypeNonList::Nil),
-        );
-        test_literal(
-            &mut env,
-            v_bool!(true),
-            v_bool!(true),
-            ValueType::NonList(ValueTypeNonList::Bool),
-        );
-        test_literal(
-            &mut env,
-            v_str!("Hello world!"),
-            v_str!("Hello world!"),
-            ValueType::NonList(ValueTypeNonList::String),
-        );
-        test_literal(
-            &mut env,
-            v_v![1, 0],
-            v_v![1, 0],
-            ValueType::NonList(ValueTypeNonList::Semver),
-        );
-    }
-
-    #[test]
-    fn test_compile_macro() {
+    fn test_compile_and_evaluate_macro() {
         use super::*;
 
         let mut env = SimpleEnvironment;
 
-        test_literal(
+        test_compile_and_evaluate(
             &mut env,
             v_list!(v_uqsym!("simplemacro1")),
             v_str!("Hello world!"),
-            ValueType::NonList(ValueTypeNonList::String),
+            BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::String)]),
         );
-        test_literal(
+        test_compile_and_evaluate(
             &mut env,
             v_list!(v_uqsym!("simplemacro2")),
             v_bool!(true),
-            ValueType::NonList(ValueTypeNonList::Bool),
+            BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::Bool)]),
         );
         assert_eq!(
             env.compile(v_list!(v_uqsym!("simplemacro3")).convert())
@@ -2269,17 +2212,17 @@ mod tests {
             ErrorKind::ValueNotDefined
         );
 
-        test_literal(
+        test_compile_and_evaluate(
             &mut env,
             v_list!(v_qsym!("p", "simplemacro1")),
             v_str!("Hello world!"),
-            ValueType::NonList(ValueTypeNonList::String),
+            BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::String)]),
         );
-        test_literal(
+        test_compile_and_evaluate(
             &mut env,
             v_list!(v_qsym!("p", "simplemacro2")),
             v_bool!(true),
-            ValueType::NonList(ValueTypeNonList::Bool),
+            BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::Bool)]),
         );
         assert_eq!(
             env.compile(v_list!(v_qsym!("p", "simplemacro3")).convert())
@@ -2290,25 +2233,21 @@ mod tests {
     }
 
     #[test]
-    fn test_compile_function() {
+    fn test_compile_and_evaluate_function() {
         use super::*;
 
         let mut env = SimpleEnvironment;
 
-        test_function(
+        test_compile_and_evaluate(
             &mut env,
             v_list!(v_uqsym!("simplefunc1"), v_str!("Hello world!")),
-            func!(qsym!("p", "simplefunc1")),
-            vec![CompilationResultType::Literal(
-                v_str!("Hello world!").convert(),
-            )],
+            v_str!("Hello world!"),
             BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::String)]),
         );
-        test_function(
+        test_compile_and_evaluate(
             &mut env,
             v_list!(v_uqsym!("simplefunc1"), v_bool!(true)),
-            func!(qsym!("p", "simplefunc1")),
-            vec![CompilationResultType::Literal(v_bool!(true).convert())],
+            v_bool!(true),
             BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::Bool)]),
         );
         assert_eq!(
@@ -2318,20 +2257,16 @@ mod tests {
             ErrorKind::IncorrectParams
         );
 
-        test_function(
+        test_compile_and_evaluate(
             &mut env,
             v_list!(v_qsym!("p", "simplefunc1"), v_str!("Hello world!")),
-            func!(qsym!("p", "simplefunc1")),
-            vec![CompilationResultType::Literal(
-                v_str!("Hello world!").convert(),
-            )],
+            v_str!("Hello world!"),
             BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::String)]),
         );
-        test_function(
+        test_compile_and_evaluate(
             &mut env,
             v_list!(v_qsym!("p", "simplefunc1"), v_bool!(true)),
-            func!(qsym!("p", "simplefunc1")),
-            vec![CompilationResultType::Literal(v_bool!(true).convert())],
+            v_bool!(true),
             BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::Bool)]),
         );
         assert_eq!(
@@ -2348,10 +2283,10 @@ mod tests {
 
         let mut env = SimpleEnvironment;
 
-        let comp = CompilationResultType::Literal(v_str!("Hello world!").convert());
+        let mut comp = Literal::new(v_str!("Hello world!").convert());
         assert_eq!(comp.evaluate(&mut env).unwrap(), v_str!("Hello world!"));
 
-        let comp = CompilationResultType::Literal(v_bool!(true).convert());
+        let mut comp = Literal::new(v_bool!(true).convert());
         assert_eq!(comp.evaluate(&mut env).unwrap(), v_bool!(true));
     }
 
@@ -2361,18 +2296,16 @@ mod tests {
 
         let mut env = SimpleEnvironment;
 
-        let comp = CompilationResultType::FunctionCall {
-            name: func!(qsym!("p", "simplefunc1")).convert(),
-            params: vec![CompilationResultType::Literal(
-                v_str!("Hello world!").convert(),
-            )],
-        };
+        let mut comp = FunctionCall::new(
+            func!(qsym!("p", "simplefunc1")).convert(),
+            vec![Box::new(Literal::new(v_str!("Hello world!").convert()))],
+        );
         assert_eq!(comp.evaluate(&mut env).unwrap(), v_str!("Hello world!"));
 
-        let comp = CompilationResultType::FunctionCall {
-            name: func!(qsym!("p", "simplefunc1")).convert(),
-            params: vec![CompilationResultType::Literal(v_bool!(true).convert())],
-        };
+        let mut comp = FunctionCall::new(
+            func!(qsym!("p", "simplefunc1")).convert(),
+            vec![Box::new(Literal::new(v_bool!(true).convert()))],
+        );
         assert_eq!(comp.evaluate(&mut env).unwrap(), v_bool!(true));
     }
 }
