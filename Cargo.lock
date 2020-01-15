@@ -6,6 +6,13 @@ version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
+name = "ryuk-kirastd"
+version = "0.1.0"
+dependencies = [
+ "ryuk-lispcore 0.1.0",
+]
+
+[[package]]
 name = "ryuk-lispcore"
 version = "0.1.0"
 dependencies = [
