@@ -1,4 +1,5 @@
 use ryuk_lispcore::*;
+use std::collections::BTreeSet;
 
 #[derive(Debug)]
 struct If<T>
@@ -44,10 +45,90 @@ where
     }
 }
 
+pub fn compile_if<T>(
+    env: &mut dyn Environment<T>,
+    mut v: LispList<T>,
+) -> Result<CompilationResult<T>>
+where
+    T: ValueTypes + ?Sized + 'static,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+{
+    use std::iter::FromIterator;
+
+    let mut types = BTreeSet::new();
+
+    let test;
+    match v.next() {
+        Option::Some(LispListItem::Item(test_item)) => {
+            let test_comp = env.compile(test_item)?;
+            if test_comp.types
+                != BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::Bool)])
+            {
+                return Result::Err(Error::new(ErrorKind::IncorrectType, "Incorrect type"));
+            }
+            test = test_comp.result;
+        }
+        _ => {
+            return Result::Err(Error::new(
+                ErrorKind::IncorrectParams,
+                "Incorrect parameters",
+            ))
+        }
+    }
+
+    let then;
+    match v.next() {
+        Option::Some(LispListItem::Item(then_item)) => {
+            let then_comp = env.compile(then_item)?;
+            types.append(&mut then_comp.types.clone());
+            then = then_comp.result;
+        }
+        _ => {
+            return Result::Err(Error::new(
+                ErrorKind::IncorrectParams,
+                "Incorrect parameters",
+            ))
+        }
+    }
+
+    let els;
+    match v.next() {
+        Option::Some(LispListItem::Item(els_item)) => {
+            let els_comp = env.compile(els_item)?;
+            types.append(&mut els_comp.types.clone());
+            els = Option::Some(els_comp.result);
+        }
+        Option::None => {
+            types.insert(ValueType::NonList(ValueTypeNonList::Nil));
+            els = Option::None;
+        }
+        _ => {
+            return Result::Err(Error::new(
+                ErrorKind::IncorrectParams,
+                "Incorrect parameters",
+            ))
+        }
+    }
+
+    match v.next() {
+        Option::Some(_) => {
+            return Result::Err(Error::new(
+                ErrorKind::IncorrectParams,
+                "Incorrect parameters",
+            ))
+        }
+        _ => (),
+    }
+
+    Result::Ok(CompilationResult {
+        result: Box::new(If::new(test, then, els)),
+        types,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::BTreeSet;
 
     struct SimpleEnvironment;
 
@@ -73,10 +154,18 @@ mod tests {
 
         fn compile_macro(
             &mut self,
-            _name: &ValueQualifiedSymbol<String>,
-            _v: LispList<ValueTypesRc>,
+            name: &ValueQualifiedSymbol<String>,
+            v: LispList<ValueTypesRc>,
         ) -> Option<Result<TryCompilationResult<ValueTypesRc>>> {
-            Option::None
+            use std::borrow::Borrow;
+
+            match (name.package.borrow(), name.name.borrow()) {
+                ("std", "if") => Option::Some(match compile_if(self, v) {
+                    Result::Ok(r) => Result::Ok(TryCompilationResult::Compiled(r)),
+                    Result::Err(e) => Result::Err(e),
+                }),
+                _ => Option::None,
+            }
         }
 
         fn compile_function(
@@ -86,6 +175,19 @@ mod tests {
         ) -> Option<Result<BTreeSet<ValueType>>> {
             Option::None
         }
+    }
+
+    fn test_compile_and_evaluate(
+        env: &mut SimpleEnvironment,
+        code: Value<ValueTypesStatic>,
+        result: Value<ValueTypesStatic>,
+        types: BTreeSet<ValueType>,
+    ) {
+        use super::*;
+
+        let mut comp = env.compile(code.convert()).unwrap();
+        assert_eq!(comp.types, types);
+        assert_eq!(comp.result.evaluate(env).unwrap(), result);
     }
 
     #[test]
@@ -128,6 +230,109 @@ mod tests {
         assert_eq!(
             comp.evaluate(&mut env).unwrap_err().kind,
             ErrorKind::IncorrectType
+        );
+    }
+
+    #[test]
+    fn test_compile_and_evaluate_if() {
+        use std::iter::FromIterator;
+
+        let mut env = SimpleEnvironment;
+
+        test_compile_and_evaluate(
+            &mut env,
+            v_list!(
+                v_qsym!("std", "if"),
+                v_bool!(true),
+                v_str!("yes"),
+                v_str!("no")
+            ),
+            v_str!("yes"),
+            BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::String)]),
+        );
+
+        test_compile_and_evaluate(
+            &mut env,
+            v_list!(
+                v_qsym!("std", "if"),
+                v_bool!(false),
+                v_str!("yes"),
+                v_str!("no")
+            ),
+            v_str!("no"),
+            BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::String)]),
+        );
+
+        test_compile_and_evaluate(
+            &mut env,
+            v_list!(v_qsym!("std", "if"), v_bool!(true), v_str!("yes")),
+            v_str!("yes"),
+            BTreeSet::from_iter(vec![
+                ValueType::NonList(ValueTypeNonList::Nil),
+                ValueType::NonList(ValueTypeNonList::String),
+            ]),
+        );
+
+        test_compile_and_evaluate(
+            &mut env,
+            v_list!(v_qsym!("std", "if"), v_bool!(false), v_str!("yes")),
+            v_nil!(),
+            BTreeSet::from_iter(vec![
+                ValueType::NonList(ValueTypeNonList::Nil),
+                ValueType::NonList(ValueTypeNonList::String),
+            ]),
+        );
+
+        assert_eq!(
+            env.compile(v_list!(v_qsym!("std", "if")).convert())
+                .unwrap_err()
+                .kind,
+            ErrorKind::IncorrectParams
+        );
+        assert_eq!(
+            env.compile(v_list!(v_qsym!("std", "if"), v_bool!(true)).convert())
+                .unwrap_err()
+                .kind,
+            ErrorKind::IncorrectParams
+        );
+        assert_eq!(
+            env.compile(
+                v_list!(
+                    v_qsym!("std", "if"),
+                    v_bool!(true),
+                    v_nil!(),
+                    v_nil!(),
+                    v_nil!()
+                )
+                .convert()
+            )
+            .unwrap_err()
+            .kind,
+            ErrorKind::IncorrectParams
+        );
+        assert_eq!(
+            env.compile(v_list!(v_qsym!("std", "if"), v_str!("str")).convert())
+                .unwrap_err()
+                .kind,
+            ErrorKind::IncorrectType
+        );
+        assert_eq!(
+            env.compile(v_cons!(v_qsym!("std", "if"), v_cons!(v_bool!(true), v_nil!())).convert())
+                .unwrap_err()
+                .kind,
+            ErrorKind::IncorrectParams
+        );
+        assert_eq!(
+            env.compile(
+                v_cons!(
+                    v_qsym!("std", "if"),
+                    v_cons!(v_bool!(true), v_cons!(v_nil!(), v_str!("str")))
+                )
+                .convert()
+            )
+            .unwrap_err()
+            .kind,
+            ErrorKind::IncorrectParams
         );
     }
 }
