@@ -834,7 +834,7 @@ where
 }
 
 #[derive(Debug)]
-struct Literal<T>(Value<T>)
+pub struct Literal<T>(Value<T>)
 where
     T: ValueTypes + ?Sized,
     for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>;
@@ -860,7 +860,7 @@ where
 }
 
 #[derive(Debug)]
-struct FunctionCall<T>
+pub struct FunctionCall<T>
 where
     T: ValueTypes + ?Sized,
     for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
