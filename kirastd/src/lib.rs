@@ -177,19 +177,6 @@ mod tests {
         }
     }
 
-    fn test_compile_and_evaluate(
-        env: &mut SimpleEnvironment,
-        code: Value<ValueTypesStatic>,
-        result: Value<ValueTypesStatic>,
-        types: BTreeSet<ValueType>,
-    ) {
-        use super::*;
-
-        let mut comp = env.compile(code.convert()).unwrap();
-        assert_eq!(comp.types, types);
-        assert_eq!(comp.result.evaluate(env).unwrap(), result);
-    }
-
     #[test]
     fn test_evaluate_if() {
         let mut env = SimpleEnvironment;
@@ -239,96 +226,104 @@ mod tests {
 
         let mut env = SimpleEnvironment;
 
-        test_compile_and_evaluate(
+        let mut comp = compile_if(
             &mut env,
-            v_list!(
-                v_qsym!("std", "if"),
-                v_bool!(true),
-                v_str!("yes"),
-                v_str!("no")
-            ),
-            v_str!("yes"),
-            BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::String)]),
-        );
-
-        test_compile_and_evaluate(
-            &mut env,
-            v_list!(
-                v_qsym!("std", "if"),
-                v_bool!(false),
-                v_str!("yes"),
-                v_str!("no")
-            ),
-            v_str!("no"),
-            BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::String)]),
-        );
-
-        test_compile_and_evaluate(
-            &mut env,
-            v_list!(v_qsym!("std", "if"), v_bool!(true), v_str!("yes")),
-            v_str!("yes"),
-            BTreeSet::from_iter(vec![
-                ValueType::NonList(ValueTypeNonList::Nil),
-                ValueType::NonList(ValueTypeNonList::String),
-            ]),
-        );
-
-        test_compile_and_evaluate(
-            &mut env,
-            v_list!(v_qsym!("std", "if"), v_bool!(false), v_str!("yes")),
-            v_nil!(),
-            BTreeSet::from_iter(vec![
-                ValueType::NonList(ValueTypeNonList::Nil),
-                ValueType::NonList(ValueTypeNonList::String),
-            ]),
-        );
-
-        assert_eq!(
-            env.compile(v_list!(v_qsym!("std", "if")).convert())
-                .unwrap_err()
-                .kind,
-            ErrorKind::IncorrectParams
-        );
-        assert_eq!(
-            env.compile(v_list!(v_qsym!("std", "if"), v_bool!(true)).convert())
-                .unwrap_err()
-                .kind,
-            ErrorKind::IncorrectParams
-        );
-        assert_eq!(
-            env.compile(
-                v_list!(
-                    v_qsym!("std", "if"),
-                    v_bool!(true),
-                    v_nil!(),
-                    v_nil!(),
-                    v_nil!()
-                )
+            v_list!(v_bool!(true), v_str!("yes"), v_str!("no"))
                 .convert()
+                .into_iter(),
+        )
+        .unwrap();
+        assert_eq!(comp.result.evaluate(&mut env).unwrap(), v_str!("yes"));
+        assert_eq!(
+            comp.types,
+            BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::String)])
+        );
+
+        let mut comp = compile_if(
+            &mut env,
+            v_list!(v_bool!(false), v_str!("yes"), v_str!("no"))
+                .convert()
+                .into_iter(),
+        )
+        .unwrap();
+        assert_eq!(comp.result.evaluate(&mut env).unwrap(), v_str!("no"));
+        assert_eq!(
+            comp.types,
+            BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::String)])
+        );
+
+        let mut comp = compile_if(
+            &mut env,
+            v_list!(v_bool!(true), v_str!("yes")).convert().into_iter(),
+        )
+        .unwrap();
+        assert_eq!(comp.result.evaluate(&mut env).unwrap(), v_str!("yes"));
+        assert_eq!(
+            comp.types,
+            BTreeSet::from_iter(vec![
+                ValueType::NonList(ValueTypeNonList::Nil),
+                ValueType::NonList(ValueTypeNonList::String),
+            ])
+        );
+
+        let mut comp = compile_if(
+            &mut env,
+            v_list!(v_bool!(false), v_str!("yes")).convert().into_iter(),
+        )
+        .unwrap();
+        assert_eq!(comp.result.evaluate(&mut env).unwrap(), v_nil!());
+        assert_eq!(
+            comp.types,
+            BTreeSet::from_iter(vec![
+                ValueType::NonList(ValueTypeNonList::Nil),
+                ValueType::NonList(ValueTypeNonList::String),
+            ])
+        );
+
+        assert_eq!(
+            compile_if(&mut env, v_list!().convert().into_iter())
+                .unwrap_err()
+                .kind,
+            ErrorKind::IncorrectParams
+        );
+        assert_eq!(
+            compile_if(&mut env, v_list!(v_bool!(true)).convert().into_iter())
+                .unwrap_err()
+                .kind,
+            ErrorKind::IncorrectParams
+        );
+        assert_eq!(
+            compile_if(
+                &mut env,
+                v_list!(v_bool!(true), v_nil!(), v_nil!(), v_nil!())
+                    .convert()
+                    .into_iter()
             )
             .unwrap_err()
             .kind,
             ErrorKind::IncorrectParams
         );
         assert_eq!(
-            env.compile(v_list!(v_qsym!("std", "if"), v_str!("str")).convert())
+            compile_if(&mut env, v_list!(v_str!("str")).convert().into_iter())
                 .unwrap_err()
                 .kind,
             ErrorKind::IncorrectType
         );
         assert_eq!(
-            env.compile(v_cons!(v_qsym!("std", "if"), v_cons!(v_bool!(true), v_nil!())).convert())
-                .unwrap_err()
-                .kind,
+            compile_if(
+                &mut env,
+                v_cons!(v_bool!(true), v_nil!()).convert().into_iter()
+            )
+            .unwrap_err()
+            .kind,
             ErrorKind::IncorrectParams
         );
         assert_eq!(
-            env.compile(
-                v_cons!(
-                    v_qsym!("std", "if"),
-                    v_cons!(v_bool!(true), v_cons!(v_nil!(), v_str!("str")))
-                )
-                .convert()
+            compile_if(
+                &mut env,
+                v_cons!(v_bool!(true), v_cons!(v_nil!(), v_str!("str")))
+                    .convert()
+                    .into_iter()
             )
             .unwrap_err()
             .kind,
