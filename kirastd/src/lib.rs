@@ -126,6 +126,44 @@ where
     })
 }
 
+pub fn compile_quote<T>(
+    _env: &mut dyn Environment<T>,
+    mut v: LispList<T>,
+) -> Result<CompilationResult<T>>
+where
+    T: ValueTypes + ?Sized + 'static,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+{
+    use std::iter::FromIterator;
+
+    let result;
+    match v.next() {
+        Option::Some(LispListItem::Item(val)) => result = val,
+        _ => {
+            return Result::Err(Error::new(
+                ErrorKind::IncorrectParams,
+                "Incorrect parameters",
+            ))
+        }
+    }
+
+    match v.next() {
+        Option::Some(_) => {
+            return Result::Err(Error::new(
+                ErrorKind::IncorrectParams,
+                "Incorrect parameters",
+            ))
+        }
+        _ => (),
+    }
+
+    let types = BTreeSet::from_iter(vec![result.value_type()]);
+    Result::Ok(CompilationResult {
+        result: Box::new(Literal::new(result)),
+        types,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -286,12 +324,14 @@ mod tests {
                 .kind,
             ErrorKind::IncorrectParams
         );
+
         assert_eq!(
             compile_if(&mut env, v_list!(v_bool!(true)).convert().into_iter())
                 .unwrap_err()
                 .kind,
             ErrorKind::IncorrectParams
         );
+
         assert_eq!(
             compile_if(
                 &mut env,
@@ -303,12 +343,14 @@ mod tests {
             .kind,
             ErrorKind::IncorrectParams
         );
+
         assert_eq!(
             compile_if(&mut env, v_list!(v_str!("str")).convert().into_iter())
                 .unwrap_err()
                 .kind,
             ErrorKind::IncorrectType
         );
+
         assert_eq!(
             compile_if(
                 &mut env,
@@ -318,12 +360,88 @@ mod tests {
             .kind,
             ErrorKind::IncorrectParams
         );
+
         assert_eq!(
             compile_if(
                 &mut env,
                 v_cons!(v_bool!(true), v_cons!(v_nil!(), v_str!("str")))
                     .convert()
                     .into_iter()
+            )
+            .unwrap_err()
+            .kind,
+            ErrorKind::IncorrectParams
+        );
+    }
+
+    #[test]
+    fn test_compile_and_evaluate_quote() {
+        use std::iter::FromIterator;
+
+        let mut env = SimpleEnvironment;
+
+        let mut comp =
+            compile_quote(&mut env, v_list!(v_str!("str")).convert().into_iter()).unwrap();
+        assert_eq!(comp.result.evaluate(&mut env).unwrap(), v_str!("str"));
+        assert_eq!(
+            comp.types,
+            BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::String)])
+        );
+
+        let mut comp = compile_quote(
+            &mut env,
+            v_list!(v_qsym!("std", "if")).convert().into_iter(),
+        )
+        .unwrap();
+        assert_eq!(
+            comp.result.evaluate(&mut env).unwrap(),
+            v_qsym!("std", "if")
+        );
+        assert_eq!(
+            comp.types,
+            BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::QualifiedSymbol)])
+        );
+
+        let mut comp = compile_quote(
+            &mut env,
+            v_list!(v_list!(v_qsym!("std", "if"), v_bool!(true)))
+                .convert()
+                .into_iter(),
+        )
+        .unwrap();
+        assert_eq!(
+            comp.result.evaluate(&mut env).unwrap(),
+            v_list!(v_qsym!("std", "if"), v_bool!(true))
+        );
+        assert_eq!(
+            comp.types,
+            BTreeSet::from_iter(vec![ValueType::List(ValueTypeList {
+                items: BTreeSet::from_iter(vec![
+                    ValueType::NonList(ValueTypeNonList::QualifiedSymbol),
+                    ValueType::NonList(ValueTypeNonList::Bool),
+                ]),
+                tail: BTreeSet::from_iter(vec![ValueTypeNonList::Nil]),
+            })])
+        );
+
+        assert_eq!(
+            compile_quote(&mut env, v_list!().convert().into_iter())
+                .unwrap_err()
+                .kind,
+            ErrorKind::IncorrectParams
+        );
+
+        assert_eq!(
+            compile_quote(&mut env, v_list!(v_nil!(), v_nil!()).convert().into_iter())
+                .unwrap_err()
+                .kind,
+            ErrorKind::IncorrectParams
+        );
+
+        assert_eq!(
+            compile_quote(
+                &mut env,
+                v_cons!(v_nil!(), v_bool!(true)).convert().into_iter()
             )
             .unwrap_err()
             .kind,
