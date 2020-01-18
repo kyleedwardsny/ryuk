@@ -1018,6 +1018,32 @@ where
     }
 }
 
+pub fn concat_lists<T, I>(mut list: Value<T>, mut rest: I) -> Result<Value<T>>
+where
+    T: ValueTypes + ?Sized,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+    Cons<T>: Into<T::ConsRef>,
+    I: Iterator<Item = Value<T>>,
+{
+    match list.next() {
+        Option::Some(ListItem::Item(item)) => Result::Ok(Value::Cons(ValueCons(
+            Cons {
+                car: item,
+                cdr: concat_lists(list, rest)?,
+            }
+            .into(),
+        ))),
+        Option::Some(ListItem::Tail(tail)) => match rest.next() {
+            Option::None => Result::Ok(tail),
+            _ => Result::Err(Error::new(ErrorKind::IncorrectType, "Incorrect type")),
+        },
+        Option::None => match rest.next() {
+            Option::None => Result::Ok(Value::Nil),
+            Option::Some(list) => concat_lists(list, rest),
+        },
+    }
+}
+
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum ValueType {
     List(ValueTypeList),
@@ -2265,6 +2291,65 @@ mod tests {
 
         let i = v_nil!().into_iter();
         assert_eq!(i, v_nil!());
+    }
+
+    #[test]
+    fn test_concat_lists() {
+        use super::*;
+
+        let v = concat_lists::<ValueTypesRc, _>(
+            v_list!(v_str!("str"), v_bool!(true), v_qsym!("p", "qsym")).convert(),
+            vec![
+                v_list!(v_uqsym!("uqsym"), v_v![1, 0]).convert(),
+                v_list!(v_bool!(false), v_str!("Hello")).convert(),
+            ]
+            .into_iter(),
+        )
+        .unwrap();
+        assert_eq!(
+            v,
+            v_list!(
+                v_str!("str"),
+                v_bool!(true),
+                v_qsym!("p", "qsym"),
+                v_uqsym!("uqsym"),
+                v_v![1, 0],
+                v_bool!(false),
+                v_str!("Hello")
+            )
+        );
+
+        let v = concat_lists::<ValueTypesRc, _>(
+            v_list!(v_str!("str")).convert(),
+            vec![v_bool!(true).convert()].into_iter(),
+        )
+        .unwrap();
+        assert_eq!(v, v_cons!(v_str!("str"), v_bool!(true)));
+
+        let v = concat_lists::<ValueTypesRc, _>(
+            v_list!().convert(),
+            vec![v_bool!(true).convert()].into_iter(),
+        )
+        .unwrap();
+        assert_eq!(v, v_bool!(true));
+
+        let v =
+            concat_lists::<ValueTypesRc, _>(v_list!(v_str!("str")).convert(), vec![].into_iter())
+                .unwrap();
+        assert_eq!(v, v_list!(v_str!("str")));
+
+        let v = concat_lists::<ValueTypesRc, _>(v_list!().convert(), vec![].into_iter()).unwrap();
+        assert_eq!(v, v_list!());
+
+        assert_eq!(
+            concat_lists::<ValueTypesRc, _>(
+                v_list!(v_str!("str")).convert(),
+                vec![v_bool!(true).convert(), v_bool!(true).convert(),].into_iter()
+            )
+            .unwrap_err()
+            .kind,
+            ErrorKind::IncorrectType
+        );
     }
 
     #[test]
