@@ -83,7 +83,7 @@ where
     fn compile_function_from_macro(
         &mut self,
         name: &ValueQualifiedSymbol<T::StringRef>,
-        params: LispList<T>,
+        params: Value<T>,
     ) -> Option<Result<TryCompilationResult<T>>> {
         let mut compiled_params = Vec::new();
         for item in params.map(|v| self.compile(v.try_unwrap_item()?)) {
@@ -118,7 +118,7 @@ where
     fn compile_macro(
         &mut self,
         name: &ValueQualifiedSymbol<T::StringRef>,
-        params: LispList<T>,
+        params: Value<T>,
     ) -> Option<Result<TryCompilationResult<T>>>;
 
     fn compile(&mut self, v: Value<T>) -> Result<CompilationResult<T>> {
@@ -800,10 +800,10 @@ where
                 };
                 for item in cons.cdr.clone().into_iter() {
                     match item {
-                        LispListItem::Item(i) => {
+                        ListItem::Item(i) => {
                             l.items.insert(i.value_type());
                         }
-                        LispListItem::Tail(t) => {
+                        ListItem::Tail(t) => {
                             l.tail.clear();
                             l.tail.insert(t.value_type_non_list());
                         }
@@ -833,16 +833,65 @@ where
     }
 }
 
-impl<T> IntoIterator for Value<T>
+pub enum ListItem<T>
 where
     T: ValueTypes + ?Sized,
     for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
 {
-    type IntoIter = LispList<T>;
-    type Item = LispListItem<T>;
+    Item(Value<T>),
+    Tail(Value<T>),
+}
 
-    fn into_iter(self) -> Self::IntoIter {
-        LispList { val: self }
+impl<T> ListItem<T>
+where
+    T: ValueTypes + ?Sized,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+{
+    pub fn try_unwrap_item(self) -> Result<Value<T>> {
+        match self {
+            Self::Item(v) => Result::Ok(v),
+            _ => Result::Err(Error::new(ErrorKind::IncorrectType, "Incorrect type")),
+        }
+    }
+
+    pub fn unwrap_item(self) -> Value<T> {
+        match self {
+            Self::Item(v) => v,
+            _ => panic!("Expected ListItem::Item"),
+        }
+    }
+
+    pub fn unwrap_tail(self) -> Value<T> {
+        match self {
+            Self::Tail(v) => v,
+            _ => panic!("Expected ListItem::Tail"),
+        }
+    }
+}
+
+impl<T> Iterator for Value<T>
+where
+    T: ValueTypes + ?Sized,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+{
+    type Item = ListItem<T>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Value::Nil => Option::None,
+            Value::Cons(ValueCons(c)) => {
+                let cons = (*c).borrow();
+                let car = cons.car.clone();
+                let cdr = cons.cdr.clone();
+                *self = cdr;
+                Option::Some(ListItem::Item(car))
+            }
+            _ => {
+                let mut result = Value::Nil;
+                std::mem::swap(self, &mut result);
+                Option::Some(ListItem::Tail(result))
+            }
+        }
     }
 }
 
@@ -1086,88 +1135,6 @@ where
 {
     Compiled(CompilationResult<T>),
     Uncompiled(Value<T>),
-}
-
-pub enum LispListItem<T>
-where
-    T: ValueTypes + ?Sized,
-    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
-{
-    Item(Value<T>),
-    Tail(Value<T>),
-}
-
-impl<T> LispListItem<T>
-where
-    T: ValueTypes + ?Sized,
-    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
-{
-    pub fn try_unwrap_item(self) -> Result<Value<T>> {
-        match self {
-            LispListItem::Item(v) => Result::Ok(v),
-            _ => Result::Err(Error::new(ErrorKind::IncorrectType, "Incorrect type")),
-        }
-    }
-
-    pub fn unwrap_item(self) -> Value<T> {
-        match self {
-            LispListItem::Item(v) => v,
-            _ => panic!("Expected LispListItem::Item"),
-        }
-    }
-
-    pub fn unwrap_tail(self) -> Value<T> {
-        match self {
-            LispListItem::Tail(v) => v,
-            _ => panic!("Expected LispListItem::Tail"),
-        }
-    }
-}
-
-pub struct LispList<T>
-where
-    T: ValueTypes + ?Sized,
-    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
-{
-    val: Value<T>,
-}
-
-impl<T> LispList<T>
-where
-    T: ValueTypes + ?Sized,
-    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
-    Value<T>: Clone,
-{
-    pub fn take(self) -> Value<T> {
-        self.val
-    }
-}
-
-impl<T> Iterator for LispList<T>
-where
-    T: ValueTypes + ?Sized,
-    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
-    Value<T>: Clone,
-{
-    type Item = LispListItem<T>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match &self.val {
-            Value::Nil => Option::None,
-            Value::Cons(ValueCons(c)) => {
-                let cons = c.borrow();
-                let car = cons.car.clone();
-                let cdr = cons.cdr.clone();
-                self.val = cdr;
-                Option::Some(LispListItem::Item(car))
-            }
-            _ => {
-                let mut result = Value::Nil;
-                std::mem::swap(&mut self.val, &mut result);
-                Option::Some(LispListItem::Tail(result))
-            }
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -2270,34 +2237,34 @@ mod tests {
     }
 
     #[test]
-    fn test_into_iter() {
+    fn test_iter() {
         use super::*;
 
-        let mut i = v_list!(v_uqsym!("uqsym"), v_bool!(true), v_str!("str")).into_iter();
+        let mut i = v_list!(v_uqsym!("uqsym"), v_bool!(true), v_str!("str"));
         assert_eq!(i.next().unwrap().unwrap_item(), v_uqsym!("uqsym"));
         assert_eq!(i.next().unwrap().unwrap_item(), v_bool!(true));
         assert_eq!(i.next().unwrap().unwrap_item(), v_str!("str"));
         assert!(i.next().is_none());
-        assert_eq!(i.take(), v_nil!());
+        assert_eq!(i, v_nil!());
 
-        let mut i = v_cons!(v_uqsym!("uqsym"), v_bool!(true)).into_iter();
+        let mut i = v_cons!(v_uqsym!("uqsym"), v_bool!(true));
         assert_eq!(i.next().unwrap().unwrap_item(), v_uqsym!("uqsym"));
         assert_eq!(i.next().unwrap().unwrap_tail(), v_bool!(true));
         assert!(i.next().is_none());
-        assert_eq!(i.take(), v_nil!());
+        assert_eq!(i, v_nil!());
 
-        let mut i = v_list!(v_uqsym!("uqsym"), v_bool!(true), v_str!("str")).into_iter();
+        let mut i = v_list!(v_uqsym!("uqsym"), v_bool!(true), v_str!("str"));
         assert_eq!(i.next().unwrap().unwrap_item(), v_uqsym!("uqsym"));
-        assert_eq!(i.take(), v_list!(v_bool!(true), v_str!("str")));
+        assert_eq!(i, v_list!(v_bool!(true), v_str!("str")));
 
-        let mut i = v_list!(v_uqsym!("uqsym"), v_bool!(true), v_str!("str")).into_iter();
+        let mut i = v_list!(v_uqsym!("uqsym"), v_bool!(true), v_str!("str"));
         assert_eq!(i.next().unwrap().unwrap_item(), v_uqsym!("uqsym"));
         assert_eq!(i.next().unwrap().unwrap_item(), v_bool!(true));
         assert_eq!(i.next().unwrap().unwrap_item(), v_str!("str"));
-        assert_eq!(i.take(), v_nil!());
+        assert_eq!(i, v_nil!());
 
         let i = v_nil!().into_iter();
-        assert_eq!(i.take(), v_nil!());
+        assert_eq!(i, v_nil!());
     }
 
     #[test]
@@ -2493,7 +2460,7 @@ mod tests {
         fn compile_macro(
             &mut self,
             name: &super::ValueQualifiedSymbol<String>,
-            v: super::LispList<super::ValueTypesRc>,
+            v: super::Value<super::ValueTypesRc>,
         ) -> Option<super::Result<super::TryCompilationResult<super::ValueTypesRc>>> {
             use std::borrow::Borrow;
 

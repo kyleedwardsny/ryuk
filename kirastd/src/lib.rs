@@ -45,10 +45,7 @@ where
     }
 }
 
-pub fn compile_if<T>(
-    env: &mut dyn Environment<T>,
-    mut v: LispList<T>,
-) -> Result<CompilationResult<T>>
+pub fn compile_if<T>(env: &mut dyn Environment<T>, mut v: Value<T>) -> Result<CompilationResult<T>>
 where
     T: ValueTypes + ?Sized + 'static,
     for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
@@ -59,7 +56,7 @@ where
 
     let test;
     match v.next() {
-        Option::Some(LispListItem::Item(test_item)) => {
+        Option::Some(ListItem::Item(test_item)) => {
             let test_comp = env.compile(test_item)?;
             if test_comp.types
                 != BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::Bool)])
@@ -78,7 +75,7 @@ where
 
     let then;
     match v.next() {
-        Option::Some(LispListItem::Item(then_item)) => {
+        Option::Some(ListItem::Item(then_item)) => {
             let then_comp = env.compile(then_item)?;
             types.append(&mut then_comp.types.clone());
             then = then_comp.result;
@@ -93,7 +90,7 @@ where
 
     let els;
     match v.next() {
-        Option::Some(LispListItem::Item(els_item)) => {
+        Option::Some(ListItem::Item(els_item)) => {
             let els_comp = env.compile(els_item)?;
             types.append(&mut els_comp.types.clone());
             els = Option::Some(els_comp.result);
@@ -128,7 +125,7 @@ where
 
 pub fn compile_quote<T>(
     _env: &mut dyn Environment<T>,
-    mut v: LispList<T>,
+    mut v: Value<T>,
 ) -> Result<CompilationResult<T>>
 where
     T: ValueTypes + ?Sized + 'static,
@@ -138,7 +135,7 @@ where
 
     let result;
     match v.next() {
-        Option::Some(LispListItem::Item(val)) => result = val,
+        Option::Some(ListItem::Item(val)) => result = val,
         _ => {
             return Result::Err(Error::new(
                 ErrorKind::IncorrectParams,
@@ -193,7 +190,7 @@ mod tests {
         fn compile_macro(
             &mut self,
             name: &ValueQualifiedSymbol<String>,
-            v: LispList<ValueTypesRc>,
+            v: Value<ValueTypesRc>,
         ) -> Option<Result<TryCompilationResult<ValueTypesRc>>> {
             use std::borrow::Borrow;
 
