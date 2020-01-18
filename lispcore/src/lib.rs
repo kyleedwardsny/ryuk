@@ -57,6 +57,7 @@ where
 {
     type ConsRef: Borrow<Cons<Self>> + Clone + Debug;
     type StringRef: Borrow<str> + Clone + Debug;
+    type ValueRef: Borrow<Value<Self>> + Clone + Debug;
     type SemverTypes: SemverTypes + ?Sized;
 }
 
@@ -256,6 +257,7 @@ where
         Cons<T2>: Into<T2::ConsRef>,
         for<'a> &'a <T::SemverTypes as SemverTypes>::Semver:
             Into<<T2::SemverTypes as SemverTypes>::SemverRef>,
+        Value<T2>: Into<T2::ValueRef>,
     {
         let cons = self.0.borrow();
         ValueCons(
@@ -592,6 +594,54 @@ where
 }
 
 #[derive(Debug)]
+pub struct ValueBackquote<T>(pub T::ValueRef)
+where
+    T: ValueTypes + ?Sized,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>;
+
+impl<T> ValueBackquote<T>
+where
+    T: ValueTypes + ?Sized,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+{
+    pub fn convert<T2>(&self) -> ValueBackquote<T2>
+    where
+        T2: ValueTypes + ?Sized,
+        for<'a> &'a <T2::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+        for<'a> &'a str: Into<T2::StringRef>,
+        Cons<T2>: Into<T2::ConsRef>,
+        for<'a> &'a <T::SemverTypes as SemverTypes>::Semver:
+            Into<<T2::SemverTypes as SemverTypes>::SemverRef>,
+        Value<T2>: Into<T2::ValueRef>,
+    {
+        ValueBackquote(self.0.borrow().convert().into())
+    }
+}
+
+impl<T1, T2> PartialEq<ValueBackquote<T2>> for ValueBackquote<T1>
+where
+    T1: ValueTypes + ?Sized,
+    T2: ValueTypes + ?Sized,
+    for<'a> &'a <T1::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+    for<'a> &'a <T2::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+    Value<T1>: PartialEq<Value<T2>>,
+{
+    fn eq(&self, rhs: &ValueBackquote<T2>) -> bool {
+        self.0.borrow() == rhs.0.borrow()
+    }
+}
+
+impl<T> Clone for ValueBackquote<T>
+where
+    T: ValueTypes + ?Sized,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+{
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
+#[derive(Debug)]
 pub enum Value<T>
 where
     T: ValueTypes + ?Sized,
@@ -606,6 +656,7 @@ where
     Semver(ValueSemver<T::SemverTypes>),
     LanguageDirective(ValueLanguageDirective<T::StringRef, T::SemverTypes>),
     Function(ValueFunction<T::StringRef>),
+    Backquote(ValueBackquote<T>),
 }
 
 impl<T> Value<T>
@@ -621,6 +672,7 @@ where
         Cons<T2>: Into<T2::ConsRef>,
         for<'a> &'a <T::SemverTypes as SemverTypes>::Semver:
             Into<<T2::SemverTypes as SemverTypes>::SemverRef>,
+        Value<T2>: Into<T2::ValueRef>,
     {
         match self {
             Value::Nil => Value::Nil,
@@ -634,6 +686,7 @@ where
                 Value::LanguageDirective(l.convert::<T2::StringRef, T2::SemverTypes>())
             }
             Value::Function(f) => Value::Function(f.convert::<T2::StringRef>()),
+            Value::Backquote(b) => Value::Backquote(b.convert::<T2>()),
         }
     }
 
@@ -673,6 +726,7 @@ where
             Value::Semver(_) => ValueTypeNonList::Semver,
             Value::LanguageDirective(_) => ValueTypeNonList::LanguageDirective,
             Value::Function(_) => ValueTypeNonList::Function,
+            Value::Backquote(_) => ValueTypeNonList::Backquote,
         }
     }
 }
@@ -706,6 +760,7 @@ where
             Value::Semver(v) => Value::Semver((*v).clone()),
             Value::LanguageDirective(l) => Value::LanguageDirective((*l).clone()),
             Value::Function(f) => Value::Function((*f).clone()),
+            Value::Backquote(b) => Value::Backquote((*b).clone()),
         }
     }
 }
@@ -748,6 +803,7 @@ try_from_value!(T, ValueString<T::StringRef>, Value::String(s) => s);
 try_from_value!(T, ValueSemver<T::SemverTypes>, Value::Semver(v) => v);
 try_from_value!(T, ValueLanguageDirective<T::StringRef, T::SemverTypes>, Value::LanguageDirective(l) => l);
 try_from_value!(T, ValueFunction<T::StringRef>, Value::Function(f) => f);
+try_from_value!(T, ValueBackquote<T>, Value::Backquote(b) => b);
 
 macro_rules! from_value_type {
     ($t:ident, $in:ty, $param:ident -> $result:expr) => {
@@ -772,6 +828,7 @@ from_value_type!(T, ValueString<T::StringRef>, s -> Value::String(s));
 from_value_type!(T, ValueSemver<T::SemverTypes>, v -> Value::Semver(v));
 from_value_type!(T, ValueLanguageDirective<T::StringRef, T::SemverTypes>, l -> Value::LanguageDirective(l));
 from_value_type!(T, ValueFunction<T::StringRef>, f -> Value::Function(f));
+from_value_type!(T, ValueBackquote<T>, b -> Value::Backquote(b));
 
 impl<T1, T2> PartialEq<Value<T2>> for Value<T1>
 where
@@ -797,6 +854,7 @@ where
             (Value::Semver(v1), Value::Semver(v2)) => v1 == v2,
             (Value::LanguageDirective(l1), Value::LanguageDirective(l2)) => l1 == l2,
             (Value::Function(f1), Value::Function(f2)) => f1 == f2,
+            (Value::Backquote(b1), Value::Backquote(b2)) => b1 == b2,
         })
     }
 }
@@ -823,6 +881,7 @@ pub enum ValueTypeNonList {
     Semver,
     LanguageDirective,
     Function,
+    Backquote,
 }
 
 pub trait CompilationResultType<T>: Debug
@@ -1013,6 +1072,7 @@ pub struct ValueTypesRc;
 impl ValueTypes for ValueTypesRc {
     type ConsRef = Rc<Cons<Self>>;
     type StringRef = String;
+    type ValueRef = Box<Value<Self>>;
     type SemverTypes = SemverTypesVec;
 }
 
@@ -1030,6 +1090,7 @@ pub struct ValueTypesStatic;
 impl ValueTypes for ValueTypesStatic {
     type ConsRef = &'static Cons<Self>;
     type StringRef = &'static str;
+    type ValueRef = &'static Value<Self>;
     type SemverTypes = SemverTypesStatic;
 }
 
@@ -1225,6 +1286,20 @@ macro_rules! func {
 macro_rules! v_func {
     ($name:expr) => {
         $crate::Value::<$crate::ValueTypesStatic>::Function(func!($name))
+    };
+}
+
+#[macro_export]
+macro_rules! bq {
+    ($val:expr) => {
+        $crate::ValueBackquote::<$crate::ValueTypesStatic>(&$val)
+    };
+}
+
+#[macro_export]
+macro_rules! v_bq {
+    ($val:expr) => {
+        $crate::Value::<$crate::ValueTypesStatic>::Backquote(bq!($val))
     };
 }
 
@@ -1499,6 +1574,24 @@ mod tests {
     }
 
     #[test]
+    fn test_bq_macro() {
+        const BQ1: super::ValueBackquote<super::ValueTypesStatic> = bq!(v_qsym!("p", "qsym"));
+        assert_eq!(*BQ1.0, v_qsym!("p", "qsym"));
+
+        const BQ2: super::ValueBackquote<super::ValueTypesStatic> = bq!(v_str!("str"));
+        assert_eq!(*BQ2.0, v_str!("str"));
+    }
+
+    #[test]
+    fn test_v_bq_macro() {
+        const BQ: super::Value<super::ValueTypesStatic> = v_bq!(v_bool!(true));
+        match BQ {
+            super::Value::Backquote(super::ValueBackquote(v)) => assert_eq!(*v, v_bool!(true)),
+            _ => panic!("Expected a Value::Backquote"),
+        }
+    }
+
+    #[test]
     fn test_v_list_macro() {
         const LIST1: super::Value<super::ValueTypesStatic> = v_list!();
         assert_eq!(LIST1, super::Value::<super::ValueTypesStatic>::Nil);
@@ -1674,6 +1767,12 @@ mod tests {
         assert_ne!(v_func!(qsym!("p", "f1")), v_func!(qsym!("p", "f2")));
         assert_ne!(v_func!(qsym!("p", "f1")), v_qsym!("p", "f1"));
         assert_ne!(v_func!(qsym!("p", "f1")), v_nil!());
+
+        assert_eq!(v_bq!(v_bool!(true)), v_bq!(v_bool!(true)));
+        assert_ne!(v_bq!(v_bool!(true)), v_bq!(v_bool!(false)));
+        assert_ne!(v_bq!(v_bool!(true)), v_bq!(v_nil!()));
+        assert_ne!(v_bq!(v_bool!(true)), v_bool!(true));
+        assert_ne!(v_bq!(v_bool!(true)), v_nil!());
     }
 
     #[test]
@@ -1766,6 +1865,16 @@ mod tests {
         assert_eq!(
             TryInto::<&ValueFunction<&'static str>>::try_into(&v).unwrap(),
             &func!(qsym!("p", "f1"))
+        );
+        assert_eq!(
+            TryInto::<()>::try_into(&v).unwrap_err().kind,
+            ErrorKind::IncorrectType
+        );
+
+        let v = v_bq!(v_bool!(true));
+        assert_eq!(
+            TryInto::<&ValueBackquote<ValueTypesStatic>>::try_into(&v).unwrap(),
+            &bq!(v_bool!(true))
         );
         assert_eq!(
             TryInto::<()>::try_into(&v).unwrap_err().kind,
@@ -1877,6 +1986,16 @@ mod tests {
             TryInto::<()>::try_into(v).unwrap_err().kind,
             ErrorKind::IncorrectType
         );
+
+        let v = v_bq!(v_bool!(true));
+        assert_eq!(
+            TryInto::<ValueBackquote<ValueTypesStatic>>::try_into(v.clone()).unwrap(),
+            bq!(v_bool!(true))
+        );
+        assert_eq!(
+            TryInto::<()>::try_into(v).unwrap_err().kind,
+            ErrorKind::IncorrectType
+        );
     }
 
     #[test]
@@ -1909,6 +2028,9 @@ mod tests {
 
         let v: Value<ValueTypesStatic> = func!(qsym!("p", "f1")).into();
         assert_eq!(v, v_func!(qsym!("p", "f1")));
+
+        let v: Value<ValueTypesStatic> = bq!(v_bool!(true)).into();
+        assert_eq!(v, v_bq!(v_bool!(true)));
     }
 
     #[test]
