@@ -826,15 +826,9 @@ where
             Value::Semver(_) => ValueTypeNonList::Semver,
             Value::LanguageDirective(_) => ValueTypeNonList::LanguageDirective,
             Value::Function(_) => ValueTypeNonList::Function,
-            Value::Backquote(b) => {
-                ValueTypeNonList::Backquote(BTreeSet::from_iter(vec![b.0.borrow().value_type()]))
-            }
-            Value::Comma(c) => {
-                ValueTypeNonList::Comma(BTreeSet::from_iter(vec![c.0.borrow().value_type()]))
-            }
-            Value::Splice(s) => {
-                ValueTypeNonList::Splice(BTreeSet::from_iter(vec![s.0.borrow().value_type()]))
-            }
+            Value::Backquote(b) => ValueTypeNonList::Backquote(Box::new(b.0.borrow().value_type())),
+            Value::Comma(c) => ValueTypeNonList::Comma(Box::new(c.0.borrow().value_type())),
+            Value::Splice(s) => ValueTypeNonList::Splice(Box::new(s.0.borrow().value_type())),
         }
     }
 }
@@ -997,9 +991,9 @@ pub enum ValueTypeNonList {
     Semver,
     LanguageDirective,
     Function,
-    Backquote(BTreeSet<ValueType>),
-    Comma(BTreeSet<ValueType>),
-    Splice(BTreeSet<ValueType>),
+    Backquote(Box<ValueType>),
+    Comma(Box<ValueType>),
+    Splice(Box<ValueType>),
 }
 
 pub trait CompilationResultType<T>: Debug
@@ -2344,21 +2338,21 @@ mod tests {
         );
         assert_eq!(
             v_bq!(v_qsym!("p", "f1")).value_type(),
-            ValueType::NonList(ValueTypeNonList::Backquote(BTreeSet::from_iter(vec![
-                ValueType::NonList(ValueTypeNonList::QualifiedSymbol)
-            ])))
+            ValueType::NonList(ValueTypeNonList::Backquote(Box::new(ValueType::NonList(
+                ValueTypeNonList::QualifiedSymbol
+            ))))
         );
         assert_eq!(
             v_comma!(v_qsym!("p", "f1")).value_type(),
-            ValueType::NonList(ValueTypeNonList::Comma(BTreeSet::from_iter(vec![
-                ValueType::NonList(ValueTypeNonList::QualifiedSymbol)
-            ])))
+            ValueType::NonList(ValueTypeNonList::Comma(Box::new(ValueType::NonList(
+                ValueTypeNonList::QualifiedSymbol
+            ))))
         );
         assert_eq!(
             v_splice!(v_qsym!("p", "f1")).value_type(),
-            ValueType::NonList(ValueTypeNonList::Splice(BTreeSet::from_iter(vec![
-                ValueType::NonList(ValueTypeNonList::QualifiedSymbol)
-            ])))
+            ValueType::NonList(ValueTypeNonList::Splice(Box::new(ValueType::NonList(
+                ValueTypeNonList::QualifiedSymbol
+            ))))
         );
         assert_eq!(
             v_list!(
