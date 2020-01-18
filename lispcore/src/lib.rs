@@ -776,8 +776,12 @@ where
             Value::Semver(_) => ValueTypeNonList::Semver,
             Value::LanguageDirective(_) => ValueTypeNonList::LanguageDirective,
             Value::Function(_) => ValueTypeNonList::Function,
-            Value::Backquote(_) => ValueTypeNonList::Backquote,
-            Value::Comma(_) => ValueTypeNonList::Comma,
+            Value::Backquote(b) => {
+                ValueTypeNonList::Backquote(BTreeSet::from_iter(vec![b.0.borrow().value_type()]))
+            }
+            Value::Comma(c) => {
+                ValueTypeNonList::Comma(BTreeSet::from_iter(vec![c.0.borrow().value_type()]))
+            }
         }
     }
 }
@@ -936,8 +940,8 @@ pub enum ValueTypeNonList {
     Semver,
     LanguageDirective,
     Function,
-    Backquote,
-    Comma,
+    Backquote(BTreeSet<ValueType>),
+    Comma(BTreeSet<ValueType>),
 }
 
 pub trait CompilationResultType<T>: Debug
@@ -2217,6 +2221,18 @@ mod tests {
         assert_eq!(
             v_func!(qsym!("p", "f1")).value_type(),
             ValueType::NonList(ValueTypeNonList::Function)
+        );
+        assert_eq!(
+            v_bq!(v_qsym!("p", "f1")).value_type(),
+            ValueType::NonList(ValueTypeNonList::Backquote(BTreeSet::from_iter(vec![
+                ValueType::NonList(ValueTypeNonList::QualifiedSymbol)
+            ])))
+        );
+        assert_eq!(
+            v_comma!(v_qsym!("p", "f1")).value_type(),
+            ValueType::NonList(ValueTypeNonList::Comma(BTreeSet::from_iter(vec![
+                ValueType::NonList(ValueTypeNonList::QualifiedSymbol)
+            ])))
         );
         assert_eq!(
             v_list!(
