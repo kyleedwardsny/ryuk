@@ -642,6 +642,54 @@ where
 }
 
 #[derive(Debug)]
+pub struct ValueComma<T>(pub T::ValueRef)
+where
+    T: ValueTypes + ?Sized,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>;
+
+impl<T> ValueComma<T>
+where
+    T: ValueTypes + ?Sized,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+{
+    pub fn convert<T2>(&self) -> ValueComma<T2>
+    where
+        T2: ValueTypes + ?Sized,
+        for<'a> &'a <T2::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+        for<'a> &'a str: Into<T2::StringRef>,
+        Cons<T2>: Into<T2::ConsRef>,
+        for<'a> &'a <T::SemverTypes as SemverTypes>::Semver:
+            Into<<T2::SemverTypes as SemverTypes>::SemverRef>,
+        Value<T2>: Into<T2::ValueRef>,
+    {
+        ValueComma(self.0.borrow().convert().into())
+    }
+}
+
+impl<T1, T2> PartialEq<ValueComma<T2>> for ValueComma<T1>
+where
+    T1: ValueTypes + ?Sized,
+    T2: ValueTypes + ?Sized,
+    for<'a> &'a <T1::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+    for<'a> &'a <T2::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+    Value<T1>: PartialEq<Value<T2>>,
+{
+    fn eq(&self, rhs: &ValueComma<T2>) -> bool {
+        self.0.borrow() == rhs.0.borrow()
+    }
+}
+
+impl<T> Clone for ValueComma<T>
+where
+    T: ValueTypes + ?Sized,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+{
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
+#[derive(Debug)]
 pub enum Value<T>
 where
     T: ValueTypes + ?Sized,
@@ -657,6 +705,7 @@ where
     LanguageDirective(ValueLanguageDirective<T::StringRef, T::SemverTypes>),
     Function(ValueFunction<T::StringRef>),
     Backquote(ValueBackquote<T>),
+    Comma(ValueComma<T>),
 }
 
 impl<T> Value<T>
@@ -687,6 +736,7 @@ where
             }
             Value::Function(f) => Value::Function(f.convert::<T2::StringRef>()),
             Value::Backquote(b) => Value::Backquote(b.convert::<T2>()),
+            Value::Comma(c) => Value::Comma(c.convert::<T2>()),
         }
     }
 
@@ -727,6 +777,7 @@ where
             Value::LanguageDirective(_) => ValueTypeNonList::LanguageDirective,
             Value::Function(_) => ValueTypeNonList::Function,
             Value::Backquote(_) => ValueTypeNonList::Backquote,
+            Value::Comma(_) => ValueTypeNonList::Comma,
         }
     }
 }
@@ -761,6 +812,7 @@ where
             Value::LanguageDirective(l) => Value::LanguageDirective((*l).clone()),
             Value::Function(f) => Value::Function((*f).clone()),
             Value::Backquote(b) => Value::Backquote((*b).clone()),
+            Value::Comma(c) => Value::Comma((*c).clone()),
         }
     }
 }
@@ -804,6 +856,7 @@ try_from_value!(T, ValueSemver<T::SemverTypes>, Value::Semver(v) => v);
 try_from_value!(T, ValueLanguageDirective<T::StringRef, T::SemverTypes>, Value::LanguageDirective(l) => l);
 try_from_value!(T, ValueFunction<T::StringRef>, Value::Function(f) => f);
 try_from_value!(T, ValueBackquote<T>, Value::Backquote(b) => b);
+try_from_value!(T, ValueComma<T>, Value::Comma(c) => c);
 
 macro_rules! from_value_type {
     ($t:ident, $in:ty, $param:ident -> $result:expr) => {
@@ -829,6 +882,7 @@ from_value_type!(T, ValueSemver<T::SemverTypes>, v -> Value::Semver(v));
 from_value_type!(T, ValueLanguageDirective<T::StringRef, T::SemverTypes>, l -> Value::LanguageDirective(l));
 from_value_type!(T, ValueFunction<T::StringRef>, f -> Value::Function(f));
 from_value_type!(T, ValueBackquote<T>, b -> Value::Backquote(b));
+from_value_type!(T, ValueComma<T>, c -> Value::Comma(c));
 
 impl<T1, T2> PartialEq<Value<T2>> for Value<T1>
 where
@@ -855,6 +909,7 @@ where
             (Value::LanguageDirective(l1), Value::LanguageDirective(l2)) => l1 == l2,
             (Value::Function(f1), Value::Function(f2)) => f1 == f2,
             (Value::Backquote(b1), Value::Backquote(b2)) => b1 == b2,
+            (Value::Comma(c1), Value::Comma(c2)) => c1 == c2,
         })
     }
 }
@@ -882,6 +937,7 @@ pub enum ValueTypeNonList {
     LanguageDirective,
     Function,
     Backquote,
+    Comma,
 }
 
 pub trait CompilationResultType<T>: Debug
@@ -1304,6 +1360,20 @@ macro_rules! v_bq {
 }
 
 #[macro_export]
+macro_rules! comma {
+    ($val:expr) => {
+        $crate::ValueComma::<$crate::ValueTypesStatic>(&$val)
+    };
+}
+
+#[macro_export]
+macro_rules! v_comma {
+    ($val:expr) => {
+        $crate::Value::<$crate::ValueTypesStatic>::Comma(comma!($val))
+    };
+}
+
+#[macro_export]
 macro_rules! v_list {
     () => { v_nil!() };
     ($e:expr) => { v_cons!($e, v_nil!()) };
@@ -1592,6 +1662,24 @@ mod tests {
     }
 
     #[test]
+    fn test_comma_macro() {
+        const C1: super::ValueComma<super::ValueTypesStatic> = comma!(v_qsym!("p", "qsym"));
+        assert_eq!(*C1.0, v_qsym!("p", "qsym"));
+
+        const C2: super::ValueComma<super::ValueTypesStatic> = comma!(v_str!("str"));
+        assert_eq!(*C2.0, v_str!("str"));
+    }
+
+    #[test]
+    fn test_v_comma_macro() {
+        const C: super::Value<super::ValueTypesStatic> = v_comma!(v_bool!(true));
+        match C {
+            super::Value::Comma(super::ValueComma(v)) => assert_eq!(*v, v_bool!(true)),
+            _ => panic!("Expected a Value::Comma"),
+        }
+    }
+
+    #[test]
     fn test_v_list_macro() {
         const LIST1: super::Value<super::ValueTypesStatic> = v_list!();
         assert_eq!(LIST1, super::Value::<super::ValueTypesStatic>::Nil);
@@ -1773,6 +1861,13 @@ mod tests {
         assert_ne!(v_bq!(v_bool!(true)), v_bq!(v_nil!()));
         assert_ne!(v_bq!(v_bool!(true)), v_bool!(true));
         assert_ne!(v_bq!(v_bool!(true)), v_nil!());
+
+        assert_eq!(v_comma!(v_bool!(true)), v_comma!(v_bool!(true)));
+        assert_ne!(v_comma!(v_bool!(true)), v_comma!(v_bool!(false)));
+        assert_ne!(v_comma!(v_bool!(true)), v_comma!(v_nil!()));
+        assert_ne!(v_comma!(v_bool!(true)), v_bool!(true));
+        assert_ne!(v_comma!(v_bool!(true)), v_bq!(v_bool!(true)));
+        assert_ne!(v_comma!(v_bool!(true)), v_nil!());
     }
 
     #[test]
@@ -1875,6 +1970,16 @@ mod tests {
         assert_eq!(
             TryInto::<&ValueBackquote<ValueTypesStatic>>::try_into(&v).unwrap(),
             &bq!(v_bool!(true))
+        );
+        assert_eq!(
+            TryInto::<()>::try_into(&v).unwrap_err().kind,
+            ErrorKind::IncorrectType
+        );
+
+        let v = v_comma!(v_bool!(true));
+        assert_eq!(
+            TryInto::<&ValueComma<ValueTypesStatic>>::try_into(&v).unwrap(),
+            &comma!(v_bool!(true))
         );
         assert_eq!(
             TryInto::<()>::try_into(&v).unwrap_err().kind,
@@ -1996,6 +2101,16 @@ mod tests {
             TryInto::<()>::try_into(v).unwrap_err().kind,
             ErrorKind::IncorrectType
         );
+
+        let v = v_comma!(v_bool!(true));
+        assert_eq!(
+            TryInto::<ValueComma<ValueTypesStatic>>::try_into(v.clone()).unwrap(),
+            comma!(v_bool!(true))
+        );
+        assert_eq!(
+            TryInto::<()>::try_into(v).unwrap_err().kind,
+            ErrorKind::IncorrectType
+        );
     }
 
     #[test]
@@ -2031,6 +2146,9 @@ mod tests {
 
         let v: Value<ValueTypesStatic> = bq!(v_bool!(true)).into();
         assert_eq!(v, v_bq!(v_bool!(true)));
+
+        let v: Value<ValueTypesStatic> = comma!(v_bool!(true)).into();
+        assert_eq!(v, v_comma!(v_bool!(true)));
     }
 
     #[test]
