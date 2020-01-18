@@ -690,6 +690,54 @@ where
 }
 
 #[derive(Debug)]
+pub struct ValueSplice<T>(pub T::ValueRef)
+where
+    T: ValueTypes + ?Sized,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>;
+
+impl<T> ValueSplice<T>
+where
+    T: ValueTypes + ?Sized,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+{
+    pub fn convert<T2>(&self) -> ValueSplice<T2>
+    where
+        T2: ValueTypes + ?Sized,
+        for<'a> &'a <T2::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+        for<'a> &'a str: Into<T2::StringRef>,
+        Cons<T2>: Into<T2::ConsRef>,
+        for<'a> &'a <T::SemverTypes as SemverTypes>::Semver:
+            Into<<T2::SemverTypes as SemverTypes>::SemverRef>,
+        Value<T2>: Into<T2::ValueRef>,
+    {
+        ValueSplice(self.0.borrow().convert().into())
+    }
+}
+
+impl<T1, T2> PartialEq<ValueSplice<T2>> for ValueSplice<T1>
+where
+    T1: ValueTypes + ?Sized,
+    T2: ValueTypes + ?Sized,
+    for<'a> &'a <T1::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+    for<'a> &'a <T2::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+    Value<T1>: PartialEq<Value<T2>>,
+{
+    fn eq(&self, rhs: &ValueSplice<T2>) -> bool {
+        self.0.borrow() == rhs.0.borrow()
+    }
+}
+
+impl<T> Clone for ValueSplice<T>
+where
+    T: ValueTypes + ?Sized,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+{
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
+#[derive(Debug)]
 pub enum Value<T>
 where
     T: ValueTypes + ?Sized,
@@ -706,6 +754,7 @@ where
     Function(ValueFunction<T::StringRef>),
     Backquote(ValueBackquote<T>),
     Comma(ValueComma<T>),
+    Splice(ValueSplice<T>),
 }
 
 impl<T> Value<T>
@@ -737,6 +786,7 @@ where
             Value::Function(f) => Value::Function(f.convert::<T2::StringRef>()),
             Value::Backquote(b) => Value::Backquote(b.convert::<T2>()),
             Value::Comma(c) => Value::Comma(c.convert::<T2>()),
+            Value::Splice(s) => Value::Splice(s.convert::<T2>()),
         }
     }
 
@@ -782,6 +832,9 @@ where
             Value::Comma(c) => {
                 ValueTypeNonList::Comma(BTreeSet::from_iter(vec![c.0.borrow().value_type()]))
             }
+            Value::Splice(s) => {
+                ValueTypeNonList::Splice(BTreeSet::from_iter(vec![s.0.borrow().value_type()]))
+            }
         }
     }
 }
@@ -817,6 +870,7 @@ where
             Value::Function(f) => Value::Function((*f).clone()),
             Value::Backquote(b) => Value::Backquote((*b).clone()),
             Value::Comma(c) => Value::Comma((*c).clone()),
+            Value::Splice(s) => Value::Splice((*s).clone()),
         }
     }
 }
@@ -861,6 +915,7 @@ try_from_value!(T, ValueLanguageDirective<T::StringRef, T::SemverTypes>, Value::
 try_from_value!(T, ValueFunction<T::StringRef>, Value::Function(f) => f);
 try_from_value!(T, ValueBackquote<T>, Value::Backquote(b) => b);
 try_from_value!(T, ValueComma<T>, Value::Comma(c) => c);
+try_from_value!(T, ValueSplice<T>, Value::Splice(s) => s);
 
 macro_rules! from_value_type {
     ($t:ident, $in:ty, $param:ident -> $result:expr) => {
@@ -887,6 +942,7 @@ from_value_type!(T, ValueLanguageDirective<T::StringRef, T::SemverTypes>, l -> V
 from_value_type!(T, ValueFunction<T::StringRef>, f -> Value::Function(f));
 from_value_type!(T, ValueBackquote<T>, b -> Value::Backquote(b));
 from_value_type!(T, ValueComma<T>, c -> Value::Comma(c));
+from_value_type!(T, ValueSplice<T>, s -> Value::Splice(s));
 
 impl<T1, T2> PartialEq<Value<T2>> for Value<T1>
 where
@@ -914,6 +970,7 @@ where
             (Value::Function(f1), Value::Function(f2)) => f1 == f2,
             (Value::Backquote(b1), Value::Backquote(b2)) => b1 == b2,
             (Value::Comma(c1), Value::Comma(c2)) => c1 == c2,
+            (Value::Splice(s1), Value::Splice(s2)) => s1 == s2,
         })
     }
 }
@@ -942,6 +999,7 @@ pub enum ValueTypeNonList {
     Function,
     Backquote(BTreeSet<ValueType>),
     Comma(BTreeSet<ValueType>),
+    Splice(BTreeSet<ValueType>),
 }
 
 pub trait CompilationResultType<T>: Debug
@@ -1378,6 +1436,20 @@ macro_rules! v_comma {
 }
 
 #[macro_export]
+macro_rules! splice {
+    ($val:expr) => {
+        $crate::ValueSplice::<$crate::ValueTypesStatic>(&$val)
+    };
+}
+
+#[macro_export]
+macro_rules! v_splice {
+    ($val:expr) => {
+        $crate::Value::<$crate::ValueTypesStatic>::Splice(splice!($val))
+    };
+}
+
+#[macro_export]
 macro_rules! v_list {
     () => { v_nil!() };
     ($e:expr) => { v_cons!($e, v_nil!()) };
@@ -1684,6 +1756,24 @@ mod tests {
     }
 
     #[test]
+    fn test_splice_macro() {
+        const S1: super::ValueSplice<super::ValueTypesStatic> = splice!(v_qsym!("p", "qsym"));
+        assert_eq!(*S1.0, v_qsym!("p", "qsym"));
+
+        const S2: super::ValueSplice<super::ValueTypesStatic> = splice!(v_str!("str"));
+        assert_eq!(*S2.0, v_str!("str"));
+    }
+
+    #[test]
+    fn test_v_splice_macro() {
+        const S: super::Value<super::ValueTypesStatic> = v_splice!(v_bool!(true));
+        match S {
+            super::Value::Splice(super::ValueSplice(v)) => assert_eq!(*v, v_bool!(true)),
+            _ => panic!("Expected a Value::Splice"),
+        }
+    }
+
+    #[test]
     fn test_v_list_macro() {
         const LIST1: super::Value<super::ValueTypesStatic> = v_list!();
         assert_eq!(LIST1, super::Value::<super::ValueTypesStatic>::Nil);
@@ -1872,6 +1962,13 @@ mod tests {
         assert_ne!(v_comma!(v_bool!(true)), v_bool!(true));
         assert_ne!(v_comma!(v_bool!(true)), v_bq!(v_bool!(true)));
         assert_ne!(v_comma!(v_bool!(true)), v_nil!());
+
+        assert_eq!(v_splice!(v_bool!(true)), v_splice!(v_bool!(true)));
+        assert_ne!(v_splice!(v_bool!(true)), v_splice!(v_bool!(false)));
+        assert_ne!(v_splice!(v_bool!(true)), v_splice!(v_nil!()));
+        assert_ne!(v_splice!(v_bool!(true)), v_bool!(true));
+        assert_ne!(v_splice!(v_bool!(true)), v_bq!(v_bool!(true)));
+        assert_ne!(v_splice!(v_bool!(true)), v_nil!());
     }
 
     #[test]
@@ -1984,6 +2081,16 @@ mod tests {
         assert_eq!(
             TryInto::<&ValueComma<ValueTypesStatic>>::try_into(&v).unwrap(),
             &comma!(v_bool!(true))
+        );
+        assert_eq!(
+            TryInto::<()>::try_into(&v).unwrap_err().kind,
+            ErrorKind::IncorrectType
+        );
+
+        let v = v_splice!(v_bool!(true));
+        assert_eq!(
+            TryInto::<&ValueSplice<ValueTypesStatic>>::try_into(&v).unwrap(),
+            &splice!(v_bool!(true))
         );
         assert_eq!(
             TryInto::<()>::try_into(&v).unwrap_err().kind,
@@ -2115,6 +2222,16 @@ mod tests {
             TryInto::<()>::try_into(v).unwrap_err().kind,
             ErrorKind::IncorrectType
         );
+
+        let v = v_splice!(v_bool!(true));
+        assert_eq!(
+            TryInto::<ValueSplice<ValueTypesStatic>>::try_into(v.clone()).unwrap(),
+            splice!(v_bool!(true))
+        );
+        assert_eq!(
+            TryInto::<()>::try_into(v).unwrap_err().kind,
+            ErrorKind::IncorrectType
+        );
     }
 
     #[test]
@@ -2153,6 +2270,9 @@ mod tests {
 
         let v: Value<ValueTypesStatic> = comma!(v_bool!(true)).into();
         assert_eq!(v, v_comma!(v_bool!(true)));
+
+        let v: Value<ValueTypesStatic> = splice!(v_bool!(true)).into();
+        assert_eq!(v, v_splice!(v_bool!(true)));
     }
 
     #[test]
@@ -2231,6 +2351,12 @@ mod tests {
         assert_eq!(
             v_comma!(v_qsym!("p", "f1")).value_type(),
             ValueType::NonList(ValueTypeNonList::Comma(BTreeSet::from_iter(vec![
+                ValueType::NonList(ValueTypeNonList::QualifiedSymbol)
+            ])))
+        );
+        assert_eq!(
+            v_splice!(v_qsym!("p", "f1")).value_type(),
+            ValueType::NonList(ValueTypeNonList::Splice(BTreeSet::from_iter(vec![
                 ValueType::NonList(ValueTypeNonList::QualifiedSymbol)
             ])))
         );
