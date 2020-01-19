@@ -833,6 +833,7 @@ where
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
 pub enum ListItem<T> {
     Item(T),
     List(T),
@@ -858,6 +859,15 @@ impl<T> ListItem<T> {
             Self::List(v) => v,
             _ => panic!("Expected ListItem::List"),
         }
+    }
+}
+
+impl<T, E> ListItem<std::result::Result<T, E>> {
+    pub fn transpose(self) -> std::result::Result<ListItem<T>, E> {
+        std::result::Result::Ok(match self {
+            ListItem::Item(item) => ListItem::Item(item?),
+            ListItem::List(list) => ListItem::List(list?),
+        })
     }
 }
 
@@ -2329,6 +2339,23 @@ mod tests {
 
         let v: Value<ValueTypesStatic> = splice!(v_bool!(true)).into();
         assert_eq!(v, v_splice!(v_bool!(true)));
+    }
+
+    #[test]
+    fn test_list_item_transpose() {
+        use super::*;
+
+        let item = ListItem::<std::result::Result<bool, ()>>::Item(std::result::Result::Ok(true));
+        assert_eq!(item.transpose().unwrap(), ListItem::Item(true));
+
+        let item = ListItem::<std::result::Result<bool, ()>>::Item(std::result::Result::Err(()));
+        assert_eq!(item.transpose().unwrap_err(), ());
+
+        let list = ListItem::<std::result::Result<bool, ()>>::List(std::result::Result::Ok(true));
+        assert_eq!(list.transpose().unwrap(), ListItem::List(true));
+
+        let list = ListItem::<std::result::Result<bool, ()>>::List(std::result::Result::Err(()));
+        assert_eq!(list.transpose().unwrap_err(), ());
     }
 
     #[test]
