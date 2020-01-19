@@ -2408,6 +2408,9 @@ mod tests {
         .unwrap();
         assert_eq!(v, v_bool!(true));
 
+        let v = concat_lists::<ValueTypesRc, _>(vec![v_bool!(true).convert()].into_iter()).unwrap();
+        assert_eq!(v, v_bool!(true));
+
         let v = concat_lists::<ValueTypesRc, _>(vec![v_list!(v_str!("str")).convert()].into_iter())
             .unwrap();
         assert_eq!(v, v_list!(v_str!("str")));
