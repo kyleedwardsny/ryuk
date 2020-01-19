@@ -861,6 +861,20 @@ impl<T> ListItem<T> {
         }
     }
 
+    pub fn as_ref(&self) -> ListItem<&T> {
+        match self {
+            Self::Item(item) => ListItem::Item(item),
+            Self::List(list) => ListItem::List(list),
+        }
+    }
+
+    pub fn as_mut(&mut self) -> ListItem<&mut T> {
+        match self {
+            Self::Item(item) => ListItem::Item(item),
+            Self::List(list) => ListItem::List(list),
+        }
+    }
+
     pub fn map<U>(self, f: impl FnOnce(T) -> U) -> ListItem<U> {
         match self {
             Self::Item(item) => ListItem::Item(f(item)),
@@ -1027,28 +1041,37 @@ where
     }
 }
 
-fn concat_lists_recursive<T, I>(mut list: Value<T>, mut rest: I) -> Result<Value<T>>
+fn concat_lists_recursive<T, I>(list_item: ListItem<Value<T>>, mut rest: I) -> Result<Value<T>>
 where
     T: ValueTypes + ?Sized,
     for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
     Cons<T>: Into<T::ConsRef>,
-    I: Iterator<Item = Value<T>>,
+    I: Iterator<Item = ListItem<Value<T>>>,
 {
-    match list.next() {
-        Option::Some(ListItem::Item(item)) => Result::Ok(Value::Cons(ValueCons(
+    match list_item {
+        ListItem::Item(item) => Result::Ok(Value::Cons(ValueCons(
             Cons {
                 car: item,
-                cdr: concat_lists_recursive(list, rest)?,
+                cdr: concat_lists(rest)?,
             }
             .into(),
         ))),
-        Option::Some(ListItem::List(tail)) => match rest.next() {
-            Option::None => Result::Ok(tail),
-            _ => Result::Err(Error::new(ErrorKind::IncorrectType, "Incorrect type")),
-        },
-        Option::None => match rest.next() {
-            Option::None => Result::Ok(Value::Nil),
-            Option::Some(list) => concat_lists_recursive(list, rest),
+        ListItem::List(mut list) => match list.next() {
+            Option::Some(ListItem::Item(item)) => Result::Ok(Value::Cons(ValueCons(
+                Cons {
+                    car: item,
+                    cdr: concat_lists_recursive(ListItem::List(list), rest)?,
+                }
+                .into(),
+            ))),
+            Option::Some(ListItem::List(tail)) => match rest.next() {
+                Option::None => Result::Ok(tail),
+                _ => Result::Err(Error::new(ErrorKind::IncorrectType, "Incorrect type")),
+            },
+            Option::None => match rest.next() {
+                Option::None => Result::Ok(Value::Nil),
+                Option::Some(list) => concat_lists_recursive(list, rest),
+            },
         },
     }
 }
@@ -1058,7 +1081,7 @@ where
     T: ValueTypes + ?Sized,
     for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
     Cons<T>: Into<T::ConsRef>,
-    I: Iterator<Item = Value<T>>,
+    I: Iterator<Item = ListItem<Value<T>>>,
 {
     match lists.next() {
         Option::Some(v) => concat_lists_recursive(v, lists),
@@ -1167,7 +1190,7 @@ where
 }
 
 #[derive(Debug)]
-pub struct ConcatenateLists<T>(Vec<Box<dyn CompilationResultType<T>>>)
+pub struct ConcatenateLists<T>(Vec<ListItem<Box<dyn CompilationResultType<T>>>>)
 where
     T: ValueTypes + ?Sized,
     for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>;
@@ -1177,7 +1200,7 @@ where
     T: ValueTypes + ?Sized,
     for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
 {
-    pub fn new(items: Vec<Box<dyn CompilationResultType<T>>>) -> Self {
+    pub fn new(items: Vec<ListItem<Box<dyn CompilationResultType<T>>>>) -> Self {
         Self(items)
     }
 }
@@ -1191,7 +1214,7 @@ where
     fn evaluate(&mut self, env: &mut dyn Environment<T>) -> Result<Value<T>> {
         let mut items = Vec::new();
         for item in &mut self.0 {
-            items.push(item.evaluate(env)?);
+            items.push(item.as_mut().map(|comp| comp.evaluate(env)).transpose()?);
         }
         concat_lists(items.into_iter())
     }
@@ -2413,59 +2436,50 @@ mod tests {
 
         let v = concat_lists::<ValueTypesRc, _>(
             vec![
-                v_list!(v_str!("str"), v_bool!(true), v_qsym!("p", "qsym")).convert(),
-                v_list!(v_uqsym!("uqsym"), v_v![1, 0]).convert(),
-                v_list!(v_bool!(false), v_str!("Hello")).convert(),
+                ListItem::List(v_list!(v_str!("str"), v_bool!(true)).convert()),
+                ListItem::Item(v_list!(v_str!("str"), v_bool!(true)).convert()),
+                ListItem::List(v_uqsym!("uqsym").convert()),
             ]
             .into_iter(),
         )
         .unwrap();
         assert_eq!(
             v,
-            v_list!(
+            v_cons!(
                 v_str!("str"),
-                v_bool!(true),
-                v_qsym!("p", "qsym"),
-                v_uqsym!("uqsym"),
-                v_v![1, 0],
-                v_bool!(false),
-                v_str!("Hello")
+                v_cons!(
+                    v_bool!(true),
+                    v_cons!(v_list!(v_str!("str"), v_bool!(true)), v_uqsym!("uqsym"))
+                )
             )
         );
 
         let v = concat_lists::<ValueTypesRc, _>(
-            vec![v_list!(v_str!("str")).convert(), v_bool!(true).convert()].into_iter(),
+            vec![
+                ListItem::Item(v_bool!(true).convert()),
+                ListItem::Item(v_bool!(false).convert()),
+            ]
+            .into_iter(),
         )
         .unwrap();
-        assert_eq!(v, v_cons!(v_str!("str"), v_bool!(true)));
+        assert_eq!(v, v_list!(v_bool!(true), v_bool!(false)));
 
         let v = concat_lists::<ValueTypesRc, _>(
-            vec![v_list!().convert(), v_bool!(true).convert()].into_iter(),
+            vec![ListItem::List(v_bool!(true).convert())].into_iter(),
         )
         .unwrap();
         assert_eq!(v, v_bool!(true));
 
-        let v = concat_lists::<ValueTypesRc, _>(vec![v_bool!(true).convert()].into_iter()).unwrap();
-        assert_eq!(v, v_bool!(true));
-
-        let v = concat_lists::<ValueTypesRc, _>(vec![v_list!(v_str!("str")).convert()].into_iter())
-            .unwrap();
-        assert_eq!(v, v_list!(v_str!("str")));
-
-        let v = concat_lists::<ValueTypesRc, _>(vec![v_list!().convert()].into_iter()).unwrap();
-        assert_eq!(v, v_list!());
-
         let v = concat_lists::<ValueTypesRc, _>(vec![].into_iter()).unwrap();
-        assert_eq!(v, v_list!());
+        assert_eq!(v, v_nil!());
 
         assert_eq!(
             concat_lists::<ValueTypesRc, _>(
                 vec![
-                    v_list!(v_str!("str")).convert(),
-                    v_bool!(true).convert(),
-                    v_bool!(true).convert(),
+                    ListItem::List(v_bool!(true).convert()),
+                    ListItem::List(v_bool!(true).convert()),
                 ]
-                .into_iter()
+                .into_iter(),
             )
             .unwrap_err()
             .kind,
@@ -2744,8 +2758,8 @@ mod tests {
         let mut env = SimpleEnvironment;
 
         let mut comp = ConcatenateLists::new(vec![
-            Box::new(Literal::new(v_list!(v_str!("str")).convert())),
-            Box::new(Literal::new(v_list!(v_bool!(true)).convert())),
+            ListItem::List(Box::new(Literal::new(v_list!(v_str!("str")).convert()))),
+            ListItem::List(Box::new(Literal::new(v_list!(v_bool!(true)).convert()))),
         ]);
         assert_eq!(
             comp.evaluate(&mut env).unwrap(),
@@ -2753,8 +2767,8 @@ mod tests {
         );
 
         let mut comp = ConcatenateLists::new(vec![
-            Box::new(Literal::new(v_list!(v_str!("str")).convert())),
-            Box::new(Literal::new(v_bool!(true).convert())),
+            ListItem::Item(Box::new(Literal::new(v_str!("str").convert()))),
+            ListItem::List(Box::new(Literal::new(v_bool!(true).convert()))),
         ]);
         assert_eq!(
             comp.evaluate(&mut env).unwrap(),
@@ -2762,8 +2776,8 @@ mod tests {
         );
 
         let mut comp = ConcatenateLists::new(vec![
-            Box::new(Literal::new(v_str!("str").convert())),
-            Box::new(Literal::new(v_bool!(true).convert())),
+            ListItem::List(Box::new(Literal::new(v_str!("str").convert()))),
+            ListItem::List(Box::new(Literal::new(v_bool!(true).convert()))),
         ]);
         assert_eq!(
             comp.evaluate(&mut env).unwrap_err().kind,
