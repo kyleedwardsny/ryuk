@@ -1018,7 +1018,7 @@ where
     }
 }
 
-pub fn concat_lists<T, I>(mut list: Value<T>, mut rest: I) -> Result<Value<T>>
+fn concat_lists_recursive<T, I>(mut list: Value<T>, mut rest: I) -> Result<Value<T>>
 where
     T: ValueTypes + ?Sized,
     for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
@@ -1029,7 +1029,7 @@ where
         Option::Some(ListItem::Item(item)) => Result::Ok(Value::Cons(ValueCons(
             Cons {
                 car: item,
-                cdr: concat_lists(list, rest)?,
+                cdr: concat_lists_recursive(list, rest)?,
             }
             .into(),
         ))),
@@ -1039,8 +1039,21 @@ where
         },
         Option::None => match rest.next() {
             Option::None => Result::Ok(Value::Nil),
-            Option::Some(list) => concat_lists(list, rest),
+            Option::Some(list) => concat_lists_recursive(list, rest),
         },
+    }
+}
+
+pub fn concat_lists<T, I>(mut lists: I) -> Result<Value<T>>
+where
+    T: ValueTypes + ?Sized,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+    Cons<T>: Into<T::ConsRef>,
+    I: Iterator<Item = Value<T>>,
+{
+    match lists.next() {
+        Option::Some(v) => concat_lists_recursive(v, lists),
+        Option::None => Result::Ok(Value::Nil),
     }
 }
 
@@ -2298,8 +2311,8 @@ mod tests {
         use super::*;
 
         let v = concat_lists::<ValueTypesRc, _>(
-            v_list!(v_str!("str"), v_bool!(true), v_qsym!("p", "qsym")).convert(),
             vec![
+                v_list!(v_str!("str"), v_bool!(true), v_qsym!("p", "qsym")).convert(),
                 v_list!(v_uqsym!("uqsym"), v_v![1, 0]).convert(),
                 v_list!(v_bool!(false), v_str!("Hello")).convert(),
             ]
@@ -2320,31 +2333,35 @@ mod tests {
         );
 
         let v = concat_lists::<ValueTypesRc, _>(
-            v_list!(v_str!("str")).convert(),
-            vec![v_bool!(true).convert()].into_iter(),
+            vec![v_list!(v_str!("str")).convert(), v_bool!(true).convert()].into_iter(),
         )
         .unwrap();
         assert_eq!(v, v_cons!(v_str!("str"), v_bool!(true)));
 
         let v = concat_lists::<ValueTypesRc, _>(
-            v_list!().convert(),
-            vec![v_bool!(true).convert()].into_iter(),
+            vec![v_list!().convert(), v_bool!(true).convert()].into_iter(),
         )
         .unwrap();
         assert_eq!(v, v_bool!(true));
 
-        let v =
-            concat_lists::<ValueTypesRc, _>(v_list!(v_str!("str")).convert(), vec![].into_iter())
-                .unwrap();
+        let v = concat_lists::<ValueTypesRc, _>(vec![v_list!(v_str!("str")).convert()].into_iter())
+            .unwrap();
         assert_eq!(v, v_list!(v_str!("str")));
 
-        let v = concat_lists::<ValueTypesRc, _>(v_list!().convert(), vec![].into_iter()).unwrap();
+        let v = concat_lists::<ValueTypesRc, _>(vec![v_list!().convert()].into_iter()).unwrap();
+        assert_eq!(v, v_list!());
+
+        let v = concat_lists::<ValueTypesRc, _>(vec![].into_iter()).unwrap();
         assert_eq!(v, v_list!());
 
         assert_eq!(
             concat_lists::<ValueTypesRc, _>(
-                v_list!(v_str!("str")).convert(),
-                vec![v_bool!(true).convert(), v_bool!(true).convert(),].into_iter()
+                vec![
+                    v_list!(v_str!("str")).convert(),
+                    v_bool!(true).convert(),
+                    v_bool!(true).convert(),
+                ]
+                .into_iter()
             )
             .unwrap_err()
             .kind,
