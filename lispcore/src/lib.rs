@@ -803,7 +803,7 @@ where
                         ListItem::Item(i) => {
                             l.items.insert(i.value_type());
                         }
-                        ListItem::Tail(t) => {
+                        ListItem::List(t) => {
                             l.tail.clear();
                             l.tail.insert(t.value_type_non_list());
                         }
@@ -833,38 +833,30 @@ where
     }
 }
 
-pub enum ListItem<T>
-where
-    T: ValueTypes + ?Sized,
-    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
-{
-    Item(Value<T>),
-    Tail(Value<T>),
+pub enum ListItem<T> {
+    Item(T),
+    List(T),
 }
 
-impl<T> ListItem<T>
-where
-    T: ValueTypes + ?Sized,
-    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
-{
-    pub fn try_unwrap_item(self) -> Result<Value<T>> {
+impl<T> ListItem<T> {
+    pub fn try_unwrap_item(self) -> Result<T> {
         match self {
             Self::Item(v) => Result::Ok(v),
             _ => Result::Err(Error::new(ErrorKind::IncorrectType, "Incorrect type")),
         }
     }
 
-    pub fn unwrap_item(self) -> Value<T> {
+    pub fn unwrap_item(self) -> T {
         match self {
             Self::Item(v) => v,
             _ => panic!("Expected ListItem::Item"),
         }
     }
 
-    pub fn unwrap_tail(self) -> Value<T> {
+    pub fn unwrap_list(self) -> T {
         match self {
-            Self::Tail(v) => v,
-            _ => panic!("Expected ListItem::Tail"),
+            Self::List(v) => v,
+            _ => panic!("Expected ListItem::List"),
         }
     }
 }
@@ -874,7 +866,7 @@ where
     T: ValueTypes + ?Sized,
     for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
 {
-    type Item = ListItem<T>;
+    type Item = ListItem<Value<T>>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self {
@@ -889,7 +881,7 @@ where
             _ => {
                 let mut result = Value::Nil;
                 std::mem::swap(self, &mut result);
-                Option::Some(ListItem::Tail(result))
+                Option::Some(ListItem::List(result))
             }
         }
     }
@@ -1033,7 +1025,7 @@ where
             }
             .into(),
         ))),
-        Option::Some(ListItem::Tail(tail)) => match rest.next() {
+        Option::Some(ListItem::List(tail)) => match rest.next() {
             Option::None => Result::Ok(tail),
             _ => Result::Err(Error::new(ErrorKind::IncorrectType, "Incorrect type")),
         },
@@ -2352,7 +2344,7 @@ mod tests {
 
         let mut i = v_cons!(v_uqsym!("uqsym"), v_bool!(true));
         assert_eq!(i.next().unwrap().unwrap_item(), v_uqsym!("uqsym"));
-        assert_eq!(i.next().unwrap().unwrap_tail(), v_bool!(true));
+        assert_eq!(i.next().unwrap().unwrap_list(), v_bool!(true));
         assert!(i.next().is_none());
         assert_eq!(i, v_nil!());
 
