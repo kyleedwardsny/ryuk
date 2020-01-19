@@ -1158,13 +1158,10 @@ where
 }
 
 #[derive(Debug)]
-pub struct ConcatenateLists<T>
+pub struct ConcatenateLists<T>(Vec<Box<dyn CompilationResultType<T>>>)
 where
     T: ValueTypes + ?Sized,
-    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
-{
-    items: Vec<Box<dyn CompilationResultType<T>>>,
-}
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>;
 
 impl<T> ConcatenateLists<T>
 where
@@ -1172,7 +1169,7 @@ where
     for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
 {
     pub fn new(items: Vec<Box<dyn CompilationResultType<T>>>) -> Self {
-        Self { items }
+        Self(items)
     }
 }
 
@@ -1184,10 +1181,43 @@ where
 {
     fn evaluate(&mut self, env: &mut dyn Environment<T>) -> Result<Value<T>> {
         let mut items = Vec::new();
-        for item in &mut self.items {
+        for item in &mut self.0 {
             items.push(item.evaluate(env)?);
         }
         concat_lists(items.into_iter())
+    }
+}
+
+#[derive(Debug)]
+pub struct WrapInList<T>(Box<dyn CompilationResultType<T>>)
+where
+    T: ValueTypes + ?Sized,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>;
+
+impl<T> WrapInList<T>
+where
+    T: ValueTypes + ?Sized,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+{
+    pub fn new(item: Box<dyn CompilationResultType<T>>) -> Self {
+        Self(item)
+    }
+}
+
+impl<T> CompilationResultType<T> for WrapInList<T>
+where
+    T: ValueTypes + ?Sized + 'static,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+    Cons<T>: Into<T::ConsRef>,
+{
+    fn evaluate(&mut self, env: &mut dyn Environment<T>) -> Result<Value<T>> {
+        Result::Ok(Value::Cons(ValueCons(
+            Cons {
+                car: self.0.evaluate(env)?,
+                cdr: Value::Nil,
+            }
+            .into(),
+        )))
     }
 }
 
@@ -2699,6 +2729,19 @@ mod tests {
             comp.evaluate(&mut env).unwrap_err().kind,
             ErrorKind::IncorrectType
         );
+    }
+
+    #[test]
+    fn test_evaluate_wrap_in_list() {
+        use super::*;
+
+        let mut env = SimpleEnvironment;
+
+        let mut comp = WrapInList::new(Box::new(Literal::new(v_bool!(true).convert())));
+        assert_eq!(comp.evaluate(&mut env).unwrap(), v_list!(v_bool!(true)));
+
+        let mut comp = WrapInList::new(Box::new(Literal::new(v_str!("str").convert())));
+        assert_eq!(comp.evaluate(&mut env).unwrap(), v_list!(v_str!("str")));
     }
 
     #[test]
