@@ -1158,6 +1158,40 @@ where
 }
 
 #[derive(Debug)]
+pub struct ConcatenateLists<T>
+where
+    T: ValueTypes + ?Sized,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+{
+    items: Vec<Box<dyn CompilationResultType<T>>>,
+}
+
+impl<T> ConcatenateLists<T>
+where
+    T: ValueTypes + ?Sized,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+{
+    pub fn new(items: Vec<Box<dyn CompilationResultType<T>>>) -> Self {
+        Self { items }
+    }
+}
+
+impl<T> CompilationResultType<T> for ConcatenateLists<T>
+where
+    T: ValueTypes + ?Sized + 'static,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+    Cons<T>: Into<T::ConsRef>,
+{
+    fn evaluate(&mut self, env: &mut dyn Environment<T>) -> Result<Value<T>> {
+        let mut items = Vec::new();
+        for item in &mut self.items {
+            items.push(item.evaluate(env)?);
+        }
+        concat_lists(items.into_iter())
+    }
+}
+
+#[derive(Debug)]
 pub struct CompilationResult<T>
 where
     T: ValueTypes + ?Sized,
@@ -2631,6 +2665,40 @@ mod tests {
             vec![Box::new(Literal::new(v_bool!(true).convert()))],
         );
         assert_eq!(comp.evaluate(&mut env).unwrap(), v_bool!(true));
+    }
+
+    #[test]
+    fn test_evaluate_concatenate_lists() {
+        use super::*;
+
+        let mut env = SimpleEnvironment;
+
+        let mut comp = ConcatenateLists::new(vec![
+            Box::new(Literal::new(v_list!(v_str!("str")).convert())),
+            Box::new(Literal::new(v_list!(v_bool!(true)).convert())),
+        ]);
+        assert_eq!(
+            comp.evaluate(&mut env).unwrap(),
+            v_list!(v_str!("str"), v_bool!(true))
+        );
+
+        let mut comp = ConcatenateLists::new(vec![
+            Box::new(Literal::new(v_list!(v_str!("str")).convert())),
+            Box::new(Literal::new(v_bool!(true).convert())),
+        ]);
+        assert_eq!(
+            comp.evaluate(&mut env).unwrap(),
+            v_cons!(v_str!("str"), v_bool!(true))
+        );
+
+        let mut comp = ConcatenateLists::new(vec![
+            Box::new(Literal::new(v_str!("str").convert())),
+            Box::new(Literal::new(v_bool!(true).convert())),
+        ]);
+        assert_eq!(
+            comp.evaluate(&mut env).unwrap_err().kind,
+            ErrorKind::IncorrectType
+        );
     }
 
     #[test]
