@@ -842,22 +842,29 @@ pub enum ListItem<T> {
 impl<T> ListItem<T> {
     pub fn try_unwrap_item(self) -> Result<T> {
         match self {
-            Self::Item(v) => Result::Ok(v),
+            Self::Item(item) => Result::Ok(item),
             _ => Result::Err(Error::new(ErrorKind::IncorrectType, "Incorrect type")),
         }
     }
 
     pub fn unwrap_item(self) -> T {
         match self {
-            Self::Item(v) => v,
+            Self::Item(item) => item,
             _ => panic!("Expected ListItem::Item"),
         }
     }
 
     pub fn unwrap_list(self) -> T {
         match self {
-            Self::List(v) => v,
+            Self::List(list) => list,
             _ => panic!("Expected ListItem::List"),
+        }
+    }
+
+    pub fn map<U>(self, f: impl FnOnce(T) -> U) -> ListItem<U> {
+        match self {
+            Self::Item(item) => ListItem::Item(f(item)),
+            Self::List(list) => ListItem::List(f(list)),
         }
     }
 }
@@ -865,8 +872,8 @@ impl<T> ListItem<T> {
 impl<T, E> ListItem<std::result::Result<T, E>> {
     pub fn transpose(self) -> std::result::Result<ListItem<T>, E> {
         std::result::Result::Ok(match self {
-            ListItem::Item(item) => ListItem::Item(item?),
-            ListItem::List(list) => ListItem::List(list?),
+            Self::Item(item) => ListItem::Item(item?),
+            Self::List(list) => ListItem::List(list?),
         })
     }
 }
@@ -2339,6 +2346,17 @@ mod tests {
 
         let v: Value<ValueTypesStatic> = splice!(v_bool!(true)).into();
         assert_eq!(v, v_splice!(v_bool!(true)));
+    }
+
+    #[test]
+    fn test_list_item_map() {
+        use super::*;
+
+        let item = ListItem::<i32>::Item(1);
+        assert_eq!(item.map(|v| v == 0), ListItem::<bool>::Item(false));
+
+        let item = ListItem::<i32>::List(0);
+        assert_eq!(item.map(|v| v == 0), ListItem::<bool>::List(true));
     }
 
     #[test]
