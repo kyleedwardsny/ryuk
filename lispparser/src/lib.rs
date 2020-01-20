@@ -17,6 +17,8 @@ pub enum ErrorKind {
     InvalidToken,
     InvalidCharacter,
     InvalidSemverComponent,
+    IllegalComma,
+    IllegalSplice,
 }
 
 impl Error {
@@ -73,6 +75,17 @@ where
     }
 }
 
+enum BackquoteStatus {
+    None,
+    Item,
+    Tail,
+}
+
+struct BackquoteStatusEntry<'prev> {
+    status: BackquoteStatus,
+    previous: Option<&'prev BackquoteStatusEntry<'prev>>,
+}
+
 impl<T, I> Iterator for LispParser<T, I>
 where
     T: ValueTypes + ?Sized,
@@ -84,11 +97,18 @@ where
     Cons<T>: Into<T::ConsRef>,
     <T::SemverTypes as SemverTypes>::SemverRef:
         Default + BorrowMut<<T::SemverTypes as SemverTypes>::Semver>,
+    Value<T>: Into<T::ValueRef>,
 {
     type Item = Result<Value<T>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match read_impl(&mut self.reader) {
+        match read_impl(
+            &mut self.reader,
+            &BackquoteStatusEntry {
+                status: BackquoteStatus::None,
+                previous: Option::None,
+            },
+        ) {
             Result::Ok(r) => match r {
                 ReadImplResult::Value(v) => Option::Some(Result::Ok(v)),
                 ReadImplResult::InvalidToken(t) => Option::Some(Result::Err(Error::new(
@@ -143,6 +163,7 @@ where
 fn read_delimited<T, I>(
     peekable: &mut Peekable<I>,
     delimiter: char,
+    bq: &BackquoteStatusEntry,
 ) -> Result<ReadDelimitedResult<T>>
 where
     T: ValueTypes + ?Sized,
@@ -154,6 +175,7 @@ where
     Cons<T>: Into<T::ConsRef>,
     <T::SemverTypes as SemverTypes>::SemverRef:
         Default + BorrowMut<<T::SemverTypes as SemverTypes>::Semver>,
+    Value<T>: Into<T::ValueRef>,
 {
     skip_whitespace(peekable)?;
     if let Option::Some(c) = peekable.peek() {
@@ -161,7 +183,7 @@ where
             peekable.next();
             Result::Ok(ReadDelimitedResult::EndDelimiter)
         } else {
-            match read_impl(peekable)? {
+            match read_impl(peekable, bq)? {
                 ReadImplResult::Value(v) => Result::Ok(ReadDelimitedResult::Value(v)),
                 ReadImplResult::InvalidToken(t) => Result::Ok(ReadDelimitedResult::InvalidToken(t)),
                 ReadImplResult::EndOfFile => Result::Err(Error::new(
@@ -178,7 +200,11 @@ where
     }
 }
 
-fn read_list<T, I>(peekable: &mut Peekable<I>, allow_dot: bool) -> Result<Value<T>>
+fn read_list<T, I>(
+    peekable: &mut Peekable<I>,
+    allow_dot: bool,
+    bq: &BackquoteStatusEntry,
+) -> Result<Value<T>>
 where
     T: ValueTypes + ?Sized,
     for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
@@ -189,18 +215,34 @@ where
     Cons<T>: Into<T::ConsRef>,
     <T::SemverTypes as SemverTypes>::SemverRef:
         Default + BorrowMut<<T::SemverTypes as SemverTypes>::Semver>,
+    Value<T>: Into<T::ValueRef>,
 {
-    match read_delimited(peekable, ')')? {
+    match read_delimited(
+        peekable,
+        ')',
+        &BackquoteStatusEntry {
+            status: BackquoteStatus::Item,
+            previous: Option::Some(bq),
+        },
+    )? {
         ReadDelimitedResult::Value(v) => Result::Ok(Value::<T>::Cons(ValueCons(
             Cons {
                 car: v,
-                cdr: read_list(peekable, true)?,
+                cdr: read_list(peekable, true, bq)?,
             }
             .into(),
         ))),
         ReadDelimitedResult::InvalidToken(t) => match (allow_dot, &*t) {
-            (true, ".") => match read_delimited(peekable, ')')? {
-                ReadDelimitedResult::Value(cdr) => match read_delimited::<T, I>(peekable, ')')? {
+            (true, ".") => match read_delimited(
+                peekable,
+                ')',
+                &BackquoteStatusEntry {
+                    status: BackquoteStatus::Tail,
+                    previous: Option::Some(bq),
+                },
+            )? {
+                ReadDelimitedResult::Value(cdr) => match read_delimited::<T, I>(peekable, ')', bq)?
+                {
                     ReadDelimitedResult::EndDelimiter => Result::Ok(cdr),
                     _ => Result::Err(Error::new(
                         ErrorKind::InvalidToken,
@@ -217,7 +259,7 @@ where
                 format!("Invalid token: '{}'", t),
             )),
         },
-        ReadDelimitedResult::EndDelimiter => Result::Ok(Value::Nil.into()),
+        ReadDelimitedResult::EndDelimiter => Result::Ok(Value::Nil),
     }
 }
 
@@ -371,7 +413,10 @@ where
     EndOfFile,
 }
 
-fn read_impl<T, I>(peekable: &mut Peekable<I>) -> Result<ReadImplResult<T>>
+fn read_impl<T, I>(
+    peekable: &mut Peekable<I>,
+    bq: &BackquoteStatusEntry,
+) -> Result<ReadImplResult<T>>
 where
     T: ValueTypes + ?Sized,
     for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
@@ -382,35 +427,106 @@ where
     Cons<T>: Into<T::ConsRef>,
     <T::SemverTypes as SemverTypes>::SemverRef:
         Default + BorrowMut<<T::SemverTypes as SemverTypes>::Semver>,
+    Value<T>: Into<T::ValueRef>,
 {
     skip_whitespace(peekable)?;
     if let Option::Some(&c) = peekable.peek() {
         if c == '(' {
             peekable.next();
-            Result::Ok(ReadImplResult::Value(read_list(peekable, false)?))
+            Result::Ok(ReadImplResult::Value(read_list(peekable, false, bq)?))
         } else if c == '#' {
             peekable.next();
             Result::Ok(ReadImplResult::Value(read_macro(peekable)?))
         } else if c == '"' {
             peekable.next();
-            Result::Ok(ReadImplResult::Value(
-                Value::String(ValueString(read_string(peekable, '"')?.into())).into(),
-            ))
+            Result::Ok(ReadImplResult::Value(Value::String(ValueString(
+                read_string(peekable, '"')?.into(),
+            ))))
+        } else if c == '`' {
+            peekable.next();
+            match read_impl(
+                peekable,
+                &BackquoteStatusEntry {
+                    status: BackquoteStatus::Tail,
+                    previous: Option::Some(&bq),
+                },
+            )? {
+                ReadImplResult::Value(v) => Result::Ok(ReadImplResult::Value(Value::Backquote(
+                    ValueBackquote(v.into()),
+                ))),
+                ReadImplResult::InvalidToken(t) => Result::Err(Error::new(
+                    ErrorKind::InvalidToken,
+                    format!("Invalid token: '{}'", t),
+                )),
+                ReadImplResult::EndOfFile => {
+                    Result::Err(Error::new(ErrorKind::EndOfFile, "End of file reached"))
+                }
+            }
+        } else if c == ',' {
+            peekable.next();
+            match peekable.peek() {
+                Option::Some(&c2) => {
+                    if c2 == '@' {
+                        peekable.next();
+                        match bq.status {
+                            BackquoteStatus::Item => {
+                                match read_impl(peekable, bq.previous.unwrap())? {
+                                    ReadImplResult::Value(v) => Result::Ok(ReadImplResult::Value(
+                                        Value::Splice(ValueSplice(v.into())),
+                                    )),
+                                    ReadImplResult::InvalidToken(t) => Result::Err(Error::new(
+                                        ErrorKind::InvalidToken,
+                                        format!("Invalid token: '{}'", t),
+                                    )),
+                                    ReadImplResult::EndOfFile => Result::Err(Error::new(
+                                        ErrorKind::EndOfFile,
+                                        "End of file reached",
+                                    )),
+                                }
+                            }
+                            _ => {
+                                Result::Err(Error::new(ErrorKind::IllegalSplice, "Illegal splice"))
+                            }
+                        }
+                    } else {
+                        match bq.status {
+                            BackquoteStatus::None => {
+                                Result::Err(Error::new(ErrorKind::IllegalComma, "Illegal comma"))
+                            }
+                            _ => match read_impl(peekable, bq.previous.unwrap())? {
+                                ReadImplResult::Value(v) => Result::Ok(ReadImplResult::Value(
+                                    Value::Comma(ValueComma(v.into())),
+                                )),
+                                ReadImplResult::InvalidToken(t) => Result::Err(Error::new(
+                                    ErrorKind::InvalidToken,
+                                    format!("Invalid token: '{}'", t),
+                                )),
+                                ReadImplResult::EndOfFile => Result::Err(Error::new(
+                                    ErrorKind::EndOfFile,
+                                    "End of file reached",
+                                )),
+                            },
+                        }
+                    }
+                }
+                Option::None => {
+                    Result::Err(Error::new(ErrorKind::EndOfFile, "End of file reached"))
+                }
+            }
         } else if c == '\'' {
             peekable.next();
-            match read_impl(peekable)? {
+            match read_impl(peekable, bq)? {
                 ReadImplResult::Value(v) => {
                     Result::Ok(ReadImplResult::Value(Value::Cons(ValueCons(
                         Cons {
                             car: Value::QualifiedSymbol(ValueQualifiedSymbol {
                                 package: "std".into(),
                                 name: "quote".into(),
-                            })
-                            .into(),
+                            }),
                             cdr: Value::Cons(ValueCons(
                                 Cons {
                                     car: v,
-                                    cdr: Value::Nil.into(),
+                                    cdr: Value::Nil,
                                 }
                                 .into(),
                             )),
@@ -436,8 +552,7 @@ where
                                 Value::QualifiedSymbol(ValueQualifiedSymbol {
                                     package: t1.to_lowercase().into(),
                                     name: t2.to_lowercase().into(),
-                                })
-                                .into(),
+                                }),
                             )),
                             ReadTokenResult::InvalidToken(t) => Result::Err(Error::new(
                                 ErrorKind::InvalidToken,
@@ -445,10 +560,9 @@ where
                             )),
                         }
                     }
-                    _ => Result::Ok(ReadImplResult::Value(
-                        Value::UnqualifiedSymbol(ValueUnqualifiedSymbol(t1.to_lowercase().into()))
-                            .into(),
-                    )),
+                    _ => Result::Ok(ReadImplResult::Value(Value::UnqualifiedSymbol(
+                        ValueUnqualifiedSymbol(t1.to_lowercase().into()),
+                    ))),
                 },
                 ReadTokenResult::InvalidToken(t) => Result::Ok(ReadImplResult::InvalidToken(t)),
             }
@@ -650,6 +764,81 @@ mod tests {
             crate::ErrorKind::EndOfFile
         );
         assert!(i.next().is_none());
+    }
+
+    #[test]
+    fn test_read_backquote() {
+        let s = "`a `,b `(c) `(,@d) `(,e) `((,f) (,@g) . ,h) `,@i `(j . ,@k) ,l ,@m `,,n `,,@o ``,,p ``,,,q `(`(,,r)) `(`(s . ,@t))";
+        let mut i = LispParser::<ValueTypesRc, _>::new(s.chars().peekable());
+        assert_eq!(i.next().unwrap().unwrap(), v_bq!(v_uqsym!("a")));
+        assert_eq!(i.next().unwrap().unwrap(), v_bq!(v_comma!(v_uqsym!("b"))));
+        assert_eq!(i.next().unwrap().unwrap(), v_bq!(v_list!(v_uqsym!("c"))));
+        assert_eq!(
+            i.next().unwrap().unwrap(),
+            v_bq!(v_list!(v_splice!(v_uqsym!("d"))))
+        );
+        assert_eq!(
+            i.next().unwrap().unwrap(),
+            v_bq!(v_list!(v_comma!(v_uqsym!("e"))))
+        );
+        assert_eq!(
+            i.next().unwrap().unwrap(),
+            v_bq!(v_cons!(
+                v_list!(v_comma!(v_uqsym!("f"))),
+                v_cons!(v_list!(v_splice!(v_uqsym!("g"))), v_comma!(v_uqsym!("h")))
+            ))
+        );
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            ErrorKind::IllegalSplice
+        );
+        assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("i"));
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            ErrorKind::IllegalSplice
+        );
+        assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("k"));
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            ErrorKind::InvalidCharacter
+        );
+        assert_eq!(i.next().unwrap().unwrap_err().kind, ErrorKind::IllegalComma);
+        assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("l"));
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            ErrorKind::IllegalSplice
+        );
+        assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("m"));
+        assert_eq!(i.next().unwrap().unwrap_err().kind, ErrorKind::IllegalComma);
+        assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("n"));
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            ErrorKind::IllegalSplice
+        );
+        assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("o"));
+        assert_eq!(
+            i.next().unwrap().unwrap(),
+            v_bq!(v_bq!(v_comma!(v_comma!(v_uqsym!("p")))))
+        );
+        assert_eq!(i.next().unwrap().unwrap_err().kind, ErrorKind::IllegalComma);
+        assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("q"));
+        assert_eq!(
+            i.next().unwrap().unwrap(),
+            v_bq!(v_list!(v_bq!(v_list!(v_comma!(v_comma!(v_uqsym!("r")))))))
+        );
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            ErrorKind::IllegalSplice
+        );
+        assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("t"));
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            ErrorKind::InvalidCharacter
+        );
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            ErrorKind::InvalidCharacter
+        );
     }
 
     #[test]
