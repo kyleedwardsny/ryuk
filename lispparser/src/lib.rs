@@ -1,4 +1,4 @@
-use ryuk_lispcore::*;
+use ryuk_lispcore::value::*;
 use std::borrow::{Borrow, BorrowMut};
 use std::fmt::Formatter;
 use std::iter::Peekable;
@@ -519,6 +519,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ryuk_lispcore::*;
 
     #[test]
     fn test_parse_semver() {

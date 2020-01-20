@@ -1,4 +1,7 @@
-use ryuk_lispcore::*;
+use ryuk_lispcore::env::*;
+use ryuk_lispcore::error::*;
+use ryuk_lispcore::list::*;
+use ryuk_lispcore::value::*;
 use std::collections::BTreeSet;
 
 #[derive(Debug)]
@@ -164,6 +167,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ryuk_lispcore::*;
 
     struct SimpleEnvironment;
 
