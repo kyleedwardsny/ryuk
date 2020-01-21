@@ -44,7 +44,7 @@ where
                 .compile_function(name, &mut (&compiled_params).into_iter().map(|p| &p.types))?
             {
                 Result::Ok(r) => Result::Ok(TryCompilationResult::Compiled(CompilationResult {
-                    result: Box::new(FunctionCall::new(
+                    result: Box::new(FunctionCallEvaluator::new(
                         ValueFunction(name.clone()),
                         compiled_params.into_iter().map(|p| p.result).collect(),
                     )),
@@ -109,7 +109,7 @@ where
                         _ => {
                             let t = v.value_type();
                             TryCompilationResult::Compiled(CompilationResult {
-                                result: Box::new(Literal::new(v)),
+                                result: Box::new(LiteralEvaluator::new(v)),
                                 types: BTreeSet::from_iter(vec![t]),
                             })
                         }
@@ -148,7 +148,7 @@ pub enum ValueTypeNonList {
     Splice(Box<ValueType>),
 }
 
-pub trait CompilationResultType<T>: Debug
+pub trait Evaluator<T>: Debug
 where
     T: ValueTypes + ?Sized + 'static,
     for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
@@ -157,22 +157,22 @@ where
 }
 
 #[derive(Debug)]
-pub struct Literal<T>(Value<T>)
+pub struct LiteralEvaluator<T>(Value<T>)
 where
     T: ValueTypes + ?Sized,
     for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>;
 
-impl<T> Literal<T>
+impl<T> LiteralEvaluator<T>
 where
     T: ValueTypes + ?Sized,
     for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
 {
     pub fn new(value: Value<T>) -> Self {
-        Literal(value)
+        Self(value)
     }
 }
 
-impl<T> CompilationResultType<T> for Literal<T>
+impl<T> Evaluator<T> for LiteralEvaluator<T>
 where
     T: ValueTypes + ?Sized + 'static,
     for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
@@ -183,29 +183,26 @@ where
 }
 
 #[derive(Debug)]
-pub struct FunctionCall<T>
+pub struct FunctionCallEvaluator<T>
 where
     T: ValueTypes + ?Sized,
     for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
 {
     name: ValueFunction<T::StringRef>,
-    params: Vec<Box<dyn CompilationResultType<T>>>,
+    params: Vec<Box<dyn Evaluator<T>>>,
 }
 
-impl<T> FunctionCall<T>
+impl<T> FunctionCallEvaluator<T>
 where
     T: ValueTypes + ?Sized,
     for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
 {
-    pub fn new(
-        name: ValueFunction<T::StringRef>,
-        params: Vec<Box<dyn CompilationResultType<T>>>,
-    ) -> Self {
-        FunctionCall { name, params }
+    pub fn new(name: ValueFunction<T::StringRef>, params: Vec<Box<dyn Evaluator<T>>>) -> Self {
+        Self { name, params }
     }
 }
 
-impl<T> CompilationResultType<T> for FunctionCall<T>
+impl<T> Evaluator<T> for FunctionCallEvaluator<T>
 where
     T: ValueTypes + ?Sized + 'static,
     for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
@@ -215,29 +212,29 @@ where
 
         let params = (&mut self.params)
             .into_iter()
-            .map(|p| BorrowMut::<dyn CompilationResultType<T>>::borrow_mut(p).evaluate(env))
+            .map(|p| BorrowMut::<dyn Evaluator<T>>::borrow_mut(p).evaluate(env))
             .collect::<Result<Vec<Value<T>>>>()?;
         env.evaluate_function(&self.name.0, params)
     }
 }
 
 #[derive(Debug)]
-pub struct ConcatenateLists<T>(Vec<ListItem<Box<dyn CompilationResultType<T>>>>)
+pub struct ConcatenateListsEvaluator<T>(Vec<ListItem<Box<dyn Evaluator<T>>>>)
 where
     T: ValueTypes + ?Sized,
     for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>;
 
-impl<T> ConcatenateLists<T>
+impl<T> ConcatenateListsEvaluator<T>
 where
     T: ValueTypes + ?Sized,
     for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
 {
-    pub fn new(items: Vec<ListItem<Box<dyn CompilationResultType<T>>>>) -> Self {
+    pub fn new(items: Vec<ListItem<Box<dyn Evaluator<T>>>>) -> Self {
         Self(items)
     }
 }
 
-impl<T> CompilationResultType<T> for ConcatenateLists<T>
+impl<T> Evaluator<T> for ConcatenateListsEvaluator<T>
 where
     T: ValueTypes + ?Sized + 'static,
     for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
@@ -258,7 +255,7 @@ where
     T: ValueTypes + ?Sized,
     for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
 {
-    pub result: Box<dyn CompilationResultType<T> + 'static>,
+    pub result: Box<dyn Evaluator<T> + 'static>,
     pub types: BTreeSet<ValueType>,
 }
 
@@ -363,7 +360,7 @@ mod tests {
         use std::iter::FromIterator;
 
         Result::Ok(TryCompilationResult::Compiled(CompilationResult {
-            result: Box::new(Literal(v_str!("Hello world!").convert())),
+            result: Box::new(LiteralEvaluator::new(v_str!("Hello world!").convert())),
             types: BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::String)]),
         }))
     }
@@ -373,7 +370,7 @@ mod tests {
         use std::iter::FromIterator;
 
         Result::Ok(TryCompilationResult::Compiled(CompilationResult {
-            result: Box::new(Literal::new(v_bool!(true).convert())),
+            result: Box::new(LiteralEvaluator::new(v_bool!(true).convert())),
             types: BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::Bool)]),
         }))
     }
@@ -511,10 +508,10 @@ mod tests {
 
         let mut env = SimpleEnvironment;
 
-        let mut comp = Literal::new(v_str!("Hello world!").convert());
+        let mut comp = LiteralEvaluator::new(v_str!("Hello world!").convert());
         assert_eq!(comp.evaluate(&mut env).unwrap(), v_str!("Hello world!"));
 
-        let mut comp = Literal::new(v_bool!(true).convert());
+        let mut comp = LiteralEvaluator::new(v_bool!(true).convert());
         assert_eq!(comp.evaluate(&mut env).unwrap(), v_bool!(true));
     }
 
@@ -524,15 +521,17 @@ mod tests {
 
         let mut env = SimpleEnvironment;
 
-        let mut comp = FunctionCall::new(
+        let mut comp = FunctionCallEvaluator::new(
             func!(qsym!("p", "simplefunc1")).convert(),
-            vec![Box::new(Literal::new(v_str!("Hello world!").convert()))],
+            vec![Box::new(LiteralEvaluator::new(
+                v_str!("Hello world!").convert(),
+            ))],
         );
         assert_eq!(comp.evaluate(&mut env).unwrap(), v_str!("Hello world!"));
 
-        let mut comp = FunctionCall::new(
+        let mut comp = FunctionCallEvaluator::new(
             func!(qsym!("p", "simplefunc1")).convert(),
-            vec![Box::new(Literal::new(v_bool!(true).convert()))],
+            vec![Box::new(LiteralEvaluator::new(v_bool!(true).convert()))],
         );
         assert_eq!(comp.evaluate(&mut env).unwrap(), v_bool!(true));
     }
@@ -543,27 +542,31 @@ mod tests {
 
         let mut env = SimpleEnvironment;
 
-        let mut comp = ConcatenateLists::new(vec![
-            ListItem::List(Box::new(Literal::new(v_list!(v_str!("str")).convert()))),
-            ListItem::List(Box::new(Literal::new(v_list!(v_bool!(true)).convert()))),
+        let mut comp = ConcatenateListsEvaluator::new(vec![
+            ListItem::List(Box::new(LiteralEvaluator::new(
+                v_list!(v_str!("str")).convert(),
+            ))),
+            ListItem::List(Box::new(LiteralEvaluator::new(
+                v_list!(v_bool!(true)).convert(),
+            ))),
         ]);
         assert_eq!(
             comp.evaluate(&mut env).unwrap(),
             v_list!(v_str!("str"), v_bool!(true))
         );
 
-        let mut comp = ConcatenateLists::new(vec![
-            ListItem::Item(Box::new(Literal::new(v_str!("str").convert()))),
-            ListItem::List(Box::new(Literal::new(v_bool!(true).convert()))),
+        let mut comp = ConcatenateListsEvaluator::new(vec![
+            ListItem::Item(Box::new(LiteralEvaluator::new(v_str!("str").convert()))),
+            ListItem::List(Box::new(LiteralEvaluator::new(v_bool!(true).convert()))),
         ]);
         assert_eq!(
             comp.evaluate(&mut env).unwrap(),
             v_cons!(v_str!("str"), v_bool!(true))
         );
 
-        let mut comp = ConcatenateLists::new(vec![
-            ListItem::List(Box::new(Literal::new(v_str!("str").convert()))),
-            ListItem::List(Box::new(Literal::new(v_bool!(true).convert()))),
+        let mut comp = ConcatenateListsEvaluator::new(vec![
+            ListItem::List(Box::new(LiteralEvaluator::new(v_str!("str").convert()))),
+            ListItem::List(Box::new(LiteralEvaluator::new(v_bool!(true).convert()))),
         ]);
         assert_eq!(
             comp.evaluate(&mut env).unwrap_err().kind,
