@@ -15,6 +15,16 @@ where
 {
     fn as_dyn_mut(&mut self) -> &mut (dyn Environment<T> + 'static);
 
+    fn resolve_symbol_get_variable(
+        &self,
+        name: &ValueUnqualifiedSymbol<T::StringRef>,
+    ) -> Option<ValueQualifiedSymbol<T::StringRef>>;
+
+    fn compile_variable(
+        &self,
+        name: &ValueQualifiedSymbol<T::StringRef>,
+    ) -> Option<BTreeSet<ValueType>>;
+
     fn resolve_symbol_get_macro(
         &self,
         name: &ValueUnqualifiedSymbol<T::StringRef>,
@@ -54,6 +64,8 @@ where
             },
         )
     }
+
+    fn evaluate_variable(&self, name: &ValueQualifiedSymbol<T::StringRef>) -> Result<Value<T>>;
 
     fn evaluate_function(
         &mut self,
@@ -179,6 +191,32 @@ where
 {
     fn evaluate(&mut self, _env: &mut dyn Environment<T>) -> Result<Value<T>> {
         Result::Ok(self.0.clone())
+    }
+}
+
+#[derive(Debug)]
+pub struct VariableEvaluator<T>(ValueQualifiedSymbol<T::StringRef>)
+where
+    T: ValueTypes + ?Sized + 'static,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>;
+
+impl<T> VariableEvaluator<T>
+where
+    T: ValueTypes + ?Sized,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+{
+    pub fn new(name: ValueQualifiedSymbol<T::StringRef>) -> Self {
+        Self(name)
+    }
+}
+
+impl<T> Evaluator<T> for VariableEvaluator<T>
+where
+    T: ValueTypes + ?Sized + 'static,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+{
+    fn evaluate(&mut self, env: &mut dyn Environment<T>) -> Result<Value<T>> {
+        env.evaluate_variable(&self.0)
     }
 }
 
@@ -430,6 +468,64 @@ mod tests {
             self as &mut (dyn super::Environment<super::ValueTypesRc> + 'static)
         }
 
+        fn resolve_symbol_get_variable(
+            &self,
+            name: &super::ValueUnqualifiedSymbol<
+                <super::ValueTypesRc as super::ValueTypes>::StringRef,
+            >,
+        ) -> Option<
+            super::ValueQualifiedSymbol<<super::ValueTypesRc as super::ValueTypes>::StringRef>,
+        > {
+            Option::Some(super::ValueQualifiedSymbol {
+                package: "pvar".to_string(),
+                name: name.0.clone(),
+            })
+        }
+
+        fn compile_variable(
+            &self,
+            name: &super::ValueQualifiedSymbol<
+                <super::ValueTypesRc as super::ValueTypes>::StringRef,
+            >,
+        ) -> Option<super::BTreeSet<super::ValueType>> {
+            use std::borrow::Borrow;
+            use std::iter::FromIterator;
+
+            match (name.package.borrow(), name.name.borrow()) {
+                ("pvar", "var1") => {
+                    Option::Some(super::BTreeSet::from_iter(vec![super::ValueType::NonList(
+                        super::ValueTypeNonList::String,
+                    )]))
+                }
+                ("pvar", "var2") => {
+                    Option::Some(super::BTreeSet::from_iter(vec![super::ValueType::NonList(
+                        super::ValueTypeNonList::Bool,
+                    )]))
+                }
+                _ => Option::None,
+            }
+        }
+
+        fn evaluate_variable(
+            &self,
+            name: &super::ValueQualifiedSymbol<
+                <super::ValueTypesRc as super::ValueTypes>::StringRef,
+            >,
+        ) -> super::Result<super::Value<super::ValueTypesRc>> {
+            use std::borrow::Borrow;
+
+            match (name.package.borrow(), name.name.borrow()) {
+                ("pvar", "var1") => {
+                    super::Result::Ok(super::Value::String(super::ValueString("str".to_string())))
+                }
+                ("pvar", "var2") => super::Result::Ok(super::Value::Bool(super::ValueBool(true))),
+                _ => Result::Err(super::Error::new(
+                    super::ErrorKind::ValueNotDefined,
+                    "Value not defined",
+                )),
+            }
+        }
+
         fn evaluate_function(
             &mut self,
             name: &super::ValueQualifiedSymbol<
@@ -513,6 +609,25 @@ mod tests {
 
         let mut comp = LiteralEvaluator::new(v_bool!(true).convert());
         assert_eq!(comp.evaluate(&mut env).unwrap(), v_bool!(true));
+    }
+
+    #[test]
+    fn test_evaluate_variable() {
+        use super::*;
+
+        let mut env = SimpleEnvironment;
+
+        let mut comp = VariableEvaluator::new(qsym!("pvar", "var1").convert());
+        assert_eq!(comp.evaluate(&mut env).unwrap(), v_str!("str"));
+
+        let mut comp = VariableEvaluator::new(qsym!("pvar", "var2").convert());
+        assert_eq!(comp.evaluate(&mut env).unwrap(), v_bool!(true));
+
+        let mut comp = VariableEvaluator::new(qsym!("pvar", "var3").convert());
+        assert_eq!(
+            comp.evaluate(&mut env).unwrap_err().kind,
+            ErrorKind::ValueNotDefined
+        );
     }
 
     #[test]

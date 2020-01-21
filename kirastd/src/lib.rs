@@ -174,6 +174,27 @@ mod tests {
             self as &mut (dyn Environment<ValueTypesRc> + 'static)
         }
 
+        fn resolve_symbol_get_variable(
+            &self,
+            _name: &ValueUnqualifiedSymbol<<ValueTypesRc as ValueTypes>::StringRef>,
+        ) -> Option<ValueQualifiedSymbol<<ValueTypesRc as ValueTypes>::StringRef>> {
+            Option::None
+        }
+
+        fn compile_variable(
+            &self,
+            _name: &ValueQualifiedSymbol<String>,
+        ) -> Option<BTreeSet<ValueType>> {
+            Option::None
+        }
+
+        fn evaluate_variable(
+            &self,
+            _name: &ValueQualifiedSymbol<<ValueTypesRc as ValueTypes>::StringRef>,
+        ) -> Result<Value<ValueTypesRc>> {
+            Result::Err(Error::new(ErrorKind::ValueNotDefined, "Value not defined"))
+        }
+
         fn evaluate_function(
             &mut self,
             _name: &ValueQualifiedSymbol<<ValueTypesRc as ValueTypes>::StringRef>,
