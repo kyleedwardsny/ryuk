@@ -12,7 +12,7 @@ where
 {
     test: Box<dyn Evaluator<T>>,
     then: Box<dyn Evaluator<T>>,
-    els: Option<Box<dyn Evaluator<T>>>,
+    els: Box<dyn Evaluator<T>>,
 }
 
 impl<T> IfEvaluator<T>
@@ -23,7 +23,7 @@ where
     pub fn new(
         test: Box<dyn Evaluator<T>>,
         then: Box<dyn Evaluator<T>>,
-        els: Option<Box<dyn Evaluator<T>>>,
+        els: Box<dyn Evaluator<T>>,
     ) -> Self {
         Self { test, then, els }
     }
@@ -41,9 +41,7 @@ where
         if b.0 {
             self.then.evaluate(env)
         } else {
-            (&mut self.els)
-                .as_mut()
-                .map_or_else(|| Result::Ok(Value::Nil), |comp| comp.evaluate(env))
+            self.els.evaluate(env)
         }
     }
 }
@@ -96,11 +94,11 @@ where
         Option::Some(ListItem::Item(els_item)) => {
             let els_comp = env.compile(els_item)?;
             types.append(&mut els_comp.types.clone());
-            els = Option::Some(els_comp.result);
+            els = els_comp.result;
         }
         Option::None => {
             types.insert(ValueType::NonList(ValueTypeNonList::Nil));
-            els = Option::None;
+            els = Box::new(LiteralEvaluator::new(Value::Nil));
         }
         _ => {
             return Result::Err(Error::new(
@@ -223,35 +221,35 @@ mod tests {
         let mut comp = IfEvaluator::new(
             Box::new(LiteralEvaluator::new(v_bool!(true).convert())),
             Box::new(LiteralEvaluator::new(v_str!("yes").convert())),
-            Option::Some(Box::new(LiteralEvaluator::new(v_str!("no").convert()))),
+            Box::new(LiteralEvaluator::new(v_str!("no").convert())),
         );
         assert_eq!(comp.evaluate(&mut env).unwrap(), v_str!("yes"));
 
         let mut comp = IfEvaluator::new(
             Box::new(LiteralEvaluator::new(v_bool!(false).convert())),
             Box::new(LiteralEvaluator::new(v_str!("yes").convert())),
-            Option::Some(Box::new(LiteralEvaluator::new(v_str!("no").convert()))),
+            Box::new(LiteralEvaluator::new(v_str!("no").convert())),
         );
         assert_eq!(comp.evaluate(&mut env).unwrap(), v_str!("no"));
 
         let mut comp = IfEvaluator::new(
             Box::new(LiteralEvaluator::new(v_bool!(true).convert())),
             Box::new(LiteralEvaluator::new(v_str!("yes").convert())),
-            Option::None,
+            Box::new(LiteralEvaluator::new(v_nil!().convert())),
         );
         assert_eq!(comp.evaluate(&mut env).unwrap(), v_str!("yes"));
 
         let mut comp = IfEvaluator::new(
             Box::new(LiteralEvaluator::new(v_bool!(false).convert())),
             Box::new(LiteralEvaluator::new(v_str!("yes").convert())),
-            Option::None,
+            Box::new(LiteralEvaluator::new(v_nil!().convert())),
         );
         assert_eq!(comp.evaluate(&mut env).unwrap(), v_nil!());
 
         let mut comp = IfEvaluator::new(
             Box::new(LiteralEvaluator::new(v_str!("true").convert())),
             Box::new(LiteralEvaluator::new(v_str!("yes").convert())),
-            Option::None,
+            Box::new(LiteralEvaluator::new(v_nil!().convert())),
         );
         assert_eq!(
             comp.evaluate(&mut env).unwrap_err().kind,
