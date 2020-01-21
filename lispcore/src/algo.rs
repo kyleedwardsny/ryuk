@@ -67,12 +67,11 @@ mod tests {
         .unwrap();
         assert_eq!(
             v,
-            v_cons!(
+            v_tlist!(
                 v_str!("str"),
-                v_cons!(
-                    v_bool!(true),
-                    v_cons!(v_list!(v_str!("str"), v_bool!(true)), v_uqsym!("uqsym"))
-                )
+                v_bool!(true),
+                v_list!(v_str!("str"), v_bool!(true)),
+                v_uqsym!("uqsym")
             )
         );
 

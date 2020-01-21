@@ -783,9 +783,10 @@ mod tests {
         );
         assert_eq!(
             i.next().unwrap().unwrap(),
-            v_bq!(v_cons!(
+            v_bq!(v_tlist!(
                 v_list!(v_comma!(v_uqsym!("f"))),
-                v_cons!(v_list!(v_splice!(v_uqsym!("g"))), v_comma!(v_uqsym!("h")))
+                v_list!(v_splice!(v_uqsym!("g"))),
+                v_comma!(v_uqsym!("h"))
             ))
         );
         assert_eq!(
@@ -914,7 +915,7 @@ mod tests {
         );
         assert_eq!(
             i.next().unwrap().unwrap(),
-            v_cons!(v_bool!(true), v_bool!(false))
+            v_tlist!(v_bool!(true), v_bool!(false))
         );
         assert_eq!(
             i.next().unwrap().unwrap_err().kind,

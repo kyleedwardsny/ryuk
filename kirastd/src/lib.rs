@@ -374,7 +374,7 @@ mod tests {
         assert_eq!(
             compile_if(
                 &mut env,
-                v_cons!(v_bool!(true), v_nil!()).convert().into_iter()
+                v_tlist!(v_bool!(true), v_nil!()).convert().into_iter()
             )
             .unwrap_err()
             .kind,
@@ -384,7 +384,7 @@ mod tests {
         assert_eq!(
             compile_if(
                 &mut env,
-                v_cons!(v_bool!(true), v_cons!(v_nil!(), v_str!("str")))
+                v_tlist!(v_bool!(true), v_nil!(), v_str!("str"))
                     .convert()
                     .into_iter()
             )
@@ -461,7 +461,7 @@ mod tests {
         assert_eq!(
             compile_quote(
                 &mut env,
-                v_cons!(v_nil!(), v_bool!(true)).convert().into_iter()
+                v_tlist!(v_nil!(), v_bool!(true)).convert().into_iter()
             )
             .unwrap_err()
             .kind,

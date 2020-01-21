@@ -405,10 +405,7 @@ mod tests {
                 v_nil!(),
                 v_bool!(true),
                 v_str!("str"),
-                v_cons!(
-                    v_uqsym!("uqsym"),
-                    v_cons!(v_bool!(true), v_qsym!("p", "qsym"))
-                )
+                v_tlist!(v_uqsym!("uqsym"), v_bool!(true), v_qsym!("p", "qsym"))
             )
             .value_type(),
             ValueType::List(ValueTypeList {
@@ -659,7 +656,7 @@ mod tests {
         ]);
         assert_eq!(
             comp.evaluate(&mut env).unwrap(),
-            v_cons!(v_str!("str"), v_bool!(true))
+            v_tlist!(v_str!("str"), v_bool!(true))
         );
 
         let mut comp = ConcatenateListsEvaluator::new(vec![
