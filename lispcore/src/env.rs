@@ -346,10 +346,10 @@ where
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
     fn test_value_type() {
-        use super::*;
-
         assert_eq!(
             v_nil!().value_type(),
             ValueType::NonList(ValueTypeNonList::Nil)
@@ -431,20 +431,14 @@ mod tests {
 
     struct SimpleEnvironment;
 
-    fn simplemacro1() -> super::Result<super::TryCompilationResult<super::ValueTypesRc>> {
-        use super::*;
-        use std::iter::FromIterator;
-
+    fn simplemacro1() -> Result<TryCompilationResult<ValueTypesRc>> {
         Result::Ok(TryCompilationResult::Compiled(CompilationResult {
             result: Box::new(LiteralEvaluator::new(v_str!("Hello world!").convert())),
             types: BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::String)]),
         }))
     }
 
-    fn simplemacro2() -> super::Result<super::TryCompilationResult<super::ValueTypesRc>> {
-        use super::*;
-        use std::iter::FromIterator;
-
+    fn simplemacro2() -> Result<TryCompilationResult<ValueTypesRc>> {
         Result::Ok(TryCompilationResult::Compiled(CompilationResult {
             result: Box::new(LiteralEvaluator::new(v_bool!(true).convert())),
             types: BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::Bool)]),
@@ -452,10 +446,8 @@ mod tests {
     }
 
     fn compile_simplefunc1(
-        params: &mut dyn Iterator<Item = &super::BTreeSet<super::ValueType>>,
-    ) -> super::Result<super::BTreeSet<super::ValueType>> {
-        use super::*;
-
+        params: &mut dyn Iterator<Item = &BTreeSet<ValueType>>,
+    ) -> Result<BTreeSet<ValueType>> {
         let result = match params.next() {
             Option::Some(p) => (*p).clone(),
             Option::None => {
@@ -476,11 +468,9 @@ mod tests {
     }
 
     fn simplefunc1(
-        _env: &mut dyn super::Environment<super::ValueTypesRc>,
-        params: Vec<super::Value<super::ValueTypesRc>>,
-    ) -> super::Result<super::Value<super::ValueTypesRc>> {
-        use super::*;
-
+        _env: &mut dyn Environment<ValueTypesRc>,
+        params: Vec<Value<ValueTypesRc>>,
+    ) -> Result<Value<ValueTypesRc>> {
         let mut params = params.into_iter();
         let result = match params.next() {
             Option::Some(p) => p,
@@ -501,20 +491,16 @@ mod tests {
         }
     }
 
-    impl super::Environment<super::ValueTypesRc> for SimpleEnvironment {
-        fn as_dyn_mut(&mut self) -> &mut (dyn super::Environment<super::ValueTypesRc> + 'static) {
-            self as &mut (dyn super::Environment<super::ValueTypesRc> + 'static)
+    impl Environment<ValueTypesRc> for SimpleEnvironment {
+        fn as_dyn_mut(&mut self) -> &mut (dyn Environment<ValueTypesRc> + 'static) {
+            self as &mut (dyn Environment<ValueTypesRc> + 'static)
         }
 
         fn resolve_symbol_get_variable(
             &self,
-            name: &super::ValueUnqualifiedSymbol<
-                <super::ValueTypesRc as super::ValueTypes>::StringRef,
-            >,
-        ) -> Option<
-            super::ValueQualifiedSymbol<<super::ValueTypesRc as super::ValueTypes>::StringRef>,
-        > {
-            Option::Some(super::ValueQualifiedSymbol {
+            name: &ValueUnqualifiedSymbol<<ValueTypesRc as ValueTypes>::StringRef>,
+        ) -> Option<ValueQualifiedSymbol<<ValueTypesRc as ValueTypes>::StringRef>> {
+            Option::Some(ValueQualifiedSymbol {
                 package: "pvar".to_string(),
                 name: name.0.clone(),
             })
@@ -522,58 +508,35 @@ mod tests {
 
         fn compile_variable(
             &self,
-            name: &super::ValueQualifiedSymbol<
-                <super::ValueTypesRc as super::ValueTypes>::StringRef,
-            >,
-        ) -> Option<super::BTreeSet<super::ValueType>> {
-            use std::borrow::Borrow;
-            use std::iter::FromIterator;
-
+            name: &ValueQualifiedSymbol<<ValueTypesRc as ValueTypes>::StringRef>,
+        ) -> Option<BTreeSet<ValueType>> {
             match (name.package.borrow(), name.name.borrow()) {
-                ("pvar", "var1") => {
-                    Option::Some(super::BTreeSet::from_iter(vec![super::ValueType::NonList(
-                        super::ValueTypeNonList::String,
-                    )]))
-                }
-                ("pvar", "var2") => {
-                    Option::Some(super::BTreeSet::from_iter(vec![super::ValueType::NonList(
-                        super::ValueTypeNonList::Bool,
-                    )]))
-                }
+                ("pvar", "var1") => Option::Some(BTreeSet::from_iter(vec![ValueType::NonList(
+                    ValueTypeNonList::String,
+                )])),
+                ("pvar", "var2") => Option::Some(BTreeSet::from_iter(vec![ValueType::NonList(
+                    ValueTypeNonList::Bool,
+                )])),
                 _ => Option::None,
             }
         }
 
         fn evaluate_variable(
             &self,
-            name: &super::ValueQualifiedSymbol<
-                <super::ValueTypesRc as super::ValueTypes>::StringRef,
-            >,
-        ) -> super::Result<super::Value<super::ValueTypesRc>> {
-            use std::borrow::Borrow;
-
+            name: &ValueQualifiedSymbol<<ValueTypesRc as ValueTypes>::StringRef>,
+        ) -> Result<Value<ValueTypesRc>> {
             match (name.package.borrow(), name.name.borrow()) {
-                ("pvar", "var1") => {
-                    super::Result::Ok(super::Value::String(super::ValueString("str".to_string())))
-                }
-                ("pvar", "var2") => super::Result::Ok(super::Value::Bool(super::ValueBool(true))),
-                _ => Result::Err(super::Error::new(
-                    super::ErrorKind::ValueNotDefined,
-                    "Value not defined",
-                )),
+                ("pvar", "var1") => Result::Ok(Value::String(ValueString("str".to_string()))),
+                ("pvar", "var2") => Result::Ok(Value::Bool(ValueBool(true))),
+                _ => Result::Err(Error::new(ErrorKind::ValueNotDefined, "Value not defined")),
             }
         }
 
         fn evaluate_function(
             &mut self,
-            name: &super::ValueQualifiedSymbol<
-                <super::ValueTypesRc as super::ValueTypes>::StringRef,
-            >,
-            params: Vec<super::Value<super::ValueTypesRc>>,
-        ) -> super::Result<super::Value<super::ValueTypesRc>> {
-            use super::*;
-            use std::borrow::Borrow;
-
+            name: &ValueQualifiedSymbol<<ValueTypesRc as ValueTypes>::StringRef>,
+            params: Vec<Value<ValueTypesRc>>,
+        ) -> Result<Value<ValueTypesRc>> {
             match (name.package.borrow(), name.name.borrow()) {
                 ("p", "simplefunc1") => simplefunc1(self, params),
                 _ => Result::Err(Error::new(ErrorKind::ValueNotDefined, "Value not defined")),
@@ -582,13 +545,9 @@ mod tests {
 
         fn resolve_symbol_get_macro(
             &self,
-            name: &super::ValueUnqualifiedSymbol<
-                <super::ValueTypesRc as super::ValueTypes>::StringRef,
-            >,
-        ) -> Option<
-            super::ValueQualifiedSymbol<<super::ValueTypesRc as super::ValueTypes>::StringRef>,
-        > {
-            Option::Some(super::ValueQualifiedSymbol {
+            name: &ValueUnqualifiedSymbol<<ValueTypesRc as ValueTypes>::StringRef>,
+        ) -> Option<ValueQualifiedSymbol<<ValueTypesRc as ValueTypes>::StringRef>> {
+            Option::Some(ValueQualifiedSymbol {
                 package: "p".to_string(),
                 name: name.0.clone(),
             })
@@ -596,11 +555,9 @@ mod tests {
 
         fn compile_macro(
             &mut self,
-            name: &super::ValueQualifiedSymbol<String>,
-            v: super::Value<super::ValueTypesRc>,
-        ) -> Option<super::Result<super::TryCompilationResult<super::ValueTypesRc>>> {
-            use std::borrow::Borrow;
-
+            name: &ValueQualifiedSymbol<String>,
+            v: Value<ValueTypesRc>,
+        ) -> Option<Result<TryCompilationResult<ValueTypesRc>>> {
             match (name.package.borrow(), name.name.borrow()) {
                 ("p", "simplemacro1") => Option::Some(simplemacro1()),
                 ("p", "simplemacro2") => Option::Some(simplemacro2()),
@@ -611,11 +568,9 @@ mod tests {
 
         fn compile_function(
             &self,
-            name: &super::ValueQualifiedSymbol<String>,
-            params: &mut dyn Iterator<Item = &super::BTreeSet<super::ValueType>>,
-        ) -> Option<super::Result<super::BTreeSet<super::ValueType>>> {
-            use std::borrow::Borrow;
-
+            name: &ValueQualifiedSymbol<String>,
+            params: &mut dyn Iterator<Item = &BTreeSet<ValueType>>,
+        ) -> Option<Result<BTreeSet<ValueType>>> {
             match (name.package.borrow(), name.name.borrow()) {
                 ("p", "simplefunc1") => Option::Some(compile_simplefunc1(params)),
                 _ => Option::None,
@@ -625,12 +580,10 @@ mod tests {
 
     fn test_compile_and_evaluate(
         env: &mut SimpleEnvironment,
-        code: super::Value<super::ValueTypesStatic>,
-        result: super::Value<super::ValueTypesStatic>,
-        types: super::BTreeSet<super::ValueType>,
+        code: Value<ValueTypesStatic>,
+        result: Value<ValueTypesStatic>,
+        types: BTreeSet<ValueType>,
     ) {
-        use super::*;
-
         let mut comp = env.compile(code.convert()).unwrap();
         assert_eq!(comp.types, types);
         assert_eq!(comp.result.evaluate(env).unwrap(), result);
@@ -638,8 +591,6 @@ mod tests {
 
     #[test]
     fn test_evaluate_literal() {
-        use super::*;
-
         let mut env = SimpleEnvironment;
 
         let mut comp = LiteralEvaluator::new(v_str!("Hello world!").convert());
@@ -651,8 +602,6 @@ mod tests {
 
     #[test]
     fn test_evaluate_variable() {
-        use super::*;
-
         let mut env = SimpleEnvironment;
 
         let mut comp = VariableEvaluator::new(qsym!("pvar", "var1").convert());
@@ -670,8 +619,6 @@ mod tests {
 
     #[test]
     fn test_evaluate_function() {
-        use super::*;
-
         let mut env = SimpleEnvironment;
 
         let mut comp = FunctionCallEvaluator::new(
@@ -691,8 +638,6 @@ mod tests {
 
     #[test]
     fn test_evaluate_concatenate_lists() {
-        use super::*;
-
         let mut env = SimpleEnvironment;
 
         let mut comp = ConcatenateListsEvaluator::new(vec![
@@ -729,8 +674,6 @@ mod tests {
 
     #[test]
     fn test_compile_and_evaluate_literal() {
-        use super::*;
-
         let mut env = SimpleEnvironment;
         test_compile_and_evaluate(
             &mut env,
@@ -760,8 +703,6 @@ mod tests {
 
     #[test]
     fn test_compile_and_evaluate_variable() {
-        use super::*;
-
         let mut env = SimpleEnvironment;
         test_compile_and_evaluate(
             &mut env,
@@ -802,8 +743,6 @@ mod tests {
 
     #[test]
     fn test_compile_and_evaluate_macro() {
-        use super::*;
-
         let mut env = SimpleEnvironment;
 
         test_compile_and_evaluate(
@@ -847,8 +786,6 @@ mod tests {
 
     #[test]
     fn test_compile_and_evaluate_function() {
-        use super::*;
-
         let mut env = SimpleEnvironment;
 
         test_compile_and_evaluate(
