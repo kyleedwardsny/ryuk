@@ -1115,41 +1115,37 @@ mod tests {
     mod macro_tests {
         #[test]
         fn test_v_nil_macro() {
-            const NIL: crate::value::Value<crate::value::ValueTypesStatic> = v_nil!();
-            assert_eq!(
-                NIL,
-                crate::value::Value::<crate::value::ValueTypesStatic>::Nil
-            );
+            const NIL: super::Value<super::ValueTypesStatic> = v_nil!();
+            assert_eq!(NIL, super::Value::<super::ValueTypesStatic>::Nil);
         }
 
         #[test]
         fn test_uqsym_macro() {
-            const UQSYM: crate::value::ValueUnqualifiedSymbol<&'static str> = uqsym!("uqsym");
+            const UQSYM: super::ValueUnqualifiedSymbol<&'static str> = uqsym!("uqsym");
             assert_eq!(UQSYM.0, "uqsym");
         }
 
         #[test]
         fn test_v_uqsym_macro() {
-            const UQSYM: crate::value::Value<crate::value::ValueTypesStatic> = v_uqsym!("uqsym");
+            const UQSYM: super::Value<super::ValueTypesStatic> = v_uqsym!("uqsym");
             match UQSYM {
-                crate::value::Value::UnqualifiedSymbol(s) => assert_eq!(s.0, "uqsym"),
+                super::Value::UnqualifiedSymbol(s) => assert_eq!(s.0, "uqsym"),
                 _ => panic!("Expected a Value::Symbol"),
             }
         }
 
         #[test]
         fn test_qsym_macro() {
-            const QSYM: crate::value::ValueQualifiedSymbol<&'static str> = qsym!("package", "qsym");
+            const QSYM: super::ValueQualifiedSymbol<&'static str> = qsym!("package", "qsym");
             assert_eq!(QSYM.package, "package");
             assert_eq!(QSYM.name, "qsym");
         }
 
         #[test]
         fn test_v_qsym_macro() {
-            const QSYM: crate::value::Value<crate::value::ValueTypesStatic> =
-                v_qsym!("package", "qsym");
+            const QSYM: super::Value<super::ValueTypesStatic> = v_qsym!("package", "qsym");
             match QSYM {
-                crate::value::Value::QualifiedSymbol(s) => {
+                super::Value::QualifiedSymbol(s) => {
                     assert_eq!(s.package, "package");
                     assert_eq!(s.name, "qsym");
                 }
@@ -1159,32 +1155,26 @@ mod tests {
 
         #[test]
         fn test_cons_macro() {
-            const CONS: crate::value::ValueCons<crate::value::ValueTypesStatic> =
+            const CONS: super::ValueCons<super::ValueTypesStatic> =
                 cons!(v_uqsym!("uqsym"), v_nil!());
             match &CONS.0.car {
-                crate::value::Value::UnqualifiedSymbol(s) => assert_eq!(s.0, "uqsym"),
+                super::Value::UnqualifiedSymbol(s) => assert_eq!(s.0, "uqsym"),
                 _ => panic!("Expected a Value::UnqualifiedSymbol"),
             }
-            assert_eq!(
-                CONS.0.cdr,
-                crate::value::Value::<crate::value::ValueTypesStatic>::Nil
-            );
+            assert_eq!(CONS.0.cdr, super::Value::<super::ValueTypesStatic>::Nil);
         }
 
         #[test]
         fn test_v_cons_macro() {
-            const CONS: crate::value::Value<crate::value::ValueTypesStatic> =
+            const CONS: super::Value<super::ValueTypesStatic> =
                 v_cons!(v_uqsym!("uqsym"), v_nil!());
             match CONS {
-                crate::value::Value::Cons(c) => {
+                super::Value::Cons(c) => {
                     match &c.0.car {
-                        crate::value::Value::UnqualifiedSymbol(s) => assert_eq!(s.0, "uqsym"),
+                        super::Value::UnqualifiedSymbol(s) => assert_eq!(s.0, "uqsym"),
                         _ => panic!("Expected a Value::UnqualifiedSymbol"),
                     }
-                    assert_eq!(
-                        c.0.cdr,
-                        crate::value::Value::<crate::value::ValueTypesStatic>::Nil
-                    );
+                    assert_eq!(c.0.cdr, super::Value::<super::ValueTypesStatic>::Nil);
                 }
                 _ => panic!("Expected a Value::Cons"),
             }
@@ -1192,67 +1182,67 @@ mod tests {
 
         #[test]
         fn test_bool_macro() {
-            const BOOL1: crate::value::ValueBool = bool!(true);
+            const BOOL1: super::ValueBool = bool!(true);
             assert_eq!(BOOL1.0, true);
 
-            const BOOL2: crate::value::ValueBool = bool!(false);
+            const BOOL2: super::ValueBool = bool!(false);
             assert_eq!(BOOL2.0, false);
         }
 
         #[test]
         fn test_v_bool_macro() {
-            const BOOL1: crate::value::Value<crate::value::ValueTypesStatic> = v_bool!(true);
+            const BOOL1: super::Value<super::ValueTypesStatic> = v_bool!(true);
             match BOOL1 {
-                crate::value::Value::Bool(b) => assert_eq!(b.0, true),
+                super::Value::Bool(b) => assert_eq!(b.0, true),
                 _ => panic!("Expected a Value::Bool"),
             }
-            const BOOL2: crate::value::Value<crate::value::ValueTypesStatic> = v_bool!(false);
+            const BOOL2: super::Value<super::ValueTypesStatic> = v_bool!(false);
             match BOOL2 {
-                crate::value::Value::Bool(b) => assert_eq!(b.0, false),
+                super::Value::Bool(b) => assert_eq!(b.0, false),
                 _ => panic!("Expected a Value::Bool"),
             }
         }
 
         #[test]
         fn test_str_macro() {
-            const S: crate::value::ValueString<&'static str> = str!("str");
+            const S: super::ValueString<&'static str> = str!("str");
             assert_eq!(S.0, "str");
         }
 
         #[test]
         fn test_v_str_macro() {
-            const S: crate::value::Value<crate::value::ValueTypesStatic> = v_str!("str");
+            const S: super::Value<super::ValueTypesStatic> = v_str!("str");
             match S {
-                crate::value::Value::String(s) => assert_eq!(s.0, "str"),
+                super::Value::String(s) => assert_eq!(s.0, "str"),
                 _ => panic!("Expected a Value::String"),
             }
         }
 
         #[test]
         fn test_vref_macro() {
-            const V1: crate::value::ValueSemver<crate::value::SemverTypesStatic> = vref!(1u64, &[0u64]);
+            const V1: super::ValueSemver<super::SemverTypesStatic> = vref!(1u64, &[0u64]);
             assert_eq!(V1.major, 1);
             assert_eq!(V1.rest, &[0]);
 
-            const V2: crate::value::ValueSemver<crate::value::SemverTypesStatic> = vref!(4u64, &[]);
+            const V2: super::ValueSemver<super::SemverTypesStatic> = vref!(4u64, &[]);
             assert_eq!(V2.major, 4);
             assert_eq!(V2.rest, &[]);
         }
 
         #[test]
         fn test_v_vref_macro() {
-            const V1: crate::value::Value<crate::value::ValueTypesStatic> = v_vref!(1u64, &[0u64]);
+            const V1: super::Value<super::ValueTypesStatic> = v_vref!(1u64, &[0u64]);
             match V1 {
-                crate::value::Value::Semver(v) => {
+                super::Value::Semver(v) => {
                     assert_eq!(v.major, 1);
                     assert_eq!(v.rest, &[0]);
                 }
                 _ => panic!("Expected a Value::Semver"),
             }
 
-            const V2: crate::value::Value<crate::value::ValueTypesStatic> = v_vref!(4u64, &[]);
+            const V2: super::Value<super::ValueTypesStatic> = v_vref!(4u64, &[]);
             match V2 {
-                crate::value::Value::Semver(v) => {
+                super::Value::Semver(v) => {
                     assert_eq!(v.major, 4);
                     assert_eq!(v.rest, &[]);
                 }
@@ -1262,29 +1252,29 @@ mod tests {
 
         #[test]
         fn test_v_macro() {
-            const V1: crate::value::ValueSemver<crate::value::SemverTypesStatic> = v![2, 1];
+            const V1: super::ValueSemver<super::SemverTypesStatic> = v![2, 1];
             assert_eq!(V1.major, 2);
             assert_eq!(V1.rest, &[1]);
 
-            const V2: crate::value::ValueSemver<crate::value::SemverTypesStatic> = v![3];
+            const V2: super::ValueSemver<super::SemverTypesStatic> = v![3];
             assert_eq!(V2.major, 3);
             assert_eq!(V2.rest, &[]);
         }
 
         #[test]
         fn test_v_v_macro() {
-            const V1: crate::value::Value<crate::value::ValueTypesStatic> = v_v![2, 1];
+            const V1: super::Value<super::ValueTypesStatic> = v_v![2, 1];
             match V1 {
-                crate::value::Value::Semver(v) => {
+                super::Value::Semver(v) => {
                     assert_eq!(v.major, 2);
                     assert_eq!(v.rest, &[1]);
                 }
                 _ => panic!("Expected a Value::Semver"),
             }
 
-            const V2: crate::value::Value<crate::value::ValueTypesStatic> = v_v![3];
+            const V2: super::Value<super::ValueTypesStatic> = v_v![3];
             match V2 {
-                crate::value::Value::Semver(v) => {
+                super::Value::Semver(v) => {
                     assert_eq!(v.major, 3);
                     assert_eq!(v.rest, &[]);
                 }
@@ -1294,24 +1284,20 @@ mod tests {
 
         #[test]
         fn test_lang_kira_macro() {
-            const L1: crate::value::ValueLanguageDirective<
-                &'static str,
-                crate::value::SemverTypesStatic,
-            > = lang_kira![1];
+            const L1: super::ValueLanguageDirective<&'static str, super::SemverTypesStatic> =
+                lang_kira![1];
             match L1 {
-                crate::value::ValueLanguageDirective::Kira(v) => {
+                super::ValueLanguageDirective::Kira(v) => {
                     assert_eq!(v.major, 1);
                     assert_eq!(v.rest, &[]);
                 }
                 _ => panic!("Expected a Value::LanguageDirective with Kira"),
             }
 
-            const L2: crate::value::ValueLanguageDirective<
-                &'static str,
-                crate::value::SemverTypesStatic,
-            > = lang_kira![1, 0];
+            const L2: super::ValueLanguageDirective<&'static str, super::SemverTypesStatic> =
+                lang_kira![1, 0];
             match L2 {
-                crate::value::ValueLanguageDirective::Kira(v) => {
+                super::ValueLanguageDirective::Kira(v) => {
                     assert_eq!(v.major, 1);
                     assert_eq!(v.rest, &[0]);
                 }
@@ -1321,22 +1307,18 @@ mod tests {
 
         #[test]
         fn test_v_lang_kira_macro() {
-            const L1: crate::value::Value<crate::value::ValueTypesStatic> = v_lang_kira![1];
+            const L1: super::Value<super::ValueTypesStatic> = v_lang_kira![1];
             match L1 {
-                crate::value::Value::LanguageDirective(crate::value::ValueLanguageDirective::Kira(
-                    v,
-                )) => {
+                super::Value::LanguageDirective(super::ValueLanguageDirective::Kira(v)) => {
                     assert_eq!(v.major, 1);
                     assert_eq!(v.rest, &[]);
                 }
                 _ => panic!("Expected a Value::LanguageDirective with Kira"),
             }
 
-            const L2: crate::value::Value<crate::value::ValueTypesStatic> = v_lang_kira![1, 0];
+            const L2: super::Value<super::ValueTypesStatic> = v_lang_kira![1, 0];
             match L2 {
-                crate::value::Value::LanguageDirective(crate::value::ValueLanguageDirective::Kira(
-                    v,
-                )) => {
+                super::Value::LanguageDirective(super::ValueLanguageDirective::Kira(v)) => {
                     assert_eq!(v.major, 1);
                     assert_eq!(v.rest, &[0]);
                 }
@@ -1346,12 +1328,10 @@ mod tests {
 
         #[test]
         fn test_lang_other_macro() {
-            const L1: crate::value::ValueLanguageDirective<
-                &'static str,
-                crate::value::SemverTypesStatic,
-            > = lang_other!("not-kira");
+            const L1: super::ValueLanguageDirective<&'static str, super::SemverTypesStatic> =
+                lang_other!("not-kira");
             match L1 {
-                crate::value::ValueLanguageDirective::Other(n) => {
+                super::ValueLanguageDirective::Other(n) => {
                     assert_eq!(n, "not-kira");
                 }
                 _ => panic!("Expected a Value::LanguageDirective with other"),
@@ -1360,11 +1340,9 @@ mod tests {
 
         #[test]
         fn test_v_lang_other_macro() {
-            const L1: crate::value::Value<crate::value::ValueTypesStatic> = v_lang_other!("not-kira");
+            const L1: super::Value<super::ValueTypesStatic> = v_lang_other!("not-kira");
             match L1 {
-                crate::value::Value::LanguageDirective(
-                    crate::value::ValueLanguageDirective::Other(n),
-                ) => {
+                super::Value::LanguageDirective(super::ValueLanguageDirective::Other(n)) => {
                     assert_eq!(n, "not-kira");
                 }
                 _ => panic!("Expected a Value::LanguageDirective with other"),
@@ -1373,10 +1351,10 @@ mod tests {
 
         #[test]
         fn test_func_macro() {
-            const F: crate::value::ValueFunction<&'static str> = func!(qsym!("p", "f1"));
+            const F: super::ValueFunction<&'static str> = func!(qsym!("p", "f1"));
             assert_eq!(
                 F.0,
-                crate::value::ValueQualifiedSymbol::<&'static str> {
+                super::ValueQualifiedSymbol::<&'static str> {
                     package: "p",
                     name: "f1"
                 }
@@ -1385,11 +1363,11 @@ mod tests {
 
         #[test]
         fn test_v_func_macro() {
-            const F: crate::value::Value<crate::value::ValueTypesStatic> = v_func!(qsym!("p", "f1"));
+            const F: super::Value<super::ValueTypesStatic> = v_func!(qsym!("p", "f1"));
             match F {
-                crate::value::Value::Function(crate::value::ValueFunction(name)) => assert_eq!(
+                super::Value::Function(super::ValueFunction(name)) => assert_eq!(
                     name,
-                    crate::value::ValueQualifiedSymbol::<&'static str> {
+                    super::ValueQualifiedSymbol::<&'static str> {
                         package: "p",
                         name: "f1"
                     }
@@ -1400,111 +1378,90 @@ mod tests {
 
         #[test]
         fn test_bq_macro() {
-            const BQ1: crate::value::ValueBackquote<crate::value::ValueTypesStatic> =
-                bq!(v_qsym!("p", "qsym"));
+            const BQ1: super::ValueBackquote<super::ValueTypesStatic> = bq!(v_qsym!("p", "qsym"));
             assert_eq!(*BQ1.0, v_qsym!("p", "qsym"));
 
-            const BQ2: crate::value::ValueBackquote<crate::value::ValueTypesStatic> =
-                bq!(v_str!("str"));
+            const BQ2: super::ValueBackquote<super::ValueTypesStatic> = bq!(v_str!("str"));
             assert_eq!(*BQ2.0, v_str!("str"));
         }
 
         #[test]
         fn test_v_bq_macro() {
-            const BQ: crate::value::Value<crate::value::ValueTypesStatic> = v_bq!(v_bool!(true));
+            const BQ: super::Value<super::ValueTypesStatic> = v_bq!(v_bool!(true));
             match BQ {
-                crate::value::Value::Backquote(crate::value::ValueBackquote(v)) => {
-                    assert_eq!(*v, v_bool!(true))
-                }
+                super::Value::Backquote(super::ValueBackquote(v)) => assert_eq!(*v, v_bool!(true)),
                 _ => panic!("Expected a Value::Backquote"),
             }
         }
 
         #[test]
         fn test_comma_macro() {
-            const C1: crate::value::ValueComma<crate::value::ValueTypesStatic> =
-                comma!(v_qsym!("p", "qsym"));
+            const C1: super::ValueComma<super::ValueTypesStatic> = comma!(v_qsym!("p", "qsym"));
             assert_eq!(*C1.0, v_qsym!("p", "qsym"));
 
-            const C2: crate::value::ValueComma<crate::value::ValueTypesStatic> = comma!(v_str!("str"));
+            const C2: super::ValueComma<super::ValueTypesStatic> = comma!(v_str!("str"));
             assert_eq!(*C2.0, v_str!("str"));
         }
 
         #[test]
         fn test_v_comma_macro() {
-            const C: crate::value::Value<crate::value::ValueTypesStatic> = v_comma!(v_bool!(true));
+            const C: super::Value<super::ValueTypesStatic> = v_comma!(v_bool!(true));
             match C {
-                crate::value::Value::Comma(crate::value::ValueComma(v)) => {
-                    assert_eq!(*v, v_bool!(true))
-                }
+                super::Value::Comma(super::ValueComma(v)) => assert_eq!(*v, v_bool!(true)),
                 _ => panic!("Expected a Value::Comma"),
             }
         }
 
         #[test]
         fn test_splice_macro() {
-            const S1: crate::value::ValueSplice<crate::value::ValueTypesStatic> =
-                splice!(v_qsym!("p", "qsym"));
+            const S1: super::ValueSplice<super::ValueTypesStatic> = splice!(v_qsym!("p", "qsym"));
             assert_eq!(*S1.0, v_qsym!("p", "qsym"));
 
-            const S2: crate::value::ValueSplice<crate::value::ValueTypesStatic> =
-                splice!(v_str!("str"));
+            const S2: super::ValueSplice<super::ValueTypesStatic> = splice!(v_str!("str"));
             assert_eq!(*S2.0, v_str!("str"));
         }
 
         #[test]
         fn test_v_splice_macro() {
-            const S: crate::value::Value<crate::value::ValueTypesStatic> = v_splice!(v_bool!(true));
+            const S: super::Value<super::ValueTypesStatic> = v_splice!(v_bool!(true));
             match S {
-                crate::value::Value::Splice(crate::value::ValueSplice(v)) => {
-                    assert_eq!(*v, v_bool!(true))
-                }
+                super::Value::Splice(super::ValueSplice(v)) => assert_eq!(*v, v_bool!(true)),
                 _ => panic!("Expected a Value::Splice"),
             }
         }
 
         #[test]
         fn test_v_list_macro() {
-            const LIST1: crate::value::Value<crate::value::ValueTypesStatic> = v_list!();
-            assert_eq!(
-                LIST1,
-                crate::value::Value::<crate::value::ValueTypesStatic>::Nil
-            );
+            const LIST1: super::Value<super::ValueTypesStatic> = v_list!();
+            assert_eq!(LIST1, super::Value::<super::ValueTypesStatic>::Nil);
 
-            const LIST2: crate::value::Value<crate::value::ValueTypesStatic> =
-                v_list!(v_uqsym!("uqsym1"));
+            const LIST2: super::Value<super::ValueTypesStatic> = v_list!(v_uqsym!("uqsym1"));
             match LIST2 {
-                crate::value::Value::Cons(c) => {
+                super::Value::Cons(c) => {
                     match &c.0.car {
-                        crate::value::Value::UnqualifiedSymbol(s) => assert_eq!(s.0, "uqsym1"),
+                        super::Value::UnqualifiedSymbol(s) => assert_eq!(s.0, "uqsym1"),
                         _ => panic!("Expected a Value::UnqualifiedSymbol"),
                     }
-                    assert_eq!(
-                        c.0.cdr,
-                        crate::value::Value::<crate::value::ValueTypesStatic>::Nil
-                    );
+                    assert_eq!(c.0.cdr, super::Value::<super::ValueTypesStatic>::Nil);
                 }
                 _ => panic!("Expected a Value::Cons"),
             }
 
-            const LIST3: crate::value::Value<crate::value::ValueTypesStatic> =
+            const LIST3: super::Value<super::ValueTypesStatic> =
                 v_list!(v_uqsym!("uqsym1"), v_uqsym!("uqsym2"));
             match LIST3 {
-                crate::value::Value::Cons(c) => {
+                super::Value::Cons(c) => {
                     match &c.0.car {
-                        crate::value::Value::UnqualifiedSymbol(s) => assert_eq!(s.0, "uqsym1"),
+                        super::Value::UnqualifiedSymbol(s) => assert_eq!(s.0, "uqsym1"),
                         _ => panic!("Expected a Value::UnqualifiedSymbol"),
                     }
                     match &c.0.cdr {
-                        crate::value::Value::Cons(c) => {
+                        super::Value::Cons(c) => {
                             match &c.0.car {
-                                crate::value::Value::UnqualifiedSymbol(s) => assert_eq!(s.0, "uqsym2"),
+                                super::Value::UnqualifiedSymbol(s) => assert_eq!(s.0, "uqsym2"),
                                 _ => panic!("Expected a Value::UnqualifiedSymbol"),
                             }
-                            assert_eq!(
-                                c.0.cdr,
-                                crate::value::Value::<crate::value::ValueTypesStatic>::Nil
-                            );
+                            assert_eq!(c.0.cdr, super::Value::<super::ValueTypesStatic>::Nil);
                         }
                         _ => panic!("Expected a Value::Cons"),
                     }
@@ -1512,31 +1469,31 @@ mod tests {
                 _ => panic!("Expected a Value::Cons"),
             }
 
-            const LIST4: crate::value::Value<crate::value::ValueTypesStatic> =
+            const LIST4: super::Value<super::ValueTypesStatic> =
                 v_list!(v_uqsym!("uqsym1"), v_uqsym!("uqsym2"), v_uqsym!("uqsym3"));
             match LIST4 {
-                crate::value::Value::Cons(c) => {
+                super::Value::Cons(c) => {
                     match &c.0.car {
-                        crate::value::Value::UnqualifiedSymbol(s) => assert_eq!(s.0, "uqsym1"),
+                        super::Value::UnqualifiedSymbol(s) => assert_eq!(s.0, "uqsym1"),
                         _ => panic!("Expected a Value::UnqualifiedSymbol"),
                     }
                     match &c.0.cdr {
-                        crate::value::Value::Cons(c) => {
+                        super::Value::Cons(c) => {
                             match &c.0.car {
-                                crate::value::Value::UnqualifiedSymbol(s) => assert_eq!(s.0, "uqsym2"),
+                                super::Value::UnqualifiedSymbol(s) => assert_eq!(s.0, "uqsym2"),
                                 _ => panic!("Expected a Value::UnqualifiedSymbol"),
                             }
                             match &c.0.cdr {
-                                crate::value::Value::Cons(c) => {
+                                super::Value::Cons(c) => {
                                     match &c.0.car {
-                                        crate::value::Value::UnqualifiedSymbol(s) => {
+                                        super::Value::UnqualifiedSymbol(s) => {
                                             assert_eq!(s.0, "uqsym3")
                                         }
                                         _ => panic!("Expected a Value::UnqualifiedSymbol"),
                                     }
                                     assert_eq!(
                                         c.0.cdr,
-                                        crate::value::Value::<crate::value::ValueTypesStatic>::Nil
+                                        super::Value::<super::ValueTypesStatic>::Nil
                                     );
                                 }
                                 _ => panic!("Expected a Value::Cons"),
@@ -1575,16 +1532,12 @@ mod tests {
         assert_eq!(v_uqsym!("uqsym"), v_uqsym!("uqsym"));
         assert_eq!(
             v_uqsym!("uqsym"),
-            Value::<ValueTypesRc>::UnqualifiedSymbol(ValueUnqualifiedSymbol(
-                "uqsym".to_string()
-            ))
+            Value::<ValueTypesRc>::UnqualifiedSymbol(ValueUnqualifiedSymbol("uqsym".to_string()))
         );
         assert_ne!(v_uqsym!("uqsym1"), v_uqsym!("uqsym2"));
         assert_ne!(
             v_uqsym!("uqsym1"),
-            Value::<ValueTypesRc>::UnqualifiedSymbol(ValueUnqualifiedSymbol(
-                "uqsym2".to_string()
-            ))
+            Value::<ValueTypesRc>::UnqualifiedSymbol(ValueUnqualifiedSymbol("uqsym2".to_string()))
         );
         assert_ne!(v_uqsym!("uqsym"), v_str!("uqsym"));
         assert_ne!(v_uqsym!("uqsym"), v_nil!());
