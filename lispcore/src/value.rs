@@ -1108,6 +1108,12 @@ macro_rules! v_list {
     ($e:expr, $($es:expr),+) => { v_cons!($e, v_list!($($es),*)) };
 }
 
+#[macro_export]
+macro_rules! v_tlist {
+    ($e:expr) => { $e };
+    ($e:expr, $($es:expr),+) => { v_cons!($e, v_tlist!($($es),*)) };
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1497,6 +1503,56 @@ mod tests {
                                     );
                                 }
                                 _ => panic!("Expected a Value::Cons"),
+                            }
+                        }
+                        _ => panic!("Expected a Value::Cons"),
+                    }
+                }
+                _ => panic!("Expected a Value::Cons"),
+            }
+        }
+
+        #[test]
+        fn test_v_tlist_macro() {
+            const LIST1: super::Value<super::ValueTypesStatic> = v_tlist!(v_uqsym!("uqsym1"));
+            match LIST1 {
+                super::Value::UnqualifiedSymbol(s) => assert_eq!(s.0, "uqsym1"),
+                _ => panic!("Expected a Value::UnqualifiedSymbol"),
+            }
+
+            const LIST2: super::Value<super::ValueTypesStatic> =
+                v_tlist!(v_uqsym!("uqsym1"), v_uqsym!("uqsym2"));
+            match LIST2 {
+                super::Value::Cons(c) => {
+                    match &c.0.car {
+                        super::Value::UnqualifiedSymbol(s) => assert_eq!(s.0, "uqsym1"),
+                        _ => panic!("Expected a Value::UnqualifiedSymbol"),
+                    }
+                    match &c.0.cdr {
+                        super::Value::UnqualifiedSymbol(s) => assert_eq!(s.0, "uqsym2"),
+                        _ => panic!("Expected a Value::UnqualifiedSymbol"),
+                    }
+                }
+                _ => panic!("Expected a Value::Cons"),
+            }
+
+            const LIST3: super::Value<super::ValueTypesStatic> =
+                v_tlist!(v_uqsym!("uqsym1"), v_uqsym!("uqsym2"), v_uqsym!("uqsym3"));
+            match LIST3 {
+                super::Value::Cons(c) => {
+                    match &c.0.car {
+                        super::Value::UnqualifiedSymbol(s) => assert_eq!(s.0, "uqsym1"),
+                        _ => panic!("Expected a Value::UnqualifiedSymbol"),
+                    }
+                    match &c.0.cdr {
+                        super::Value::Cons(c) => {
+                            match &c.0.car {
+                                super::Value::UnqualifiedSymbol(s) => assert_eq!(s.0, "uqsym2"),
+                                _ => panic!("Expected a Value::UnqualifiedSymbol"),
+                            }
+                            match &c.0.cdr {
+                                super::Value::UnqualifiedSymbol(s) => assert_eq!(s.0, "uqsym3"),
+                                _ => panic!("Expected a Value::UnqualifiedSymbol"),
                             }
                         }
                         _ => panic!("Expected a Value::Cons"),
