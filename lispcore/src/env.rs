@@ -118,6 +118,44 @@ where
                                 }
                             }
                         }
+                        Value::UnqualifiedSymbol(name) => {
+                            match self.resolve_symbol_get_variable(&name) {
+                                Option::Some(name) => match self.compile_variable(&name) {
+                                    Option::Some(types) => {
+                                        TryCompilationResult::Compiled(CompilationResult {
+                                            result: Box::new(VariableEvaluator::new(name)),
+                                            types,
+                                        })
+                                    }
+                                    Option::None => {
+                                        return Result::Err(Error::new(
+                                            ErrorKind::ValueNotDefined,
+                                            "Value not defined",
+                                        ))
+                                    }
+                                },
+                                Option::None => {
+                                    return Result::Err(Error::new(
+                                        ErrorKind::ValueNotDefined,
+                                        "Value not defined",
+                                    ))
+                                }
+                            }
+                        }
+                        Value::QualifiedSymbol(name) => match self.compile_variable(&name) {
+                            Option::Some(types) => {
+                                TryCompilationResult::Compiled(CompilationResult {
+                                    result: Box::new(VariableEvaluator::new(name)),
+                                    types,
+                                })
+                            }
+                            Option::None => {
+                                return Result::Err(Error::new(
+                                    ErrorKind::ValueNotDefined,
+                                    "Value not defined",
+                                ))
+                            }
+                        },
                         _ => {
                             let t = v.value_type();
                             TryCompilationResult::Compiled(CompilationResult {
@@ -717,6 +755,48 @@ mod tests {
             v_v![1, 0],
             v_v![1, 0],
             BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::Semver)]),
+        );
+    }
+
+    #[test]
+    fn test_compile_and_evaluate_variable() {
+        use super::*;
+
+        let mut env = SimpleEnvironment;
+        test_compile_and_evaluate(
+            &mut env,
+            v_uqsym!("var1"),
+            v_str!("str"),
+            BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::String)]),
+        );
+        test_compile_and_evaluate(
+            &mut env,
+            v_uqsym!("var2"),
+            v_bool!(true),
+            BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::Bool)]),
+        );
+        assert_eq!(
+            env.compile(v_uqsym!("var3").convert()).unwrap_err().kind,
+            ErrorKind::ValueNotDefined
+        );
+
+        test_compile_and_evaluate(
+            &mut env,
+            v_qsym!("pvar", "var1"),
+            v_str!("str"),
+            BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::String)]),
+        );
+        test_compile_and_evaluate(
+            &mut env,
+            v_qsym!("pvar", "var2"),
+            v_bool!(true),
+            BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::Bool)]),
+        );
+        assert_eq!(
+            env.compile(v_qsym!("pvar", "var3").convert())
+                .unwrap_err()
+                .kind,
+            ErrorKind::ValueNotDefined
         );
     }
 
