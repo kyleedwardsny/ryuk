@@ -768,7 +768,10 @@ mod tests {
 
     #[test]
     fn test_read_backquote() {
-        let s = "`a `,b `(c) `(,@d) `(,e) `((,f) (,@g) . ,h) `,@i `(j . ,@k) ,l ,@m `,,n `,,@o ``,,p ``,,,q `(`(,,r)) `(`(s . ,@t)) ``(,,@u) ``(,,v) ``(,@,w)";
+        let s = concat!(
+            "`a `,b `(c) `(,@d) `(,e) `((,f) (,@g) . ,h) `,@i `(j . ,@k) ,l ,@m `,,n `,,@o ``,,p ",
+            "``,,,q `(`(,,r)) `(`(s . ,@t)) ``(,,@u) ``(,,v) ``(,@,w) ``(,@(,@x)) ``(,(,y))"
+        );
         let mut i = LispParser::<ValueTypesRc, _>::new(s.chars().peekable());
         assert_eq!(i.next().unwrap().unwrap(), v_bq!(v_uqsym!("a")));
         assert_eq!(i.next().unwrap().unwrap(), v_bq!(v_comma!(v_uqsym!("b"))));
@@ -856,6 +859,14 @@ mod tests {
         assert_eq!(
             i.next().unwrap().unwrap(),
             v_bq!(v_bq!(v_list!(v_splice!(v_comma!(v_uqsym!("w"))))))
+        );
+        assert_eq!(
+            i.next().unwrap().unwrap(),
+            v_bq!(v_bq!(v_list!(v_splice!(v_list!(v_splice!(v_uqsym!("x")))))))
+        );
+        assert_eq!(
+            i.next().unwrap().unwrap(),
+            v_bq!(v_bq!(v_list!(v_comma!(v_list!(v_comma!(v_uqsym!("y")))))))
         );
     }
 
