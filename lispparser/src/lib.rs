@@ -75,12 +75,14 @@ where
     }
 }
 
+#[derive(Debug)]
 enum BackquoteStatus {
     None,
     Item,
     Tail,
 }
 
+#[derive(Debug)]
 struct BackquoteStatusEntry<'prev> {
     status: BackquoteStatus,
     previous: Option<&'prev BackquoteStatusEntry<'prev>>,
@@ -221,8 +223,11 @@ where
         peekable,
         ')',
         &BackquoteStatusEntry {
-            status: BackquoteStatus::Item,
-            previous: Option::Some(bq),
+            status: match bq.status {
+                BackquoteStatus::None => BackquoteStatus::None,
+                _ => BackquoteStatus::Item,
+            },
+            previous: bq.previous,
         },
     )? {
         ReadDelimitedResult::Value(v) => Result::Ok(Value::<T>::Cons(ValueCons(
@@ -237,8 +242,11 @@ where
                 peekable,
                 ')',
                 &BackquoteStatusEntry {
-                    status: BackquoteStatus::Tail,
-                    previous: Option::Some(bq),
+                    status: match bq.status {
+                        BackquoteStatus::None => BackquoteStatus::None,
+                        _ => BackquoteStatus::Tail,
+                    },
+                    previous: bq.previous,
                 },
             )? {
                 ReadDelimitedResult::Value(cdr) => match read_delimited::<T, I>(peekable, ')', bq)?
@@ -770,7 +778,8 @@ mod tests {
     fn test_read_backquote() {
         let s = concat!(
             "`a `,b `(c) `(,@d) `(,e) `((,f) (,@g) . ,h) `,@i `(j . ,@k) ,l ,@m `,,n `,,@o ``,,p ",
-            "``,,,q `(`(,,r)) `(`(s . ,@t)) ``(,,@u) ``(,,v) ``(,@,w) ``(,@(,@x)) ``(,(,y))"
+            "``,,,q `(`(,,r)) `(`(s . ,@t)) ``(,,@u) ``(,,v) ``(,@,w) ``(,@(,@x)) ``(,(,y)) (,z) ",
+            "(,@aa) `(,(,ab)) `(,(ac . ,@ad)) `(,(ae . (,@af))) ``(,(,(ah (,ai))))"
         );
         let mut i = LispParser::<ValueTypesRc, _>::new(s.chars().peekable());
         assert_eq!(i.next().unwrap().unwrap(), v_bq!(v_uqsym!("a")));
@@ -867,6 +876,79 @@ mod tests {
         assert_eq!(
             i.next().unwrap().unwrap(),
             v_bq!(v_bq!(v_list!(v_comma!(v_list!(v_comma!(v_uqsym!("y")))))))
+        );
+        assert_eq!(i.next().unwrap().unwrap_err().kind, ErrorKind::IllegalComma);
+        assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("z"));
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            ErrorKind::InvalidCharacter
+        );
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            ErrorKind::IllegalSplice
+        );
+        assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("aa"));
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            ErrorKind::InvalidCharacter
+        );
+        assert_eq!(i.next().unwrap().unwrap_err().kind, ErrorKind::IllegalComma);
+        assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("ab"));
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            ErrorKind::InvalidCharacter
+        );
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            ErrorKind::InvalidCharacter
+        );
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            ErrorKind::IllegalSplice
+        );
+        assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("ad"));
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            ErrorKind::InvalidCharacter
+        );
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            ErrorKind::InvalidCharacter
+        );
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            ErrorKind::IllegalSplice
+        );
+        assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("af"));
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            ErrorKind::InvalidCharacter
+        );
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            ErrorKind::InvalidCharacter
+        );
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            ErrorKind::InvalidCharacter
+        );
+        assert_eq!(i.next().unwrap().unwrap_err().kind, ErrorKind::IllegalComma);
+        assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("ai"));
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            ErrorKind::InvalidCharacter
+        );
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            ErrorKind::InvalidCharacter
+        );
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            ErrorKind::InvalidCharacter
+        );
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            ErrorKind::InvalidCharacter
         );
     }
 
