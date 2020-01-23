@@ -456,7 +456,7 @@ where
                 peekable,
                 &BackquoteStatusEntry {
                     status: BackquoteStatus::Tail,
-                    previous: Option::Some(&bq),
+                    previous: Option::Some(bq),
                 },
             )? {
                 ReadImplResult::Value(v) => Result::Ok(ReadImplResult::Value(Value::Backquote(
@@ -779,7 +779,8 @@ mod tests {
         let s = concat!(
             "`a `,b `(c) `(,@d) `(,e) `((,f) (,@g) . ,h) `,@i `(j . ,@k) ,l ,@m `,,n `,,@o ``,,p ",
             "``,,,q `(`(,,r)) `(`(s . ,@t)) ``(,,@u) ``(,,v) ``(,@,w) ``(,@(,@x)) ``(,(,y)) (,z) ",
-            "(,@aa) `(,(,ab)) `(,(ac . ,@ad)) `(,(ae . (,@af))) ``(,(,(ah (,ai))))"
+            "(,@aa) `(,(,ab)) `(,(ac . ,@ad)) `(,(ae . (,@af))) ``(,(,(ah (,ai)))) ",
+            "``(,(aj . ,((,ak))))"
         );
         let mut i = LispParser::<ValueTypesRc, _>::new(s.chars().peekable());
         assert_eq!(i.next().unwrap().unwrap(), v_bq!(v_uqsym!("a")));
@@ -934,6 +935,24 @@ mod tests {
         );
         assert_eq!(i.next().unwrap().unwrap_err().kind, ErrorKind::IllegalComma);
         assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("ai"));
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            ErrorKind::InvalidCharacter
+        );
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            ErrorKind::InvalidCharacter
+        );
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            ErrorKind::InvalidCharacter
+        );
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            ErrorKind::InvalidCharacter
+        );
+        assert_eq!(i.next().unwrap().unwrap_err().kind, ErrorKind::IllegalComma);
+        assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("ak"));
         assert_eq!(
             i.next().unwrap().unwrap_err().kind,
             ErrorKind::InvalidCharacter
