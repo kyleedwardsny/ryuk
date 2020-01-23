@@ -478,7 +478,17 @@ where
                         peekable.next();
                         match bq.status {
                             BackquoteStatus::Item => {
-                                match read_impl(peekable, bq.previous.unwrap())? {
+                                let previous = bq.previous.unwrap();
+                                match read_impl(
+                                    peekable,
+                                    &BackquoteStatusEntry {
+                                        status: match previous.status {
+                                            BackquoteStatus::None => BackquoteStatus::None,
+                                            _ => BackquoteStatus::Tail,
+                                        },
+                                        previous: previous.previous,
+                                    },
+                                )? {
                                     ReadImplResult::Value(v) => Result::Ok(ReadImplResult::Value(
                                         Value::Splice(ValueSplice(v.into())),
                                     )),
@@ -501,19 +511,31 @@ where
                             BackquoteStatus::None => {
                                 Result::Err(Error::new(ErrorKind::IllegalComma, "Illegal comma"))
                             }
-                            _ => match read_impl(peekable, bq.previous.unwrap())? {
-                                ReadImplResult::Value(v) => Result::Ok(ReadImplResult::Value(
-                                    Value::Comma(ValueComma(v.into())),
-                                )),
-                                ReadImplResult::InvalidToken(t) => Result::Err(Error::new(
-                                    ErrorKind::InvalidToken,
-                                    format!("Invalid token: '{}'", t),
-                                )),
-                                ReadImplResult::EndOfFile => Result::Err(Error::new(
-                                    ErrorKind::EndOfFile,
-                                    "End of file reached",
-                                )),
-                            },
+                            _ => {
+                                let previous = bq.previous.unwrap();
+                                match read_impl(
+                                    peekable,
+                                    &BackquoteStatusEntry {
+                                        status: match previous.status {
+                                            BackquoteStatus::None => BackquoteStatus::None,
+                                            _ => BackquoteStatus::Tail,
+                                        },
+                                        previous: previous.previous,
+                                    },
+                                )? {
+                                    ReadImplResult::Value(v) => Result::Ok(ReadImplResult::Value(
+                                        Value::Comma(ValueComma(v.into())),
+                                    )),
+                                    ReadImplResult::InvalidToken(t) => Result::Err(Error::new(
+                                        ErrorKind::InvalidToken,
+                                        format!("Invalid token: '{}'", t),
+                                    )),
+                                    ReadImplResult::EndOfFile => Result::Err(Error::new(
+                                        ErrorKind::EndOfFile,
+                                        "End of file reached",
+                                    )),
+                                }
+                            }
                         }
                     }
                 }
@@ -780,7 +802,7 @@ mod tests {
             "`a `,b `(c) `(,@d) `(,e) `((,f) (,@g) . ,h) `,@i `(j . ,@k) ,l ,@m `,,n `,,@o ``,,p ",
             "``,,,q `(`(,,r)) `(`(s . ,@t)) ``(,,@u) ``(,,v) ``(,@,w) ``(,@(,@x)) ``(,(,y)) (,z) ",
             "(,@aa) `(,(,ab)) `(,(ac . ,@ad)) `(,(ae . (,@af))) ``(,(,(ah (,ai)))) ",
-            "``(,(aj . ,((,ak))))"
+            "``(,(aj . ,((,ak)))) `(`(,(al ,,@am))) `(`(an ,,@ao)) `(`(ap ,@,@aq))"
         );
         let mut i = LispParser::<ValueTypesRc, _>::new(s.chars().peekable());
         assert_eq!(i.next().unwrap().unwrap(), v_bq!(v_uqsym!("a")));
@@ -961,6 +983,49 @@ mod tests {
             i.next().unwrap().unwrap_err().kind,
             ErrorKind::InvalidCharacter
         );
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            ErrorKind::InvalidCharacter
+        );
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            ErrorKind::InvalidCharacter
+        );
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            ErrorKind::IllegalSplice
+        );
+        assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("am"));
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            ErrorKind::InvalidCharacter
+        );
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            ErrorKind::InvalidCharacter
+        );
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            ErrorKind::InvalidCharacter
+        );
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            ErrorKind::IllegalSplice
+        );
+        assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("ao"));
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            ErrorKind::InvalidCharacter
+        );
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            ErrorKind::InvalidCharacter
+        );
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            ErrorKind::IllegalSplice
+        );
+        assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("aq"));
         assert_eq!(
             i.next().unwrap().unwrap_err().kind,
             ErrorKind::InvalidCharacter
