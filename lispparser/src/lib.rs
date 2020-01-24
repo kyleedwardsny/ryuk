@@ -327,27 +327,13 @@ where
 {
     skip_whitespace(peekable)?;
 
-    match read_token(peekable)? {
-        ReadTokenResult::ValidToken(t) => Result::Ok(if t == "kira" {
-            skip_whitespace(peekable)?;
-            let token = read_token(peekable)?;
-            match token {
-                ReadTokenResult::ValidToken(t) => ValueLanguageDirective::Kira(parse_semver(&t)?),
-                ReadTokenResult::InvalidToken(t) => {
-                    return Result::Err(Error::new(
-                        ErrorKind::InvalidToken,
-                        format!("Invalid token: '{}'", t),
-                    ))
-                }
-            }
-        } else {
-            ValueLanguageDirective::Other(t.into())
-        }),
-        ReadTokenResult::InvalidToken(t) => Result::Err(Error::new(
-            ErrorKind::InvalidToken,
-            format!("Invalid token: '{}'", t),
-        )),
-    }
+    let t = read_token(peekable)?.try_unwrap_token()?;
+    Result::Ok(if t == "kira" {
+        skip_whitespace(peekable)?;
+        ValueLanguageDirective::Kira(parse_semver(&read_token(peekable)?.try_unwrap_token()?)?)
+    } else {
+        ValueLanguageDirective::Other(t.into())
+    })
 }
 
 fn read_macro<T, I>(peekable: &mut Peekable<I>) -> Result<Value<T>>
@@ -363,31 +349,20 @@ where
     if let Option::Some(&c) = peekable.peek() {
         if c == 'v' {
             peekable.next();
-            match read_token(peekable)? {
-                ReadTokenResult::ValidToken(t) => {
-                    Result::Ok(Value::Semver(parse_semver(&t)?).into())
-                }
-                ReadTokenResult::InvalidToken(t) => Result::Err(Error::new(
-                    ErrorKind::InvalidToken,
-                    format!("Invalid token: '{}'", t),
-                )),
-            }
+            Result::Ok(
+                Value::Semver(parse_semver(&read_token(peekable)?.try_unwrap_token()?)?).into(),
+            )
         } else {
-            match read_token(peekable)? {
-                ReadTokenResult::ValidToken(t) => match &*t {
-                    "lang" => Result::Ok(
-                        Value::LanguageDirective(read_language_directive(peekable)?).into(),
-                    ),
-                    "t" => Result::Ok(Value::Bool(ValueBool(true)).into()),
-                    "f" => Result::Ok(Value::Bool(ValueBool(false)).into()),
-                    _ => Result::Err(Error::new(
-                        ErrorKind::InvalidToken,
-                        format!("Invalid macro: '{}'", t),
-                    )),
-                },
-                ReadTokenResult::InvalidToken(t) => Result::Err(Error::new(
+            let t = read_token(peekable)?.try_unwrap_token()?;
+            match &*t {
+                "lang" => {
+                    Result::Ok(Value::LanguageDirective(read_language_directive(peekable)?).into())
+                }
+                "t" => Result::Ok(Value::Bool(ValueBool(true)).into()),
+                "f" => Result::Ok(Value::Bool(ValueBool(false)).into()),
+                _ => Result::Err(Error::new(
                     ErrorKind::InvalidToken,
-                    format!("Invalid token: '{}'", t),
+                    format!("Invalid macro: '{}'", t),
                 )),
             }
         }
@@ -402,6 +377,18 @@ where
 enum ReadTokenResult {
     ValidToken(String),
     InvalidToken(String),
+}
+
+impl ReadTokenResult {
+    pub fn try_unwrap_token(self) -> Result<String> {
+        match self {
+            Self::ValidToken(t) => Result::Ok(t),
+            Self::InvalidToken(t) => Result::Err(Error::new(
+                ErrorKind::InvalidToken,
+                format!("Invalid token: '{}'", t),
+            )),
+        }
+    }
 }
 
 fn read_token<I>(peekable: &mut Peekable<I>) -> Result<ReadTokenResult>
@@ -533,18 +520,15 @@ where
                 ReadTokenResult::ValidToken(t1) => match peekable.peek() {
                     Option::Some(':') => {
                         peekable.next();
-                        match read_token(peekable)? {
-                            ReadTokenResult::ValidToken(t2) => Result::Ok(ReadImplResult::Value(
-                                Value::QualifiedSymbol(ValueQualifiedSymbol {
-                                    package: t1.to_lowercase().into(),
-                                    name: t2.to_lowercase().into(),
-                                }),
-                            )),
-                            ReadTokenResult::InvalidToken(t) => Result::Err(Error::new(
-                                ErrorKind::InvalidToken,
-                                format!("Invalid token: '{}'", t),
-                            )),
-                        }
+                        Result::Ok(ReadImplResult::Value(Value::QualifiedSymbol(
+                            ValueQualifiedSymbol {
+                                package: t1.to_lowercase().into(),
+                                name: read_token(peekable)?
+                                    .try_unwrap_token()?
+                                    .to_lowercase()
+                                    .into(),
+                            },
+                        )))
                     }
                     _ => Result::Ok(ReadImplResult::Value(Value::UnqualifiedSymbol(
                         ValueUnqualifiedSymbol(t1.to_lowercase().into()),
