@@ -1,6 +1,6 @@
 use super::error::*;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ListItem<T> {
     Item(T),
     List(T),

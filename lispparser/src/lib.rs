@@ -1,3 +1,4 @@
+use ryuk_lispcore::list::ListItem;
 use ryuk_lispcore::value::*;
 use std::borrow::{Borrow, BorrowMut};
 use std::fmt::Formatter;
@@ -75,17 +76,62 @@ where
     }
 }
 
-#[derive(Debug)]
-enum BackquoteStatus {
-    None,
-    Item,
-    Tail,
+#[derive(Clone, Copy, Debug)]
+struct BackquoteStatus {
+    depth: u32,
+    status: ListItem<()>,
 }
 
-#[derive(Debug)]
-struct BackquoteStatusEntry<'prev> {
-    status: BackquoteStatus,
-    previous: Option<&'prev BackquoteStatusEntry<'prev>>,
+impl BackquoteStatus {
+    pub fn new() -> Self {
+        Self {
+            depth: 0,
+            status: ListItem::List(()),
+        }
+    }
+
+    pub fn backquote(&self) -> Self {
+        Self {
+            depth: self.depth + 1,
+            status: ListItem::List(()),
+        }
+    }
+
+    pub fn list_item(&self) -> Self {
+        Self {
+            depth: self.depth,
+            status: ListItem::Item(()),
+        }
+    }
+
+    pub fn list_tail(&self) -> Self {
+        Self {
+            depth: self.depth,
+            status: ListItem::List(()),
+        }
+    }
+
+    pub fn comma(&self) -> Result<Self> {
+        if self.depth == 0 {
+            Result::Err(Error::new(ErrorKind::IllegalComma, "Illegal comma"))
+        } else {
+            Result::Ok(Self {
+                depth: self.depth - 1,
+                status: ListItem::List(()),
+            })
+        }
+    }
+
+    pub fn splice(&self) -> Result<Self> {
+        if self.depth == 0 || self.status != ListItem::Item(()) {
+            Result::Err(Error::new(ErrorKind::IllegalSplice, "Illegal splice"))
+        } else {
+            Result::Ok(Self {
+                depth: self.depth - 1,
+                status: ListItem::List(()),
+            })
+        }
+    }
 }
 
 impl<T, I> Iterator for LispParser<T, I>
@@ -104,13 +150,7 @@ where
     type Item = Result<Value<T>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match read_impl(
-            &mut self.reader,
-            &BackquoteStatusEntry {
-                status: BackquoteStatus::None,
-                previous: Option::None,
-            },
-        ) {
+        match read_impl(&mut self.reader, BackquoteStatus::new()) {
             Result::Ok(r) => match r {
                 ReadImplResult::Value(v) => Option::Some(Result::Ok(v)),
                 ReadImplResult::InvalidToken(t) => Option::Some(Result::Err(Error::new(
@@ -165,7 +205,7 @@ where
 fn read_delimited<T, I>(
     peekable: &mut Peekable<I>,
     delimiter: char,
-    bq: &BackquoteStatusEntry,
+    bq: BackquoteStatus,
 ) -> Result<ReadDelimitedResult<T>>
 where
     T: ValueTypes + ?Sized,
@@ -205,7 +245,7 @@ where
 fn read_list<T, I>(
     peekable: &mut Peekable<I>,
     allow_dot: bool,
-    bq: &BackquoteStatusEntry,
+    bq: BackquoteStatus,
 ) -> Result<Value<T>>
 where
     T: ValueTypes + ?Sized,
@@ -219,17 +259,7 @@ where
         Default + BorrowMut<<T::SemverTypes as SemverTypes>::Semver>,
     Value<T>: Into<T::ValueRef>,
 {
-    match read_delimited(
-        peekable,
-        ')',
-        &BackquoteStatusEntry {
-            status: match bq.status {
-                BackquoteStatus::None => BackquoteStatus::None,
-                _ => BackquoteStatus::Item,
-            },
-            previous: bq.previous,
-        },
-    )? {
+    match read_delimited(peekable, ')', bq.list_item())? {
         ReadDelimitedResult::Value(v) => Result::Ok(Value::<T>::Cons(ValueCons(
             Cons {
                 car: v,
@@ -238,17 +268,7 @@ where
             .into(),
         ))),
         ReadDelimitedResult::InvalidToken(t) => match (allow_dot, &*t) {
-            (true, ".") => match read_delimited(
-                peekable,
-                ')',
-                &BackquoteStatusEntry {
-                    status: match bq.status {
-                        BackquoteStatus::None => BackquoteStatus::None,
-                        _ => BackquoteStatus::Tail,
-                    },
-                    previous: bq.previous,
-                },
-            )? {
+            (true, ".") => match read_delimited(peekable, ')', bq.list_tail())? {
                 ReadDelimitedResult::Value(cdr) => match read_delimited::<T, I>(peekable, ')', bq)?
                 {
                     ReadDelimitedResult::EndDelimiter => Result::Ok(cdr),
@@ -421,10 +441,7 @@ where
     EndOfFile,
 }
 
-fn read_impl<T, I>(
-    peekable: &mut Peekable<I>,
-    bq: &BackquoteStatusEntry,
-) -> Result<ReadImplResult<T>>
+fn read_impl<T, I>(peekable: &mut Peekable<I>, bq: BackquoteStatus) -> Result<ReadImplResult<T>>
 where
     T: ValueTypes + ?Sized,
     for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
@@ -452,13 +469,7 @@ where
             ))))
         } else if c == '`' {
             peekable.next();
-            match read_impl(
-                peekable,
-                &BackquoteStatusEntry {
-                    status: BackquoteStatus::Tail,
-                    previous: Option::Some(bq),
-                },
-            )? {
+            match read_impl(peekable, bq.backquote())? {
                 ReadImplResult::Value(v) => Result::Ok(ReadImplResult::Value(Value::Backquote(
                     ValueBackquote(v.into()),
                 ))),
@@ -476,65 +487,29 @@ where
                 Option::Some(&c2) => {
                     if c2 == '@' {
                         peekable.next();
-                        match bq.status {
-                            BackquoteStatus::Item => {
-                                let previous = bq.previous.unwrap();
-                                match read_impl(
-                                    peekable,
-                                    &BackquoteStatusEntry {
-                                        status: match previous.status {
-                                            BackquoteStatus::None => BackquoteStatus::None,
-                                            _ => BackquoteStatus::Tail,
-                                        },
-                                        previous: previous.previous,
-                                    },
-                                )? {
-                                    ReadImplResult::Value(v) => Result::Ok(ReadImplResult::Value(
-                                        Value::Splice(ValueSplice(v.into())),
-                                    )),
-                                    ReadImplResult::InvalidToken(t) => Result::Err(Error::new(
-                                        ErrorKind::InvalidToken,
-                                        format!("Invalid token: '{}'", t),
-                                    )),
-                                    ReadImplResult::EndOfFile => Result::Err(Error::new(
-                                        ErrorKind::EndOfFile,
-                                        "End of file reached",
-                                    )),
-                                }
-                            }
-                            _ => {
-                                Result::Err(Error::new(ErrorKind::IllegalSplice, "Illegal splice"))
+                        match read_impl(peekable, bq.splice()?)? {
+                            ReadImplResult::Value(v) => Result::Ok(ReadImplResult::Value(
+                                Value::Splice(ValueSplice(v.into())),
+                            )),
+                            ReadImplResult::InvalidToken(t) => Result::Err(Error::new(
+                                ErrorKind::InvalidToken,
+                                format!("Invalid token: '{}'", t),
+                            )),
+                            ReadImplResult::EndOfFile => {
+                                Result::Err(Error::new(ErrorKind::EndOfFile, "End of file reached"))
                             }
                         }
                     } else {
-                        match bq.status {
-                            BackquoteStatus::None => {
-                                Result::Err(Error::new(ErrorKind::IllegalComma, "Illegal comma"))
-                            }
-                            _ => {
-                                let previous = bq.previous.unwrap();
-                                match read_impl(
-                                    peekable,
-                                    &BackquoteStatusEntry {
-                                        status: match previous.status {
-                                            BackquoteStatus::None => BackquoteStatus::None,
-                                            _ => BackquoteStatus::Tail,
-                                        },
-                                        previous: previous.previous,
-                                    },
-                                )? {
-                                    ReadImplResult::Value(v) => Result::Ok(ReadImplResult::Value(
-                                        Value::Comma(ValueComma(v.into())),
-                                    )),
-                                    ReadImplResult::InvalidToken(t) => Result::Err(Error::new(
-                                        ErrorKind::InvalidToken,
-                                        format!("Invalid token: '{}'", t),
-                                    )),
-                                    ReadImplResult::EndOfFile => Result::Err(Error::new(
-                                        ErrorKind::EndOfFile,
-                                        "End of file reached",
-                                    )),
-                                }
+                        match read_impl(peekable, bq.comma()?)? {
+                            ReadImplResult::Value(v) => Result::Ok(ReadImplResult::Value(
+                                Value::Comma(ValueComma(v.into())),
+                            )),
+                            ReadImplResult::InvalidToken(t) => Result::Err(Error::new(
+                                ErrorKind::InvalidToken,
+                                format!("Invalid token: '{}'", t),
+                            )),
+                            ReadImplResult::EndOfFile => {
+                                Result::Err(Error::new(ErrorKind::EndOfFile, "End of file reached"))
                             }
                         }
                     }
