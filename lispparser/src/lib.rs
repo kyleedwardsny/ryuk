@@ -441,6 +441,23 @@ where
     EndOfFile,
 }
 
+impl<T> ReadImplResult<T>
+where
+    T: ValueTypes + ?Sized,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+{
+    pub fn try_unwrap_value(self) -> Result<Value<T>> {
+        match self {
+            Self::Value(v) => Result::Ok(v),
+            Self::InvalidToken(t) => Result::Err(Error::new(
+                ErrorKind::InvalidToken,
+                format!("Invalid token: '{}'", t),
+            )),
+            Self::EndOfFile => Result::Err(Error::new(ErrorKind::EndOfFile, "End of file reached")),
+        }
+    }
+}
+
 fn read_impl<T, I>(peekable: &mut Peekable<I>, bq: BackquoteStatus) -> Result<ReadImplResult<T>>
 where
     T: ValueTypes + ?Sized,
@@ -469,84 +486,48 @@ where
             ))))
         } else if c == '`' {
             peekable.next();
-            match read_impl(peekable, bq.backquote())? {
-                ReadImplResult::Value(v) => Result::Ok(ReadImplResult::Value(Value::Backquote(
-                    ValueBackquote(v.into()),
-                ))),
-                ReadImplResult::InvalidToken(t) => Result::Err(Error::new(
-                    ErrorKind::InvalidToken,
-                    format!("Invalid token: '{}'", t),
-                )),
-                ReadImplResult::EndOfFile => {
-                    Result::Err(Error::new(ErrorKind::EndOfFile, "End of file reached"))
-                }
-            }
+            Result::Ok(ReadImplResult::Value(Value::Backquote(ValueBackquote(
+                read_impl(peekable, bq.backquote())?
+                    .try_unwrap_value()?
+                    .into(),
+            ))))
         } else if c == ',' {
             peekable.next();
             match peekable.peek() {
-                Option::Some(&c2) => {
-                    if c2 == '@' {
-                        peekable.next();
-                        match read_impl(peekable, bq.splice()?)? {
-                            ReadImplResult::Value(v) => Result::Ok(ReadImplResult::Value(
-                                Value::Splice(ValueSplice(v.into())),
-                            )),
-                            ReadImplResult::InvalidToken(t) => Result::Err(Error::new(
-                                ErrorKind::InvalidToken,
-                                format!("Invalid token: '{}'", t),
-                            )),
-                            ReadImplResult::EndOfFile => {
-                                Result::Err(Error::new(ErrorKind::EndOfFile, "End of file reached"))
-                            }
-                        }
-                    } else {
-                        match read_impl(peekable, bq.comma()?)? {
-                            ReadImplResult::Value(v) => Result::Ok(ReadImplResult::Value(
-                                Value::Comma(ValueComma(v.into())),
-                            )),
-                            ReadImplResult::InvalidToken(t) => Result::Err(Error::new(
-                                ErrorKind::InvalidToken,
-                                format!("Invalid token: '{}'", t),
-                            )),
-                            ReadImplResult::EndOfFile => {
-                                Result::Err(Error::new(ErrorKind::EndOfFile, "End of file reached"))
-                            }
-                        }
-                    }
-                }
+                Option::Some(&c2) => Result::Ok(ReadImplResult::Value(if c2 == '@' {
+                    peekable.next();
+                    Value::Splice(ValueSplice(
+                        read_impl(peekable, bq.splice()?)?
+                            .try_unwrap_value()?
+                            .into(),
+                    ))
+                } else {
+                    Value::Comma(ValueComma(
+                        read_impl(peekable, bq.comma()?)?.try_unwrap_value()?.into(),
+                    ))
+                })),
                 Option::None => {
                     Result::Err(Error::new(ErrorKind::EndOfFile, "End of file reached"))
                 }
             }
         } else if c == '\'' {
             peekable.next();
-            match read_impl(peekable, bq)? {
-                ReadImplResult::Value(v) => {
-                    Result::Ok(ReadImplResult::Value(Value::Cons(ValueCons(
+            Result::Ok(ReadImplResult::Value(Value::Cons(ValueCons(
+                Cons {
+                    car: Value::QualifiedSymbol(ValueQualifiedSymbol {
+                        package: "std".into(),
+                        name: "quote".into(),
+                    }),
+                    cdr: Value::Cons(ValueCons(
                         Cons {
-                            car: Value::QualifiedSymbol(ValueQualifiedSymbol {
-                                package: "std".into(),
-                                name: "quote".into(),
-                            }),
-                            cdr: Value::Cons(ValueCons(
-                                Cons {
-                                    car: v,
-                                    cdr: Value::Nil,
-                                }
-                                .into(),
-                            )),
+                            car: read_impl(peekable, bq)?.try_unwrap_value()?,
+                            cdr: Value::Nil,
                         }
                         .into(),
-                    ))))
+                    )),
                 }
-                ReadImplResult::InvalidToken(t) => Result::Err(Error::new(
-                    ErrorKind::InvalidToken,
-                    format!("Invalid token: '{}'", t),
-                )),
-                ReadImplResult::EndOfFile => {
-                    Result::Err(Error::new(ErrorKind::EndOfFile, "End of file reached"))
-                }
-            }
+                .into(),
+            ))))
         } else if is_token_char(c) {
             match read_token(peekable)? {
                 ReadTokenResult::ValidToken(t1) => match peekable.peek() {
