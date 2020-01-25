@@ -39,10 +39,10 @@ where
     fn compile_function_from_macro(
         &mut self,
         name: &ValueQualifiedSymbol<T::StringRef>,
-        params: Value<T>,
+        params: ValueList<T>,
     ) -> Option<Result<TryCompilationResult<T>>> {
         let mut compiled_params = Vec::new();
-        for item in params.map(|v| self.compile(v.try_unwrap_item()?)) {
+        for item in params.map(|v| self.compile(v)) {
             match item {
                 Result::Ok(r) => compiled_params.push(r),
                 Result::Err(e) => return Option::Some(Result::Err(e)),
@@ -76,7 +76,7 @@ where
     fn compile_macro(
         &mut self,
         name: &ValueQualifiedSymbol<T::StringRef>,
-        params: Value<T>,
+        params: ValueList<T>,
     ) -> Option<Result<TryCompilationResult<T>>>;
 
     fn compile(&mut self, v: Value<T>) -> Result<CompilationResult<T>> {
@@ -86,9 +86,9 @@ where
             match result {
                 TryCompilationResult::Uncompiled(v) => {
                     result = match v {
-                        Value::Cons(ValueCons(c)) => {
-                            let cons = c.borrow();
-                            let name = match &cons.car {
+                        Value::List(ValueList(Option::Some(l))) => {
+                            let list = l.borrow();
+                            let name = match &list.car {
                                 Value::UnqualifiedSymbol(name) => {
                                     match self.resolve_symbol_get_macro(name) {
                                         Option::Some(name) => name,
@@ -108,7 +108,7 @@ where
                                     ))
                                 }
                             };
-                            match self.compile_macro(&name, cons.cdr.clone().into_iter()) {
+                            match self.compile_macro(&name, list.cdr.clone()) {
                                 Option::Some(r) => r?,
                                 Option::None => {
                                     return Result::Err(Error::new(
@@ -180,7 +180,6 @@ pub enum ValueType {
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct ValueTypeList {
     pub items: BTreeSet<ValueType>,
-    pub tail: BTreeSet<ValueTypeNonList>,
 }
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -321,7 +320,7 @@ where
         for item in &mut self.0 {
             items.push(item.as_mut().map(|comp| comp.evaluate(env)).transpose()?);
         }
-        concat_lists(items.into_iter())
+        Result::Ok(Value::List(concat_lists(items.into_iter())?))
     }
 }
 
@@ -351,8 +350,25 @@ mod tests {
     #[test]
     fn test_value_type() {
         assert_eq!(
-            v_nil!().value_type(),
-            ValueType::NonList(ValueTypeNonList::Nil)
+            v_list!(
+                v_bool!(true),
+                v_str!("str"),
+                v_list!(v_uqsym!("uqsym"), v_bool!(true), v_qsym!("p", "qsym"))
+            )
+            .value_type(),
+            ValueType::List(ValueTypeList {
+                items: BTreeSet::from_iter(vec![
+                    ValueType::NonList(ValueTypeNonList::Bool),
+                    ValueType::NonList(ValueTypeNonList::String),
+                    ValueType::List(ValueTypeList {
+                        items: BTreeSet::from_iter(vec![
+                            ValueType::NonList(ValueTypeNonList::UnqualifiedSymbol),
+                            ValueType::NonList(ValueTypeNonList::QualifiedSymbol),
+                            ValueType::NonList(ValueTypeNonList::Bool),
+                        ]),
+                    }),
+                ]),
+            })
         );
         assert_eq!(
             v_uqsym!("uqsym").value_type(),
@@ -399,30 +415,6 @@ mod tests {
             ValueType::NonList(ValueTypeNonList::Splice(Box::new(ValueType::NonList(
                 ValueTypeNonList::QualifiedSymbol
             ))))
-        );
-        assert_eq!(
-            v_list!(
-                v_nil!(),
-                v_bool!(true),
-                v_str!("str"),
-                v_tlist!(v_uqsym!("uqsym"), v_bool!(true), v_qsym!("p", "qsym"))
-            )
-            .value_type(),
-            ValueType::List(ValueTypeList {
-                items: BTreeSet::from_iter(vec![
-                    ValueType::NonList(ValueTypeNonList::Nil),
-                    ValueType::NonList(ValueTypeNonList::Bool),
-                    ValueType::NonList(ValueTypeNonList::String),
-                    ValueType::List(ValueTypeList {
-                        items: BTreeSet::from_iter(vec![
-                            ValueType::NonList(ValueTypeNonList::UnqualifiedSymbol),
-                            ValueType::NonList(ValueTypeNonList::Bool),
-                        ]),
-                        tail: BTreeSet::from_iter(vec![ValueTypeNonList::QualifiedSymbol]),
-                    }),
-                ]),
-                tail: BTreeSet::from_iter(vec![ValueTypeNonList::Nil]),
-            })
         );
     }
 
@@ -553,12 +545,12 @@ mod tests {
         fn compile_macro(
             &mut self,
             name: &ValueQualifiedSymbol<String>,
-            v: Value<ValueTypesRc>,
+            params: ValueList<ValueTypesRc>,
         ) -> Option<Result<TryCompilationResult<ValueTypesRc>>> {
             match (name.package.borrow(), name.name.borrow()) {
                 ("p", "simplemacro1") => Option::Some(simplemacro1()),
                 ("p", "simplemacro2") => Option::Some(simplemacro2()),
-                ("p", "simplefunc1") => self.compile_function_from_macro(name, v),
+                ("p", "simplefunc1") => self.compile_function_from_macro(name, params),
                 _ => Option::None,
             }
         }
@@ -650,19 +642,9 @@ mod tests {
             v_list!(v_str!("str"), v_bool!(true))
         );
 
-        let mut comp = ConcatenateListsEvaluator::new(vec![
-            ListItem::Item(Box::new(LiteralEvaluator::new(v_str!("str").convert()))),
-            ListItem::List(Box::new(LiteralEvaluator::new(v_bool!(true).convert()))),
-        ]);
-        assert_eq!(
-            comp.evaluate(&mut env).unwrap(),
-            v_tlist!(v_str!("str"), v_bool!(true))
-        );
-
-        let mut comp = ConcatenateListsEvaluator::new(vec![
-            ListItem::List(Box::new(LiteralEvaluator::new(v_str!("str").convert()))),
-            ListItem::List(Box::new(LiteralEvaluator::new(v_bool!(true).convert()))),
-        ]);
+        let mut comp = ConcatenateListsEvaluator::new(vec![ListItem::List(Box::new(
+            LiteralEvaluator::new(v_bool!(true).convert()),
+        ))]);
         assert_eq!(
             comp.evaluate(&mut env).unwrap_err().kind,
             ErrorKind::IncorrectType
@@ -674,9 +656,11 @@ mod tests {
         let mut env = SimpleEnvironment;
         test_compile_and_evaluate(
             &mut env,
-            v_nil!(),
-            v_nil!(),
-            BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::Nil)]),
+            v_list!(),
+            v_list!(),
+            BTreeSet::from_iter(vec![ValueType::List(ValueTypeList {
+                items: BTreeSet::new(),
+            })]),
         );
         test_compile_and_evaluate(
             &mut env,

@@ -1,12 +1,10 @@
 use super::env::*;
 use super::error::*;
-use super::list::*;
 use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::collections::BTreeSet;
 use std::convert::TryFrom;
 use std::fmt::Debug;
-use std::iter::FromIterator;
 use std::rc::Rc;
 
 pub trait SemverTypes: Debug
@@ -25,6 +23,134 @@ where
     type StringRef: Borrow<str> + Clone + Debug;
     type ValueRef: Borrow<Value<Self>> + Clone + Debug;
     type SemverTypes: SemverTypes + ?Sized;
+}
+
+#[derive(Debug)]
+pub struct ValueList<T>(pub Option<T::ConsRef>)
+where
+    T: ValueTypes + ?Sized,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>;
+
+impl<T> ValueList<T>
+where
+    T: ValueTypes + ?Sized,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+{
+    pub fn convert<T2>(&self) -> ValueList<T2>
+    where
+        T2: ValueTypes + ?Sized,
+        for<'a> &'a <T2::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+        for<'a> &'a str: Into<T2::StringRef>,
+        Cons<T2>: Into<T2::ConsRef>,
+        for<'a> &'a <T::SemverTypes as SemverTypes>::Semver:
+            Into<<T2::SemverTypes as SemverTypes>::SemverRef>,
+        Value<T2>: Into<T2::ValueRef>,
+    {
+        ValueList(match &self.0 {
+            Option::Some(c) => {
+                let cons = c.borrow();
+                Option::Some(
+                    Cons {
+                        car: cons.car.convert::<T2>(),
+                        cdr: cons.cdr.convert::<T2>(),
+                    }
+                    .into(),
+                )
+            }
+            Option::None => Option::None,
+        })
+    }
+
+    fn list_eq<T2>(&self, other: &ValueList<T2>) -> bool
+    where
+        T2: ValueTypes + ?Sized,
+        for<'a> &'a <T2::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+    {
+        match (&self.0, &other.0) {
+            (Option::Some(c1), Option::Some(c2)) => c1.borrow() == c2.borrow(),
+            (Option::None, Option::None) => true,
+            _ => false,
+        }
+    }
+}
+
+impl<T> Clone for ValueList<T>
+where
+    T: ValueTypes + ?Sized,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+{
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
+impl<T1, T2> PartialEq<ValueList<T2>> for ValueList<T1>
+where
+    T1: ValueTypes + ?Sized,
+    T2: ValueTypes + ?Sized,
+    for<'a> &'a <T1::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+    for<'a> &'a <T2::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+{
+    fn eq(&self, other: &ValueList<T2>) -> bool {
+        self.list_eq(other)
+    }
+}
+
+impl<T> Iterator for ValueList<T>
+where
+    T: ValueTypes + ?Sized,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+{
+    type Item = Value<T>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match &self.0 {
+            Option::None => Option::None,
+            Option::Some(c) => {
+                let cons = c.borrow();
+                let car = cons.car.clone();
+                let cdr = cons.cdr.clone();
+                *self = cdr;
+                Option::Some(car)
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct Cons<T>
+where
+    T: ValueTypes + ?Sized,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+{
+    pub car: Value<T>,
+    pub cdr: ValueList<T>,
+}
+
+impl<T> Clone for Cons<T>
+where
+    T: ValueTypes + ?Sized,
+    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+{
+    fn clone(&self) -> Self {
+        Cons {
+            car: self.car.clone(),
+            cdr: self.cdr.clone(),
+        }
+    }
+}
+
+impl<T1, T2> PartialEq<Cons<T2>> for Cons<T1>
+where
+    T1: ValueTypes + ?Sized,
+    T2: ValueTypes + ?Sized,
+    for<'a> &'a <T1::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+    for<'a> &'a <T2::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+    Value<T1>: PartialEq<Value<T2>>,
+{
+    fn eq(&self, other: &Cons<T2>) -> bool {
+        self.car == other.car && self.cdr.list_eq(&other.cdr)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -87,97 +213,6 @@ where
 {
     fn eq(&self, rhs: &ValueQualifiedSymbol<S2>) -> bool {
         self.package.borrow() == rhs.package.borrow() && self.name.borrow() == rhs.name.borrow()
-    }
-}
-
-#[derive(Debug)]
-pub struct ValueCons<T>(pub T::ConsRef)
-where
-    T: ValueTypes + ?Sized,
-    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>;
-
-impl<T> ValueCons<T>
-where
-    T: ValueTypes + ?Sized,
-    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
-{
-    pub fn convert<T2>(&self) -> ValueCons<T2>
-    where
-        T2: ValueTypes + ?Sized,
-        for<'a> &'a <T2::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
-        for<'a> &'a str: Into<T2::StringRef>,
-        Cons<T2>: Into<T2::ConsRef>,
-        for<'a> &'a <T::SemverTypes as SemverTypes>::Semver:
-            Into<<T2::SemverTypes as SemverTypes>::SemverRef>,
-        Value<T2>: Into<T2::ValueRef>,
-    {
-        let cons = self.0.borrow();
-        ValueCons(
-            Cons {
-                car: cons.car.convert::<T2>(),
-                cdr: cons.cdr.convert::<T2>(),
-            }
-            .into(),
-        )
-    }
-}
-
-impl<T> Clone for ValueCons<T>
-where
-    T: ValueTypes + ?Sized,
-    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
-{
-    fn clone(&self) -> Self {
-        Self(self.0.clone())
-    }
-}
-
-impl<T1, T2> PartialEq<ValueCons<T2>> for ValueCons<T1>
-where
-    T1: ValueTypes + ?Sized,
-    T2: ValueTypes + ?Sized,
-    for<'a> &'a <T1::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
-    for<'a> &'a <T2::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
-    <T1 as ValueTypes>::ConsRef: PartialEq<<T2 as ValueTypes>::ConsRef>,
-{
-    fn eq(&self, other: &ValueCons<T2>) -> bool {
-        self.0 == other.0
-    }
-}
-
-#[derive(Debug)]
-pub struct Cons<T>
-where
-    T: ValueTypes + ?Sized,
-    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
-{
-    pub car: Value<T>,
-    pub cdr: Value<T>,
-}
-
-impl<T> Clone for Cons<T>
-where
-    T: ValueTypes + ?Sized,
-    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
-{
-    fn clone(&self) -> Self {
-        Cons {
-            car: self.car.clone(),
-            cdr: self.cdr.clone(),
-        }
-    }
-}
-
-impl<T1, T2> PartialEq<Cons<T2>> for Cons<T1>
-where
-    T1: ValueTypes + ?Sized,
-    T2: ValueTypes + ?Sized,
-    for<'a> &'a <T1::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
-    for<'a> &'a <T2::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
-    Value<T1>: PartialEq<Value<T2>>,
-{
-    fn eq(&self, other: &Cons<T2>) -> bool {
-        self.car == other.car && self.cdr == other.cdr
     }
 }
 
@@ -587,10 +622,9 @@ where
     T: ValueTypes + ?Sized,
     for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
 {
-    Nil,
+    List(ValueList<T>),
     UnqualifiedSymbol(ValueUnqualifiedSymbol<T::StringRef>),
     QualifiedSymbol(ValueQualifiedSymbol<T::StringRef>),
-    Cons(ValueCons<T>),
     Bool(ValueBool),
     String(ValueString<T::StringRef>),
     Semver(ValueSemver<T::SemverTypes>),
@@ -617,10 +651,9 @@ where
         Value<T2>: Into<T2::ValueRef>,
     {
         match self {
-            Value::Nil => Value::Nil,
+            Value::List(l) => Value::List(l.convert::<T2>()),
             Value::UnqualifiedSymbol(s) => Value::UnqualifiedSymbol(s.convert::<T2::StringRef>()),
             Value::QualifiedSymbol(s) => Value::QualifiedSymbol(s.convert::<T2::StringRef>()),
-            Value::Cons(c) => Value::Cons(c.convert::<T2>()),
             Value::Bool(b) => Value::Bool(b.clone()),
             Value::String(s) => Value::String(s.convert::<T2::StringRef>()),
             Value::Semver(v) => Value::Semver(v.convert::<T2::SemverTypes>()),
@@ -636,24 +669,14 @@ where
 
     pub fn value_type(&self) -> ValueType {
         match self {
-            Value::Cons(c) => {
-                let cons = c.0.borrow();
-                let mut l = ValueTypeList {
-                    items: BTreeSet::from_iter(vec![cons.car.value_type()]),
-                    tail: BTreeSet::from_iter(vec![ValueTypeNonList::Nil]),
+            Value::List(l) => {
+                let mut types = ValueTypeList {
+                    items: BTreeSet::new(),
                 };
-                for item in cons.cdr.clone().into_iter() {
-                    match item {
-                        ListItem::Item(i) => {
-                            l.items.insert(i.value_type());
-                        }
-                        ListItem::List(t) => {
-                            l.tail.clear();
-                            l.tail.insert(t.value_type_non_list());
-                        }
-                    }
+                for item in l.clone() {
+                    types.items.insert(item.value_type());
                 }
-                ValueType::List(l)
+                ValueType::List(types)
             }
             _ => ValueType::NonList(self.value_type_non_list()),
         }
@@ -661,10 +684,9 @@ where
 
     pub fn value_type_non_list(&self) -> ValueTypeNonList {
         match self {
-            Value::Nil => ValueTypeNonList::Nil,
+            Value::List(_) => panic!("Unexpected Value::List"),
             Value::UnqualifiedSymbol(_) => ValueTypeNonList::UnqualifiedSymbol,
             Value::QualifiedSymbol(_) => ValueTypeNonList::QualifiedSymbol,
-            Value::Cons(_) => panic!("Unexpected Value::Cons"),
             Value::Bool(_) => ValueTypeNonList::Bool,
             Value::String(_) => ValueTypeNonList::String,
             Value::Semver(_) => ValueTypeNonList::Semver,
@@ -677,32 +699,6 @@ where
     }
 }
 
-impl<T> Iterator for Value<T>
-where
-    T: ValueTypes + ?Sized,
-    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
-{
-    type Item = ListItem<Value<T>>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match self {
-            Value::Nil => Option::None,
-            Value::Cons(ValueCons(c)) => {
-                let cons = (*c).borrow();
-                let car = cons.car.clone();
-                let cdr = cons.cdr.clone();
-                *self = cdr;
-                Option::Some(ListItem::Item(car))
-            }
-            _ => {
-                let mut result = Value::Nil;
-                std::mem::swap(self, &mut result);
-                Option::Some(ListItem::List(result))
-            }
-        }
-    }
-}
-
 impl<T> Clone for Value<T>
 where
     T: ValueTypes + ?Sized,
@@ -710,10 +706,9 @@ where
 {
     fn clone(&self) -> Self {
         match self {
-            Value::Nil => Value::Nil,
+            Value::List(l) => Value::List((*l).clone()),
             Value::UnqualifiedSymbol(s) => Value::UnqualifiedSymbol((*s).clone()),
             Value::QualifiedSymbol(s) => Value::QualifiedSymbol((*s).clone()),
-            Value::Cons(c) => Value::Cons((*c).clone()),
             Value::Bool(b) => Value::Bool((*b).clone()),
             Value::String(s) => Value::String((*s).clone()),
             Value::Semver(v) => Value::Semver((*v).clone()),
@@ -755,10 +750,9 @@ macro_rules! try_from_value {
     };
 }
 
-try_from_value!(T, (), Value::Nil => ());
+try_from_value!(T, ValueList<T>, Value::List(l) => l);
 try_from_value!(T, ValueUnqualifiedSymbol<T::StringRef>, Value::UnqualifiedSymbol(s) => s);
 try_from_value!(T, ValueQualifiedSymbol<T::StringRef>, Value::QualifiedSymbol(s) => s);
-try_from_value!(T, ValueCons<T>, Value::Cons(c) => c);
 try_from_value!(T, ValueBool, Value::Bool(b) => b);
 try_from_value!(T, ValueString<T::StringRef>, Value::String(s) => s);
 try_from_value!(T, ValueSemver<T::SemverTypes>, Value::Semver(v) => v);
@@ -782,10 +776,9 @@ macro_rules! from_value_type {
     };
 }
 
-from_value_type!(T, (), _n -> Value::Nil);
+from_value_type!(T, ValueList<T>, l -> Value::List(l));
 from_value_type!(T, ValueUnqualifiedSymbol<T::StringRef>, s -> Value::UnqualifiedSymbol(s));
 from_value_type!(T, ValueQualifiedSymbol<T::StringRef>, s -> Value::QualifiedSymbol(s));
-from_value_type!(T, ValueCons<T>, c -> Value::Cons(c));
 from_value_type!(T, ValueBool, b -> Value::Bool(b));
 from_value_type!(T, ValueString<T::StringRef>, s -> Value::String(s));
 from_value_type!(T, ValueSemver<T::SemverTypes>, v -> Value::Semver(v));
@@ -804,16 +797,9 @@ where
 {
     fn eq(&self, rhs: &Value<T2>) -> bool {
         eq_match!(self, rhs, {
-            (Value::Nil, Value::Nil) => true,
+            (Value::List(l1), Value::List(l2)) => l1.list_eq(l2),
             (Value::UnqualifiedSymbol(s1), Value::UnqualifiedSymbol(s2)) => s1 == s2,
             (Value::QualifiedSymbol(s1), Value::QualifiedSymbol(s2)) => s1 == s2,
-            (Value::Cons(c1), Value::Cons(c2)) => {
-                // This has to be a direct comparison to avoid a cyclic dependency when
-                // calculating eligibility for PartialEq
-                let cons1 = c1.0.borrow();
-                let cons2 = c2.0.borrow();
-                cons1.car == cons2.car && cons1.cdr == cons2.cdr
-            },
             (Value::Bool(b1), Value::Bool(b2)) => b1 == b2,
             (Value::String(s1), Value::String(s2)) => s1 == s2,
             (Value::Semver(v1), Value::Semver(v2)) => v1 == v2,
@@ -863,10 +849,27 @@ impl ValueTypes for ValueTypesStatic {
 }
 
 #[macro_export]
-macro_rules! v_nil {
-    () => {
-        $crate::value::Value::<$crate::value::ValueTypesStatic>::Nil
+macro_rules! cons {
+    ($car:expr, $cdr:expr) => {
+        $crate::value::ValueList::<$crate::value::ValueTypesStatic>(::std::option::Option::Some(
+            &$crate::value::Cons {
+                car: $car,
+                cdr: $cdr,
+            },
+        ))
     };
+}
+
+#[macro_export]
+macro_rules! list {
+    () => { $crate::value::ValueList::<$crate::value::ValueTypesStatic>(::std::option::Option::None) };
+    ($e:expr) => { cons!($e, list!()) };
+    ($e:expr, $($es:expr),*) => { cons!($e, list!($($es),*)) };
+}
+
+#[macro_export]
+macro_rules! v_list {
+    ($($es:expr),*) => { $crate::value::Value::<$crate::value::ValueTypesStatic>::List(list!($($es),*)) };
 }
 
 #[macro_export]
@@ -899,23 +902,6 @@ macro_rules! v_qsym {
         $crate::value::Value::<$crate::value::ValueTypesStatic>::QualifiedSymbol(qsym!(
             $package, $name
         ))
-    };
-}
-
-#[macro_export]
-macro_rules! cons {
-    ($car:expr, $cdr:expr) => {
-        $crate::value::ValueCons::<$crate::value::ValueTypesStatic>(&$crate::value::Cons {
-            car: $car,
-            cdr: $cdr,
-        })
-    };
-}
-
-#[macro_export]
-macro_rules! v_cons {
-    ($car:expr, $cdr:expr) => {
-        $crate::value::Value::<$crate::value::ValueTypesStatic>::Cons(cons!($car, $cdr))
     };
 }
 
@@ -1101,30 +1087,11 @@ macro_rules! v_splice {
     };
 }
 
-#[macro_export]
-macro_rules! v_list {
-    () => { v_nil!() };
-    ($e:expr) => { v_cons!($e, v_nil!()) };
-    ($e:expr, $($es:expr),+) => { v_cons!($e, v_list!($($es),*)) };
-}
-
-#[macro_export]
-macro_rules! v_tlist {
-    ($e:expr) => { $e };
-    ($e:expr, $($es:expr),+) => { v_cons!($e, v_tlist!($($es),*)) };
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     mod macro_tests {
-        #[test]
-        fn test_v_nil_macro() {
-            const NIL: super::Value<super::ValueTypesStatic> = v_nil!();
-            assert_eq!(NIL, super::Value::<super::ValueTypesStatic>::Nil);
-        }
-
         #[test]
         fn test_uqsym_macro() {
             const UQSYM: super::ValueUnqualifiedSymbol<&'static str> = uqsym!("uqsym");
@@ -1156,33 +1123,6 @@ mod tests {
                     assert_eq!(s.name, "qsym");
                 }
                 _ => panic!("Expected a Value::UnqualifiedSymbol"),
-            }
-        }
-
-        #[test]
-        fn test_cons_macro() {
-            const CONS: super::ValueCons<super::ValueTypesStatic> =
-                cons!(v_uqsym!("uqsym"), v_nil!());
-            match &CONS.0.car {
-                super::Value::UnqualifiedSymbol(s) => assert_eq!(s.0, "uqsym"),
-                _ => panic!("Expected a Value::UnqualifiedSymbol"),
-            }
-            assert_eq!(CONS.0.cdr, super::Value::<super::ValueTypesStatic>::Nil);
-        }
-
-        #[test]
-        fn test_v_cons_macro() {
-            const CONS: super::Value<super::ValueTypesStatic> =
-                v_cons!(v_uqsym!("uqsym"), v_nil!());
-            match CONS {
-                super::Value::Cons(c) => {
-                    match &c.0.car {
-                        super::Value::UnqualifiedSymbol(s) => assert_eq!(s.0, "uqsym"),
-                        _ => panic!("Expected a Value::UnqualifiedSymbol"),
-                    }
-                    assert_eq!(c.0.cdr, super::Value::<super::ValueTypesStatic>::Nil);
-                }
-                _ => panic!("Expected a Value::Cons"),
             }
         }
 
@@ -1437,129 +1377,124 @@ mod tests {
         }
 
         #[test]
-        fn test_v_list_macro() {
-            const LIST1: super::Value<super::ValueTypesStatic> = v_list!();
-            assert_eq!(LIST1, super::Value::<super::ValueTypesStatic>::Nil);
+        fn test_list_macro() {
+            const LIST1: super::ValueList<super::ValueTypesStatic> = list!();
+            assert_eq!(
+                LIST1,
+                super::ValueList::<super::ValueTypesStatic>(Option::None)
+            );
 
-            const LIST2: super::Value<super::ValueTypesStatic> = v_list!(v_uqsym!("uqsym1"));
+            const LIST2: super::ValueList<super::ValueTypesStatic> = list!(v_uqsym!("uqsym1"));
             match LIST2 {
-                super::Value::Cons(c) => {
-                    match &c.0.car {
+                super::ValueList(Option::Some(l)) => {
+                    match &l.car {
                         super::Value::UnqualifiedSymbol(s) => assert_eq!(s.0, "uqsym1"),
                         _ => panic!("Expected a Value::UnqualifiedSymbol"),
                     }
-                    assert_eq!(c.0.cdr, super::Value::<super::ValueTypesStatic>::Nil);
+                    assert_eq!(
+                        l.cdr,
+                        super::ValueList::<super::ValueTypesStatic>(Option::None)
+                    );
                 }
-                _ => panic!("Expected a Value::Cons"),
+                _ => panic!("Expected a ValueList(Option::Some)"),
             }
 
-            const LIST3: super::Value<super::ValueTypesStatic> =
-                v_list!(v_uqsym!("uqsym1"), v_uqsym!("uqsym2"));
+            const LIST3: super::ValueList<super::ValueTypesStatic> =
+                list!(v_uqsym!("uqsym1"), v_uqsym!("uqsym2"));
             match LIST3 {
-                super::Value::Cons(c) => {
-                    match &c.0.car {
+                super::ValueList(Option::Some(l)) => {
+                    match &l.car {
                         super::Value::UnqualifiedSymbol(s) => assert_eq!(s.0, "uqsym1"),
                         _ => panic!("Expected a Value::UnqualifiedSymbol"),
                     }
-                    match &c.0.cdr {
-                        super::Value::Cons(c) => {
-                            match &c.0.car {
+                    match &l.cdr {
+                        super::ValueList(Option::Some(l)) => {
+                            match &l.car {
                                 super::Value::UnqualifiedSymbol(s) => assert_eq!(s.0, "uqsym2"),
                                 _ => panic!("Expected a Value::UnqualifiedSymbol"),
                             }
-                            assert_eq!(c.0.cdr, super::Value::<super::ValueTypesStatic>::Nil);
+                            assert_eq!(
+                                l.cdr,
+                                super::ValueList::<super::ValueTypesStatic>(Option::None)
+                            );
                         }
-                        _ => panic!("Expected a Value::Cons"),
+                        _ => panic!("Expected a ValueList(Option::Some)"),
                     }
                 }
-                _ => panic!("Expected a Value::Cons"),
+                _ => panic!("Expected a ValueList(Option::Some)"),
             }
 
-            const LIST4: super::Value<super::ValueTypesStatic> =
-                v_list!(v_uqsym!("uqsym1"), v_uqsym!("uqsym2"), v_uqsym!("uqsym3"));
+            const LIST4: super::ValueList<super::ValueTypesStatic> =
+                list!(v_uqsym!("uqsym1"), v_uqsym!("uqsym2"), v_uqsym!("uqsym3"));
             match LIST4 {
-                super::Value::Cons(c) => {
-                    match &c.0.car {
+                super::ValueList(Option::Some(l)) => {
+                    match &l.car {
                         super::Value::UnqualifiedSymbol(s) => assert_eq!(s.0, "uqsym1"),
                         _ => panic!("Expected a Value::UnqualifiedSymbol"),
                     }
-                    match &c.0.cdr {
-                        super::Value::Cons(c) => {
-                            match &c.0.car {
+                    match &l.cdr {
+                        super::ValueList(Option::Some(l)) => {
+                            match &l.car {
                                 super::Value::UnqualifiedSymbol(s) => assert_eq!(s.0, "uqsym2"),
                                 _ => panic!("Expected a Value::UnqualifiedSymbol"),
                             }
-                            match &c.0.cdr {
-                                super::Value::Cons(c) => {
-                                    match &c.0.car {
+                            match &l.cdr {
+                                super::ValueList(Option::Some(l)) => {
+                                    match &l.car {
                                         super::Value::UnqualifiedSymbol(s) => {
                                             assert_eq!(s.0, "uqsym3")
                                         }
                                         _ => panic!("Expected a Value::UnqualifiedSymbol"),
                                     }
                                     assert_eq!(
-                                        c.0.cdr,
-                                        super::Value::<super::ValueTypesStatic>::Nil
+                                        l.cdr,
+                                        super::ValueList::<super::ValueTypesStatic>(Option::None)
                                     );
                                 }
-                                _ => panic!("Expected a Value::Cons"),
+                                _ => panic!("Expected a ValueList(Option::Some)"),
                             }
                         }
-                        _ => panic!("Expected a Value::Cons"),
+                        _ => panic!("Expected a ValueList(Option::Some)"),
                     }
                 }
-                _ => panic!("Expected a Value::Cons"),
+                _ => panic!("Expected a ValueList(Option::Some)"),
             }
         }
 
         #[test]
-        fn test_v_tlist_macro() {
-            const LIST1: super::Value<super::ValueTypesStatic> = v_tlist!(v_uqsym!("uqsym1"));
-            match LIST1 {
-                super::Value::UnqualifiedSymbol(s) => assert_eq!(s.0, "uqsym1"),
-                _ => panic!("Expected a Value::UnqualifiedSymbol"),
-            }
+        fn test_v_list_macro() {
+            const LIST1: super::Value<super::ValueTypesStatic> = v_list!();
+            assert_eq!(
+                LIST1,
+                super::Value::<super::ValueTypesStatic>::List(list!())
+            );
 
-            const LIST2: super::Value<super::ValueTypesStatic> =
-                v_tlist!(v_uqsym!("uqsym1"), v_uqsym!("uqsym2"));
-            match LIST2 {
-                super::Value::Cons(c) => {
-                    match &c.0.car {
-                        super::Value::UnqualifiedSymbol(s) => assert_eq!(s.0, "uqsym1"),
-                        _ => panic!("Expected a Value::UnqualifiedSymbol"),
-                    }
-                    match &c.0.cdr {
-                        super::Value::UnqualifiedSymbol(s) => assert_eq!(s.0, "uqsym2"),
-                        _ => panic!("Expected a Value::UnqualifiedSymbol"),
-                    }
-                }
-                _ => panic!("Expected a Value::Cons"),
-            }
+            const LIST2: super::Value<super::ValueTypesStatic> = v_list!(v_uqsym!("uqsym1"));
+            assert_eq!(
+                LIST2,
+                super::Value::<super::ValueTypesStatic>::List(list!(v_uqsym!("uqsym1")))
+            );
 
             const LIST3: super::Value<super::ValueTypesStatic> =
-                v_tlist!(v_uqsym!("uqsym1"), v_uqsym!("uqsym2"), v_uqsym!("uqsym3"));
-            match LIST3 {
-                super::Value::Cons(c) => {
-                    match &c.0.car {
-                        super::Value::UnqualifiedSymbol(s) => assert_eq!(s.0, "uqsym1"),
-                        _ => panic!("Expected a Value::UnqualifiedSymbol"),
-                    }
-                    match &c.0.cdr {
-                        super::Value::Cons(c) => {
-                            match &c.0.car {
-                                super::Value::UnqualifiedSymbol(s) => assert_eq!(s.0, "uqsym2"),
-                                _ => panic!("Expected a Value::UnqualifiedSymbol"),
-                            }
-                            match &c.0.cdr {
-                                super::Value::UnqualifiedSymbol(s) => assert_eq!(s.0, "uqsym3"),
-                                _ => panic!("Expected a Value::UnqualifiedSymbol"),
-                            }
-                        }
-                        _ => panic!("Expected a Value::Cons"),
-                    }
-                }
-                _ => panic!("Expected a Value::Cons"),
-            }
+                v_list!(v_uqsym!("uqsym1"), v_uqsym!("uqsym2"));
+            assert_eq!(
+                LIST3,
+                super::Value::<super::ValueTypesStatic>::List(list!(
+                    v_uqsym!("uqsym1"),
+                    v_uqsym!("uqsym2")
+                ))
+            );
+
+            const LIST4: super::Value<super::ValueTypesStatic> =
+                v_list!(v_uqsym!("uqsym1"), v_uqsym!("uqsym2"), v_uqsym!("uqsym3"));
+            assert_eq!(
+                LIST4,
+                super::Value::<super::ValueTypesStatic>::List(list!(
+                    v_uqsym!("uqsym1"),
+                    v_uqsym!("uqsym2"),
+                    v_uqsym!("uqsym3")
+                ))
+            );
         }
     }
 
@@ -1582,8 +1517,11 @@ mod tests {
 
     #[test]
     fn test_eq() {
-        assert_eq!(v_nil!(), v_nil!());
-        assert_ne!(v_nil!(), v_uqsym!("uqsym"));
+        assert_eq!(v_list!(), v_list!());
+        assert_eq!(v_list!(v_uqsym!("uqsym")), v_list!(v_uqsym!("uqsym")));
+        assert_ne!(v_list!(v_uqsym!("uqsym1")), v_list!(v_uqsym!("v_uqsym2")));
+        assert_ne!(v_list!(v_str!("uqsym")), v_list!(v_uqsym!("v_uqsym")));
+        assert_ne!(v_list!(v_uqsym!("uqsym")), v_uqsym!("uqsym"));
 
         assert_eq!(v_uqsym!("uqsym"), v_uqsym!("uqsym"));
         assert_eq!(
@@ -1596,7 +1534,7 @@ mod tests {
             Value::<ValueTypesRc>::UnqualifiedSymbol(ValueUnqualifiedSymbol("uqsym2".to_string()))
         );
         assert_ne!(v_uqsym!("uqsym"), v_str!("uqsym"));
-        assert_ne!(v_uqsym!("uqsym"), v_nil!());
+        assert_ne!(v_uqsym!("uqsym"), v_list!());
 
         assert_eq!(v_qsym!("p", "qsym"), v_qsym!("p", "qsym"));
         assert_eq!(
@@ -1612,29 +1550,11 @@ mod tests {
         assert_ne!(v_qsym!("p", "qsym"), v_str!("p:qsym"));
         assert_ne!(v_qsym!("p", "qsym"), v_str!("p"));
         assert_ne!(v_qsym!("p", "qsym"), v_str!("qsym"));
-        assert_ne!(v_qsym!("p", "qsym"), v_nil!());
-
-        assert_eq!(
-            v_cons!(v_uqsym!("uqsym"), v_nil!()),
-            v_cons!(v_uqsym!("uqsym"), v_nil!())
-        );
-        assert_ne!(
-            v_cons!(v_uqsym!("uqsym1"), v_nil!()),
-            v_cons!(v_uqsym!("uqsym2"), v_nil!())
-        );
-        assert_ne!(
-            v_cons!(v_uqsym!("uqsym"), v_nil!()),
-            v_cons!(v_nil!(), v_nil!())
-        );
-        assert_ne!(
-            v_cons!(v_uqsym!("uqsym"), v_nil!()),
-            v_cons!(v_uqsym!("uqsym"), v_uqsym!("uqsym"))
-        );
-        assert_ne!(v_cons!(v_uqsym!("uqsym"), v_nil!()), v_nil!());
+        assert_ne!(v_qsym!("p", "qsym"), v_list!());
 
         assert_eq!(v_bool!(true), v_bool!(true));
         assert_ne!(v_bool!(true), v_bool!(false));
-        assert_ne!(v_bool!(true), v_nil!());
+        assert_ne!(v_bool!(true), v_list!());
 
         assert_eq!(v_str!("str"), v_str!("str"));
         assert_eq!(
@@ -1647,52 +1567,55 @@ mod tests {
             Value::<ValueTypesRc>::String(ValueString("str2".to_string()))
         );
         assert_ne!(v_str!("str"), v_uqsym!("str"));
-        assert_ne!(v_str!("str"), v_nil!());
+        assert_ne!(v_str!("str"), v_list!());
 
         assert_eq!(v_v![1, 0], v_v![1, 0]);
         assert_ne!(v_v![1, 0], v_v![1, 1]);
-        assert_ne!(v_v![1, 0], v_nil!());
+        assert_ne!(v_v![1, 0], v_list!());
 
         assert_eq!(v_lang_kira![1, 0], v_lang_kira![1, 0]);
         assert_ne!(v_lang_kira![1, 0], v_lang_kira![1, 1]);
         assert_ne!(v_lang_kira![1, 0], v_lang_other!("not-kira"));
         assert_ne!(v_lang_kira![1, 0], v_v![1, 0]);
-        assert_ne!(v_lang_kira![1, 0], v_nil!());
+        assert_ne!(v_lang_kira![1, 0], v_list!());
 
         assert_eq!(v_func!(qsym!("p", "f1")), v_func!(qsym!("p", "f1")));
         assert_ne!(v_func!(qsym!("p", "f1")), v_func!(qsym!("p", "f2")));
         assert_ne!(v_func!(qsym!("p", "f1")), v_qsym!("p", "f1"));
-        assert_ne!(v_func!(qsym!("p", "f1")), v_nil!());
+        assert_ne!(v_func!(qsym!("p", "f1")), v_list!());
 
         assert_eq!(v_bq!(v_bool!(true)), v_bq!(v_bool!(true)));
         assert_ne!(v_bq!(v_bool!(true)), v_bq!(v_bool!(false)));
-        assert_ne!(v_bq!(v_bool!(true)), v_bq!(v_nil!()));
+        assert_ne!(v_bq!(v_bool!(true)), v_bq!(v_list!()));
         assert_ne!(v_bq!(v_bool!(true)), v_bool!(true));
-        assert_ne!(v_bq!(v_bool!(true)), v_nil!());
+        assert_ne!(v_bq!(v_bool!(true)), v_list!());
 
         assert_eq!(v_comma!(v_bool!(true)), v_comma!(v_bool!(true)));
         assert_ne!(v_comma!(v_bool!(true)), v_comma!(v_bool!(false)));
-        assert_ne!(v_comma!(v_bool!(true)), v_comma!(v_nil!()));
+        assert_ne!(v_comma!(v_bool!(true)), v_comma!(v_list!()));
         assert_ne!(v_comma!(v_bool!(true)), v_bool!(true));
         assert_ne!(v_comma!(v_bool!(true)), v_bq!(v_bool!(true)));
-        assert_ne!(v_comma!(v_bool!(true)), v_nil!());
+        assert_ne!(v_comma!(v_bool!(true)), v_list!());
 
         assert_eq!(v_splice!(v_bool!(true)), v_splice!(v_bool!(true)));
         assert_ne!(v_splice!(v_bool!(true)), v_splice!(v_bool!(false)));
-        assert_ne!(v_splice!(v_bool!(true)), v_splice!(v_nil!()));
+        assert_ne!(v_splice!(v_bool!(true)), v_splice!(v_list!()));
         assert_ne!(v_splice!(v_bool!(true)), v_bool!(true));
         assert_ne!(v_splice!(v_bool!(true)), v_bq!(v_bool!(true)));
-        assert_ne!(v_splice!(v_bool!(true)), v_nil!());
+        assert_ne!(v_splice!(v_bool!(true)), v_list!());
     }
 
     #[test]
     fn test_try_into_value_type_ref() {
         use std::convert::TryInto;
 
-        let v = v_nil!();
-        assert_eq!(TryInto::<()>::try_into(&v).unwrap(), ());
+        let v = v_list!();
         assert_eq!(
-            TryInto::<&ValueString<<ValueTypesStatic as ValueTypes>::StringRef>>::try_into(&v)
+            TryInto::<&ValueList<ValueTypesStatic>>::try_into(&v).unwrap(),
+            &list!()
+        );
+        assert_eq!(
+            TryInto::<&ValueString<&'static str>>::try_into(&v)
                 .unwrap_err()
                 .kind,
             ErrorKind::IncorrectType
@@ -1705,7 +1628,9 @@ mod tests {
             &uqsym!("uqsym")
         );
         assert_eq!(
-            TryInto::<()>::try_into(&v).unwrap_err().kind,
+            TryInto::<&ValueList<ValueTypesStatic>>::try_into(&v)
+                .unwrap_err()
+                .kind,
             ErrorKind::IncorrectType
         );
 
@@ -1716,24 +1641,18 @@ mod tests {
             &qsym!("p", "qsym")
         );
         assert_eq!(
-            TryInto::<()>::try_into(&v).unwrap_err().kind,
-            ErrorKind::IncorrectType
-        );
-
-        let v = v_cons!(v_nil!(), v_nil!());
-        assert_eq!(
-            TryInto::<&ValueCons<ValueTypesStatic>>::try_into(&v).unwrap(),
-            &cons!(v_nil!(), v_nil!())
-        );
-        assert_eq!(
-            TryInto::<()>::try_into(&v).unwrap_err().kind,
+            TryInto::<&ValueList<ValueTypesStatic>>::try_into(&v)
+                .unwrap_err()
+                .kind,
             ErrorKind::IncorrectType
         );
 
         let v = v_bool!(true);
         assert_eq!(TryInto::<&ValueBool>::try_into(&v).unwrap(), &bool!(true));
         assert_eq!(
-            TryInto::<()>::try_into(&v).unwrap_err().kind,
+            TryInto::<&ValueList<ValueTypesStatic>>::try_into(&v)
+                .unwrap_err()
+                .kind,
             ErrorKind::IncorrectType
         );
 
@@ -1744,7 +1663,9 @@ mod tests {
             &str!("str")
         );
         assert_eq!(
-            TryInto::<()>::try_into(&v).unwrap_err().kind,
+            TryInto::<&ValueList<ValueTypesStatic>>::try_into(&v)
+                .unwrap_err()
+                .kind,
             ErrorKind::IncorrectType
         );
 
@@ -1755,7 +1676,9 @@ mod tests {
             &v![1, 0]
         );
         assert_eq!(
-            TryInto::<()>::try_into(&v).unwrap_err().kind,
+            TryInto::<&ValueList<ValueTypesStatic>>::try_into(&v)
+                .unwrap_err()
+                .kind,
             ErrorKind::IncorrectType
         );
 
@@ -1766,7 +1689,9 @@ mod tests {
             &lang_kira![1, 0]
         );
         assert_eq!(
-            TryInto::<()>::try_into(&v).unwrap_err().kind,
+            TryInto::<&ValueList<ValueTypesStatic>>::try_into(&v)
+                .unwrap_err()
+                .kind,
             ErrorKind::IncorrectType
         );
 
@@ -1776,7 +1701,9 @@ mod tests {
             &func!(qsym!("p", "f1"))
         );
         assert_eq!(
-            TryInto::<()>::try_into(&v).unwrap_err().kind,
+            TryInto::<&ValueList<ValueTypesStatic>>::try_into(&v)
+                .unwrap_err()
+                .kind,
             ErrorKind::IncorrectType
         );
 
@@ -1786,7 +1713,9 @@ mod tests {
             &bq!(v_bool!(true))
         );
         assert_eq!(
-            TryInto::<()>::try_into(&v).unwrap_err().kind,
+            TryInto::<&ValueList<ValueTypesStatic>>::try_into(&v)
+                .unwrap_err()
+                .kind,
             ErrorKind::IncorrectType
         );
 
@@ -1796,7 +1725,9 @@ mod tests {
             &comma!(v_bool!(true))
         );
         assert_eq!(
-            TryInto::<()>::try_into(&v).unwrap_err().kind,
+            TryInto::<&ValueList<ValueTypesStatic>>::try_into(&v)
+                .unwrap_err()
+                .kind,
             ErrorKind::IncorrectType
         );
 
@@ -1806,7 +1737,9 @@ mod tests {
             &splice!(v_bool!(true))
         );
         assert_eq!(
-            TryInto::<()>::try_into(&v).unwrap_err().kind,
+            TryInto::<&ValueList<ValueTypesStatic>>::try_into(&v)
+                .unwrap_err()
+                .kind,
             ErrorKind::IncorrectType
         );
     }
@@ -1815,10 +1748,13 @@ mod tests {
     fn test_try_into_value_type() {
         use std::convert::TryInto;
 
-        let v = v_nil!();
-        assert_eq!(TryInto::<()>::try_into(v.clone()).unwrap(), ());
+        let v = v_list!();
         assert_eq!(
-            TryInto::<ValueString<<ValueTypesStatic as ValueTypes>::StringRef>>::try_into(v)
+            TryInto::<ValueList<ValueTypesStatic>>::try_into(v.clone()).unwrap(),
+            list!()
+        );
+        assert_eq!(
+            TryInto::<ValueString<&'static str>>::try_into(v)
                 .unwrap_err()
                 .kind,
             ErrorKind::IncorrectType
@@ -1831,7 +1767,9 @@ mod tests {
             uqsym!("uqsym")
         );
         assert_eq!(
-            TryInto::<()>::try_into(v).unwrap_err().kind,
+            TryInto::<ValueList<ValueTypesStatic>>::try_into(v)
+                .unwrap_err()
+                .kind,
             ErrorKind::IncorrectType
         );
 
@@ -1844,17 +1782,9 @@ mod tests {
             qsym!("p", "qsym")
         );
         assert_eq!(
-            TryInto::<()>::try_into(v).unwrap_err().kind,
-            ErrorKind::IncorrectType
-        );
-
-        let v = v_cons!(v_nil!(), v_nil!());
-        assert_eq!(
-            TryInto::<ValueCons<ValueTypesStatic>>::try_into(v.clone()).unwrap(),
-            cons!(v_nil!(), v_nil!())
-        );
-        assert_eq!(
-            TryInto::<()>::try_into(v).unwrap_err().kind,
+            TryInto::<ValueList<ValueTypesStatic>>::try_into(v)
+                .unwrap_err()
+                .kind,
             ErrorKind::IncorrectType
         );
 
@@ -1864,7 +1794,9 @@ mod tests {
             bool!(true)
         );
         assert_eq!(
-            TryInto::<()>::try_into(v).unwrap_err().kind,
+            TryInto::<ValueList<ValueTypesStatic>>::try_into(v)
+                .unwrap_err()
+                .kind,
             ErrorKind::IncorrectType
         );
 
@@ -1877,7 +1809,9 @@ mod tests {
             str!("str")
         );
         assert_eq!(
-            TryInto::<()>::try_into(v).unwrap_err().kind,
+            TryInto::<ValueList<ValueTypesStatic>>::try_into(v)
+                .unwrap_err()
+                .kind,
             ErrorKind::IncorrectType
         );
 
@@ -1890,7 +1824,9 @@ mod tests {
             v![1, 0]
         );
         assert_eq!(
-            TryInto::<()>::try_into(v).unwrap_err().kind,
+            TryInto::<ValueList<ValueTypesStatic>>::try_into(v)
+                .unwrap_err()
+                .kind,
             ErrorKind::IncorrectType
         );
 
@@ -1901,7 +1837,9 @@ mod tests {
             lang_kira![1, 0]
         );
         assert_eq!(
-            TryInto::<()>::try_into(v).unwrap_err().kind,
+            TryInto::<ValueList<ValueTypesStatic>>::try_into(v)
+                .unwrap_err()
+                .kind,
             ErrorKind::IncorrectType
         );
 
@@ -1911,7 +1849,9 @@ mod tests {
             func!(qsym!("p", "f1"))
         );
         assert_eq!(
-            TryInto::<()>::try_into(v).unwrap_err().kind,
+            TryInto::<ValueList<ValueTypesStatic>>::try_into(v)
+                .unwrap_err()
+                .kind,
             ErrorKind::IncorrectType
         );
 
@@ -1921,7 +1861,9 @@ mod tests {
             bq!(v_bool!(true))
         );
         assert_eq!(
-            TryInto::<()>::try_into(v).unwrap_err().kind,
+            TryInto::<ValueList<ValueTypesStatic>>::try_into(v)
+                .unwrap_err()
+                .kind,
             ErrorKind::IncorrectType
         );
 
@@ -1931,7 +1873,9 @@ mod tests {
             comma!(v_bool!(true))
         );
         assert_eq!(
-            TryInto::<()>::try_into(v).unwrap_err().kind,
+            TryInto::<ValueList<ValueTypesStatic>>::try_into(v)
+                .unwrap_err()
+                .kind,
             ErrorKind::IncorrectType
         );
 
@@ -1941,24 +1885,23 @@ mod tests {
             splice!(v_bool!(true))
         );
         assert_eq!(
-            TryInto::<()>::try_into(v).unwrap_err().kind,
+            TryInto::<ValueList<ValueTypesStatic>>::try_into(v)
+                .unwrap_err()
+                .kind,
             ErrorKind::IncorrectType
         );
     }
 
     #[test]
     fn test_into_value() {
-        let v: Value<ValueTypesStatic> = ().into();
-        assert_eq!(v, v_nil!());
+        let v: Value<ValueTypesStatic> = list!().into();
+        assert_eq!(v, v_list!());
 
         let v: Value<ValueTypesStatic> = uqsym!("uqsym").into();
         assert_eq!(v, v_uqsym!("uqsym"));
 
         let v: Value<ValueTypesStatic> = qsym!("p", "qsym").into();
         assert_eq!(v, v_qsym!("p", "qsym"));
-
-        let v: Value<ValueTypesStatic> = cons!(v_nil!(), v_nil!()).into();
-        assert_eq!(v, v_cons!(v_nil!(), v_nil!()));
 
         let v: Value<ValueTypesStatic> = bool!(true).into();
         assert_eq!(v, v_bool!(true));
@@ -1987,30 +1930,16 @@ mod tests {
 
     #[test]
     fn test_iter() {
-        let mut i = v_list!(v_uqsym!("uqsym"), v_bool!(true), v_str!("str"));
-        assert_eq!(i.next().unwrap().unwrap_item(), v_uqsym!("uqsym"));
-        assert_eq!(i.next().unwrap().unwrap_item(), v_bool!(true));
-        assert_eq!(i.next().unwrap().unwrap_item(), v_str!("str"));
+        let mut i = list!();
         assert!(i.next().is_none());
-        assert_eq!(i, v_nil!());
+        assert_eq!(i, list!());
 
-        let mut i = v_cons!(v_uqsym!("uqsym"), v_bool!(true));
-        assert_eq!(i.next().unwrap().unwrap_item(), v_uqsym!("uqsym"));
-        assert_eq!(i.next().unwrap().unwrap_list(), v_bool!(true));
+        let mut i = list!(v_uqsym!("uqsym"), v_bool!(true), v_str!("str"));
+        assert_eq!(i.next().unwrap(), v_uqsym!("uqsym"));
+        assert_eq!(i.next().unwrap(), v_bool!(true));
+        assert_eq!(i, list!(v_str!("str")));
+        assert_eq!(i.next().unwrap(), v_str!("str"));
         assert!(i.next().is_none());
-        assert_eq!(i, v_nil!());
-
-        let mut i = v_list!(v_uqsym!("uqsym"), v_bool!(true), v_str!("str"));
-        assert_eq!(i.next().unwrap().unwrap_item(), v_uqsym!("uqsym"));
-        assert_eq!(i, v_list!(v_bool!(true), v_str!("str")));
-
-        let mut i = v_list!(v_uqsym!("uqsym"), v_bool!(true), v_str!("str"));
-        assert_eq!(i.next().unwrap().unwrap_item(), v_uqsym!("uqsym"));
-        assert_eq!(i.next().unwrap().unwrap_item(), v_bool!(true));
-        assert_eq!(i.next().unwrap().unwrap_item(), v_str!("str"));
-        assert_eq!(i, v_nil!());
-
-        let i = v_nil!().into_iter();
-        assert_eq!(i, v_nil!());
+        assert_eq!(i, list!());
     }
 }
