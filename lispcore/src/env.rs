@@ -184,7 +184,6 @@ pub struct ValueTypeList {
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum ValueTypeNonList {
-    Nil,
     UnqualifiedSymbol,
     QualifiedSymbol,
     Bool,

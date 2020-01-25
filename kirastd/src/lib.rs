@@ -1,6 +1,5 @@
 use ryuk_lispcore::env::*;
 use ryuk_lispcore::error::*;
-use ryuk_lispcore::list::*;
 use ryuk_lispcore::value::*;
 use std::collections::BTreeSet;
 
@@ -46,7 +45,10 @@ where
     }
 }
 
-pub fn compile_if<T>(env: &mut dyn Environment<T>, mut v: Value<T>) -> Result<CompilationResult<T>>
+pub fn compile_if<T>(
+    env: &mut dyn Environment<T>,
+    mut params: ValueList<T>,
+) -> Result<CompilationResult<T>>
 where
     T: ValueTypes + ?Sized + 'static,
     for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
@@ -56,8 +58,8 @@ where
     let mut types = BTreeSet::new();
 
     let test;
-    match v.next() {
-        Option::Some(ListItem::Item(test_item)) => {
+    match params.next() {
+        Option::Some(test_item) => {
             let test_comp = env.compile(test_item)?;
             if test_comp.types
                 != BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::Bool)])
@@ -75,8 +77,8 @@ where
     }
 
     let then;
-    match v.next() {
-        Option::Some(ListItem::Item(then_item)) => {
+    match params.next() {
+        Option::Some(then_item) => {
             let then_comp = env.compile(then_item)?;
             types.append(&mut then_comp.types.clone());
             then = then_comp.result;
@@ -90,25 +92,21 @@ where
     }
 
     let els;
-    match v.next() {
-        Option::Some(ListItem::Item(els_item)) => {
+    match params.next() {
+        Option::Some(els_item) => {
             let els_comp = env.compile(els_item)?;
             types.append(&mut els_comp.types.clone());
             els = els_comp.result;
         }
         Option::None => {
-            types.insert(ValueType::NonList(ValueTypeNonList::Nil));
-            els = Box::new(LiteralEvaluator::new(Value::Nil));
-        }
-        _ => {
-            return Result::Err(Error::new(
-                ErrorKind::IncorrectParams,
-                "Incorrect parameters",
-            ))
+            types.insert(ValueType::List(ValueTypeList {
+                items: BTreeSet::new(),
+            }));
+            els = Box::new(LiteralEvaluator::new(Value::List(ValueList(Option::None))));
         }
     }
 
-    match v.next() {
+    match params.next() {
         Option::Some(_) => {
             return Result::Err(Error::new(
                 ErrorKind::IncorrectParams,
@@ -126,7 +124,7 @@ where
 
 pub fn compile_quote<T>(
     _env: &mut dyn Environment<T>,
-    mut v: Value<T>,
+    mut params: ValueList<T>,
 ) -> Result<CompilationResult<T>>
 where
     T: ValueTypes + ?Sized + 'static,
@@ -135,8 +133,8 @@ where
     use std::iter::FromIterator;
 
     let result;
-    match v.next() {
-        Option::Some(ListItem::Item(val)) => result = val,
+    match params.next() {
+        Option::Some(val) => result = val,
         _ => {
             return Result::Err(Error::new(
                 ErrorKind::IncorrectParams,
@@ -145,7 +143,7 @@ where
         }
     }
 
-    match v.next() {
+    match params.next() {
         Option::Some(_) => {
             return Result::Err(Error::new(
                 ErrorKind::IncorrectParams,
@@ -213,12 +211,12 @@ mod tests {
         fn compile_macro(
             &mut self,
             name: &ValueQualifiedSymbol<String>,
-            v: Value<ValueTypesRc>,
+            params: ValueList<ValueTypesRc>,
         ) -> Option<Result<TryCompilationResult<ValueTypesRc>>> {
             use std::borrow::Borrow;
 
             match (name.package.borrow(), name.name.borrow()) {
-                ("std", "if") => Option::Some(match compile_if(self, v) {
+                ("std", "if") => Option::Some(match compile_if(self, params) {
                     Result::Ok(r) => Result::Ok(TryCompilationResult::Compiled(r)),
                     Result::Err(e) => Result::Err(e),
                 }),
@@ -256,21 +254,21 @@ mod tests {
         let mut comp = IfEvaluator::new(
             Box::new(LiteralEvaluator::new(v_bool!(true).convert())),
             Box::new(LiteralEvaluator::new(v_str!("yes").convert())),
-            Box::new(LiteralEvaluator::new(v_nil!().convert())),
+            Box::new(LiteralEvaluator::new(v_list!().convert())),
         );
         assert_eq!(comp.evaluate(&mut env).unwrap(), v_str!("yes"));
 
         let mut comp = IfEvaluator::new(
             Box::new(LiteralEvaluator::new(v_bool!(false).convert())),
             Box::new(LiteralEvaluator::new(v_str!("yes").convert())),
-            Box::new(LiteralEvaluator::new(v_nil!().convert())),
+            Box::new(LiteralEvaluator::new(v_list!().convert())),
         );
-        assert_eq!(comp.evaluate(&mut env).unwrap(), v_nil!());
+        assert_eq!(comp.evaluate(&mut env).unwrap(), v_list!());
 
         let mut comp = IfEvaluator::new(
             Box::new(LiteralEvaluator::new(v_str!("true").convert())),
             Box::new(LiteralEvaluator::new(v_str!("yes").convert())),
-            Box::new(LiteralEvaluator::new(v_nil!().convert())),
+            Box::new(LiteralEvaluator::new(v_list!().convert())),
         );
         assert_eq!(
             comp.evaluate(&mut env).unwrap_err().kind,
@@ -286,9 +284,7 @@ mod tests {
 
         let mut comp = compile_if(
             &mut env,
-            v_list!(v_bool!(true), v_str!("yes"), v_str!("no"))
-                .convert()
-                .into_iter(),
+            list!(v_bool!(true), v_str!("yes"), v_str!("no")).convert(),
         )
         .unwrap();
         assert_eq!(comp.result.evaluate(&mut env).unwrap(), v_str!("yes"));
@@ -299,9 +295,7 @@ mod tests {
 
         let mut comp = compile_if(
             &mut env,
-            v_list!(v_bool!(false), v_str!("yes"), v_str!("no"))
-                .convert()
-                .into_iter(),
+            list!(v_bool!(false), v_str!("yes"), v_str!("no")).convert(),
         )
         .unwrap();
         assert_eq!(comp.result.evaluate(&mut env).unwrap(), v_str!("no"));
@@ -310,43 +304,38 @@ mod tests {
             BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::String)])
         );
 
-        let mut comp = compile_if(
-            &mut env,
-            v_list!(v_bool!(true), v_str!("yes")).convert().into_iter(),
-        )
-        .unwrap();
+        let mut comp = compile_if(&mut env, list!(v_bool!(true), v_str!("yes")).convert()).unwrap();
         assert_eq!(comp.result.evaluate(&mut env).unwrap(), v_str!("yes"));
         assert_eq!(
             comp.types,
             BTreeSet::from_iter(vec![
-                ValueType::NonList(ValueTypeNonList::Nil),
+                ValueType::List(ValueTypeList {
+                    items: BTreeSet::new(),
+                }),
                 ValueType::NonList(ValueTypeNonList::String),
             ])
         );
 
-        let mut comp = compile_if(
-            &mut env,
-            v_list!(v_bool!(false), v_str!("yes")).convert().into_iter(),
-        )
-        .unwrap();
-        assert_eq!(comp.result.evaluate(&mut env).unwrap(), v_nil!());
+        let mut comp =
+            compile_if(&mut env, list!(v_bool!(false), v_str!("yes")).convert()).unwrap();
+        assert_eq!(comp.result.evaluate(&mut env).unwrap(), v_list!());
         assert_eq!(
             comp.types,
             BTreeSet::from_iter(vec![
-                ValueType::NonList(ValueTypeNonList::Nil),
+                ValueType::List(ValueTypeList {
+                    items: BTreeSet::new(),
+                }),
                 ValueType::NonList(ValueTypeNonList::String),
             ])
         );
 
         assert_eq!(
-            compile_if(&mut env, v_list!().convert().into_iter())
-                .unwrap_err()
-                .kind,
+            compile_if(&mut env, list!().convert()).unwrap_err().kind,
             ErrorKind::IncorrectParams
         );
 
         assert_eq!(
-            compile_if(&mut env, v_list!(v_bool!(true)).convert().into_iter())
+            compile_if(&mut env, list!(v_bool!(true)).convert())
                 .unwrap_err()
                 .kind,
             ErrorKind::IncorrectParams
@@ -355,9 +344,7 @@ mod tests {
         assert_eq!(
             compile_if(
                 &mut env,
-                v_list!(v_bool!(true), v_nil!(), v_nil!(), v_nil!())
-                    .convert()
-                    .into_iter()
+                list!(v_bool!(true), v_list!(), v_list!(), v_list!()).convert()
             )
             .unwrap_err()
             .kind,
@@ -365,32 +352,10 @@ mod tests {
         );
 
         assert_eq!(
-            compile_if(&mut env, v_list!(v_str!("str")).convert().into_iter())
+            compile_if(&mut env, list!(v_str!("str")).convert())
                 .unwrap_err()
                 .kind,
             ErrorKind::IncorrectType
-        );
-
-        assert_eq!(
-            compile_if(
-                &mut env,
-                v_tlist!(v_bool!(true), v_nil!()).convert().into_iter()
-            )
-            .unwrap_err()
-            .kind,
-            ErrorKind::IncorrectParams
-        );
-
-        assert_eq!(
-            compile_if(
-                &mut env,
-                v_tlist!(v_bool!(true), v_nil!(), v_str!("str"))
-                    .convert()
-                    .into_iter()
-            )
-            .unwrap_err()
-            .kind,
-            ErrorKind::IncorrectParams
         );
     }
 
@@ -400,19 +365,14 @@ mod tests {
 
         let mut env = SimpleEnvironment;
 
-        let mut comp =
-            compile_quote(&mut env, v_list!(v_str!("str")).convert().into_iter()).unwrap();
+        let mut comp = compile_quote(&mut env, list!(v_str!("str")).convert()).unwrap();
         assert_eq!(comp.result.evaluate(&mut env).unwrap(), v_str!("str"));
         assert_eq!(
             comp.types,
             BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::String)])
         );
 
-        let mut comp = compile_quote(
-            &mut env,
-            v_list!(v_qsym!("std", "if")).convert().into_iter(),
-        )
-        .unwrap();
+        let mut comp = compile_quote(&mut env, list!(v_qsym!("std", "if")).convert()).unwrap();
         assert_eq!(
             comp.result.evaluate(&mut env).unwrap(),
             v_qsym!("std", "if")
@@ -424,9 +384,7 @@ mod tests {
 
         let mut comp = compile_quote(
             &mut env,
-            v_list!(v_list!(v_qsym!("std", "if"), v_bool!(true)))
-                .convert()
-                .into_iter(),
+            list!(v_list!(v_qsym!("std", "if"), v_bool!(true))).convert(),
         )
         .unwrap();
         assert_eq!(
@@ -440,31 +398,18 @@ mod tests {
                     ValueType::NonList(ValueTypeNonList::QualifiedSymbol),
                     ValueType::NonList(ValueTypeNonList::Bool),
                 ]),
-                tail: BTreeSet::from_iter(vec![ValueTypeNonList::Nil]),
             })])
         );
 
         assert_eq!(
-            compile_quote(&mut env, v_list!().convert().into_iter())
-                .unwrap_err()
-                .kind,
+            compile_quote(&mut env, list!().convert()).unwrap_err().kind,
             ErrorKind::IncorrectParams
         );
 
         assert_eq!(
-            compile_quote(&mut env, v_list!(v_nil!(), v_nil!()).convert().into_iter())
+            compile_quote(&mut env, list!(v_list!(), v_list!()).convert())
                 .unwrap_err()
                 .kind,
-            ErrorKind::IncorrectParams
-        );
-
-        assert_eq!(
-            compile_quote(
-                &mut env,
-                v_tlist!(v_nil!(), v_bool!(true)).convert().into_iter()
-            )
-            .unwrap_err()
-            .kind,
             ErrorKind::IncorrectParams
         );
     }
