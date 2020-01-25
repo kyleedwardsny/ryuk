@@ -668,33 +668,22 @@ where
     }
 
     pub fn value_type(&self) -> ValueType {
+        use std::iter::FromIterator;
+
         match self {
             Value::List(l) => {
-                let mut types = ValueTypeList {
-                    items: BTreeSet::new(),
-                };
-                for item in l.clone() {
-                    types.items.insert(item.value_type());
-                }
-                ValueType::List(types)
+                ValueType::List(BTreeSet::from_iter(l.clone().map(|item| item.value_type())))
             }
-            _ => ValueType::NonList(self.value_type_non_list()),
-        }
-    }
-
-    pub fn value_type_non_list(&self) -> ValueTypeNonList {
-        match self {
-            Value::List(_) => panic!("Unexpected Value::List"),
-            Value::UnqualifiedSymbol(_) => ValueTypeNonList::UnqualifiedSymbol,
-            Value::QualifiedSymbol(_) => ValueTypeNonList::QualifiedSymbol,
-            Value::Bool(_) => ValueTypeNonList::Bool,
-            Value::String(_) => ValueTypeNonList::String,
-            Value::Semver(_) => ValueTypeNonList::Semver,
-            Value::LanguageDirective(_) => ValueTypeNonList::LanguageDirective,
-            Value::Function(_) => ValueTypeNonList::Function,
-            Value::Backquote(b) => ValueTypeNonList::Backquote(Box::new(b.0.borrow().value_type())),
-            Value::Comma(c) => ValueTypeNonList::Comma(Box::new(c.0.borrow().value_type())),
-            Value::Splice(s) => ValueTypeNonList::Splice(Box::new(s.0.borrow().value_type())),
+            Value::UnqualifiedSymbol(_) => ValueType::UnqualifiedSymbol,
+            Value::QualifiedSymbol(_) => ValueType::QualifiedSymbol,
+            Value::Bool(_) => ValueType::Bool,
+            Value::String(_) => ValueType::String,
+            Value::Semver(_) => ValueType::Semver,
+            Value::LanguageDirective(_) => ValueType::LanguageDirective,
+            Value::Function(_) => ValueType::Function,
+            Value::Backquote(b) => ValueType::Backquote(Box::new(b.0.borrow().value_type())),
+            Value::Comma(c) => ValueType::Comma(Box::new(c.0.borrow().value_type())),
+            Value::Splice(s) => ValueType::Splice(Box::new(s.0.borrow().value_type())),
         }
     }
 }

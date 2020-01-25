@@ -173,17 +173,7 @@ where
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum ValueType {
-    List(ValueTypeList),
-    NonList(ValueTypeNonList),
-}
-
-#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
-pub struct ValueTypeList {
-    pub items: BTreeSet<ValueType>,
-}
-
-#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
-pub enum ValueTypeNonList {
+    List(BTreeSet<ValueType>),
     UnqualifiedSymbol,
     QualifiedSymbol,
     Bool,
@@ -355,65 +345,40 @@ mod tests {
                 v_list!(v_uqsym!("uqsym"), v_bool!(true), v_qsym!("p", "qsym"))
             )
             .value_type(),
-            ValueType::List(ValueTypeList {
-                items: BTreeSet::from_iter(vec![
-                    ValueType::NonList(ValueTypeNonList::Bool),
-                    ValueType::NonList(ValueTypeNonList::String),
-                    ValueType::List(ValueTypeList {
-                        items: BTreeSet::from_iter(vec![
-                            ValueType::NonList(ValueTypeNonList::UnqualifiedSymbol),
-                            ValueType::NonList(ValueTypeNonList::QualifiedSymbol),
-                            ValueType::NonList(ValueTypeNonList::Bool),
-                        ]),
-                    }),
-                ]),
-            })
+            ValueType::List(BTreeSet::from_iter(vec![
+                ValueType::Bool,
+                ValueType::String,
+                ValueType::List(BTreeSet::from_iter(vec![
+                    ValueType::UnqualifiedSymbol,
+                    ValueType::QualifiedSymbol,
+                    ValueType::Bool,
+                ])),
+            ]),)
         );
-        assert_eq!(
-            v_uqsym!("uqsym").value_type(),
-            ValueType::NonList(ValueTypeNonList::UnqualifiedSymbol)
-        );
+        assert_eq!(v_uqsym!("uqsym").value_type(), ValueType::UnqualifiedSymbol);
         assert_eq!(
             v_qsym!("p", "qsym").value_type(),
-            ValueType::NonList(ValueTypeNonList::QualifiedSymbol)
+            ValueType::QualifiedSymbol
         );
-        assert_eq!(
-            v_bool!(true).value_type(),
-            ValueType::NonList(ValueTypeNonList::Bool)
-        );
-        assert_eq!(
-            v_str!("str").value_type(),
-            ValueType::NonList(ValueTypeNonList::String)
-        );
-        assert_eq!(
-            v_v![1, 0].value_type(),
-            ValueType::NonList(ValueTypeNonList::Semver)
-        );
+        assert_eq!(v_bool!(true).value_type(), ValueType::Bool);
+        assert_eq!(v_str!("str").value_type(), ValueType::String);
+        assert_eq!(v_v![1, 0].value_type(), ValueType::Semver);
         assert_eq!(
             v_lang_kira![1, 0].value_type(),
-            ValueType::NonList(ValueTypeNonList::LanguageDirective)
+            ValueType::LanguageDirective
         );
-        assert_eq!(
-            v_func!(qsym!("p", "f1")).value_type(),
-            ValueType::NonList(ValueTypeNonList::Function)
-        );
+        assert_eq!(v_func!(qsym!("p", "f1")).value_type(), ValueType::Function);
         assert_eq!(
             v_bq!(v_qsym!("p", "f1")).value_type(),
-            ValueType::NonList(ValueTypeNonList::Backquote(Box::new(ValueType::NonList(
-                ValueTypeNonList::QualifiedSymbol
-            ))))
+            ValueType::Backquote(Box::new(ValueType::QualifiedSymbol))
         );
         assert_eq!(
             v_comma!(v_qsym!("p", "f1")).value_type(),
-            ValueType::NonList(ValueTypeNonList::Comma(Box::new(ValueType::NonList(
-                ValueTypeNonList::QualifiedSymbol
-            ))))
+            ValueType::Comma(Box::new(ValueType::QualifiedSymbol))
         );
         assert_eq!(
             v_splice!(v_qsym!("p", "f1")).value_type(),
-            ValueType::NonList(ValueTypeNonList::Splice(Box::new(ValueType::NonList(
-                ValueTypeNonList::QualifiedSymbol
-            ))))
+            ValueType::Splice(Box::new(ValueType::QualifiedSymbol))
         );
     }
 
@@ -422,14 +387,14 @@ mod tests {
     fn simplemacro1() -> Result<TryCompilationResult<ValueTypesRc>> {
         Result::Ok(TryCompilationResult::Compiled(CompilationResult {
             result: Box::new(LiteralEvaluator::new(v_str!("Hello world!").convert())),
-            types: BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::String)]),
+            types: BTreeSet::from_iter(vec![ValueType::String]),
         }))
     }
 
     fn simplemacro2() -> Result<TryCompilationResult<ValueTypesRc>> {
         Result::Ok(TryCompilationResult::Compiled(CompilationResult {
             result: Box::new(LiteralEvaluator::new(v_bool!(true).convert())),
-            types: BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::Bool)]),
+            types: BTreeSet::from_iter(vec![ValueType::Bool]),
         }))
     }
 
@@ -499,12 +464,8 @@ mod tests {
             name: &ValueQualifiedSymbol<<ValueTypesRc as ValueTypes>::StringRef>,
         ) -> Option<BTreeSet<ValueType>> {
             match (name.package.borrow(), name.name.borrow()) {
-                ("pvar", "var1") => Option::Some(BTreeSet::from_iter(vec![ValueType::NonList(
-                    ValueTypeNonList::String,
-                )])),
-                ("pvar", "var2") => Option::Some(BTreeSet::from_iter(vec![ValueType::NonList(
-                    ValueTypeNonList::Bool,
-                )])),
+                ("pvar", "var1") => Option::Some(BTreeSet::from_iter(vec![ValueType::String])),
+                ("pvar", "var2") => Option::Some(BTreeSet::from_iter(vec![ValueType::Bool])),
                 _ => Option::None,
             }
         }
@@ -657,27 +618,25 @@ mod tests {
             &mut env,
             v_list!(),
             v_list!(),
-            BTreeSet::from_iter(vec![ValueType::List(ValueTypeList {
-                items: BTreeSet::new(),
-            })]),
+            BTreeSet::from_iter(vec![ValueType::List(BTreeSet::new())]),
         );
         test_compile_and_evaluate(
             &mut env,
             v_bool!(true),
             v_bool!(true),
-            BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::Bool)]),
+            BTreeSet::from_iter(vec![ValueType::Bool]),
         );
         test_compile_and_evaluate(
             &mut env,
             v_str!("Hello world!"),
             v_str!("Hello world!"),
-            BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::String)]),
+            BTreeSet::from_iter(vec![ValueType::String]),
         );
         test_compile_and_evaluate(
             &mut env,
             v_v![1, 0],
             v_v![1, 0],
-            BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::Semver)]),
+            BTreeSet::from_iter(vec![ValueType::Semver]),
         );
     }
 
@@ -688,13 +647,13 @@ mod tests {
             &mut env,
             v_uqsym!("var1"),
             v_str!("str"),
-            BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::String)]),
+            BTreeSet::from_iter(vec![ValueType::String]),
         );
         test_compile_and_evaluate(
             &mut env,
             v_uqsym!("var2"),
             v_bool!(true),
-            BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::Bool)]),
+            BTreeSet::from_iter(vec![ValueType::Bool]),
         );
         assert_eq!(
             env.compile(v_uqsym!("var3").convert()).unwrap_err().kind,
@@ -705,13 +664,13 @@ mod tests {
             &mut env,
             v_qsym!("pvar", "var1"),
             v_str!("str"),
-            BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::String)]),
+            BTreeSet::from_iter(vec![ValueType::String]),
         );
         test_compile_and_evaluate(
             &mut env,
             v_qsym!("pvar", "var2"),
             v_bool!(true),
-            BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::Bool)]),
+            BTreeSet::from_iter(vec![ValueType::Bool]),
         );
         assert_eq!(
             env.compile(v_qsym!("pvar", "var3").convert())
@@ -729,13 +688,13 @@ mod tests {
             &mut env,
             v_list!(v_uqsym!("simplemacro1")),
             v_str!("Hello world!"),
-            BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::String)]),
+            BTreeSet::from_iter(vec![ValueType::String]),
         );
         test_compile_and_evaluate(
             &mut env,
             v_list!(v_uqsym!("simplemacro2")),
             v_bool!(true),
-            BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::Bool)]),
+            BTreeSet::from_iter(vec![ValueType::Bool]),
         );
         assert_eq!(
             env.compile(v_list!(v_uqsym!("simplemacro3")).convert())
@@ -748,13 +707,13 @@ mod tests {
             &mut env,
             v_list!(v_qsym!("p", "simplemacro1")),
             v_str!("Hello world!"),
-            BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::String)]),
+            BTreeSet::from_iter(vec![ValueType::String]),
         );
         test_compile_and_evaluate(
             &mut env,
             v_list!(v_qsym!("p", "simplemacro2")),
             v_bool!(true),
-            BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::Bool)]),
+            BTreeSet::from_iter(vec![ValueType::Bool]),
         );
         assert_eq!(
             env.compile(v_list!(v_qsym!("p", "simplemacro3")).convert())
@@ -772,13 +731,13 @@ mod tests {
             &mut env,
             v_list!(v_uqsym!("simplefunc1"), v_str!("Hello world!")),
             v_str!("Hello world!"),
-            BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::String)]),
+            BTreeSet::from_iter(vec![ValueType::String]),
         );
         test_compile_and_evaluate(
             &mut env,
             v_list!(v_uqsym!("simplefunc1"), v_bool!(true)),
             v_bool!(true),
-            BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::Bool)]),
+            BTreeSet::from_iter(vec![ValueType::Bool]),
         );
         assert_eq!(
             env.compile(v_list!(v_uqsym!("simplefunc1")).convert())
@@ -791,13 +750,13 @@ mod tests {
             &mut env,
             v_list!(v_qsym!("p", "simplefunc1"), v_str!("Hello world!")),
             v_str!("Hello world!"),
-            BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::String)]),
+            BTreeSet::from_iter(vec![ValueType::String]),
         );
         test_compile_and_evaluate(
             &mut env,
             v_list!(v_qsym!("p", "simplefunc1"), v_bool!(true)),
             v_bool!(true),
-            BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::Bool)]),
+            BTreeSet::from_iter(vec![ValueType::Bool]),
         );
         assert_eq!(
             env.compile(v_list!(v_qsym!("p", "simplefunc1")).convert())

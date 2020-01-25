@@ -61,9 +61,7 @@ where
     match params.next() {
         Option::Some(test_item) => {
             let test_comp = env.compile(test_item)?;
-            if test_comp.types
-                != BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::Bool)])
-            {
+            if test_comp.types != BTreeSet::from_iter(vec![ValueType::Bool]) {
                 return Result::Err(Error::new(ErrorKind::IncorrectType, "Incorrect type"));
             }
             test = test_comp.result;
@@ -99,9 +97,7 @@ where
             els = els_comp.result;
         }
         Option::None => {
-            types.insert(ValueType::List(ValueTypeList {
-                items: BTreeSet::new(),
-            }));
+            types.insert(ValueType::List(BTreeSet::new()));
             els = Box::new(LiteralEvaluator::new(Value::List(ValueList(Option::None))));
         }
     }
@@ -288,10 +284,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(comp.result.evaluate(&mut env).unwrap(), v_str!("yes"));
-        assert_eq!(
-            comp.types,
-            BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::String)])
-        );
+        assert_eq!(comp.types, BTreeSet::from_iter(vec![ValueType::String]));
 
         let mut comp = compile_if(
             &mut env,
@@ -299,21 +292,13 @@ mod tests {
         )
         .unwrap();
         assert_eq!(comp.result.evaluate(&mut env).unwrap(), v_str!("no"));
-        assert_eq!(
-            comp.types,
-            BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::String)])
-        );
+        assert_eq!(comp.types, BTreeSet::from_iter(vec![ValueType::String]));
 
         let mut comp = compile_if(&mut env, list!(v_bool!(true), v_str!("yes")).convert()).unwrap();
         assert_eq!(comp.result.evaluate(&mut env).unwrap(), v_str!("yes"));
         assert_eq!(
             comp.types,
-            BTreeSet::from_iter(vec![
-                ValueType::List(ValueTypeList {
-                    items: BTreeSet::new(),
-                }),
-                ValueType::NonList(ValueTypeNonList::String),
-            ])
+            BTreeSet::from_iter(vec![ValueType::List(BTreeSet::new()), ValueType::String,])
         );
 
         let mut comp =
@@ -321,12 +306,7 @@ mod tests {
         assert_eq!(comp.result.evaluate(&mut env).unwrap(), v_list!());
         assert_eq!(
             comp.types,
-            BTreeSet::from_iter(vec![
-                ValueType::List(ValueTypeList {
-                    items: BTreeSet::new(),
-                }),
-                ValueType::NonList(ValueTypeNonList::String),
-            ])
+            BTreeSet::from_iter(vec![ValueType::List(BTreeSet::new()), ValueType::String,])
         );
 
         assert_eq!(
@@ -367,10 +347,7 @@ mod tests {
 
         let mut comp = compile_quote(&mut env, list!(v_str!("str")).convert()).unwrap();
         assert_eq!(comp.result.evaluate(&mut env).unwrap(), v_str!("str"));
-        assert_eq!(
-            comp.types,
-            BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::String)])
-        );
+        assert_eq!(comp.types, BTreeSet::from_iter(vec![ValueType::String]));
 
         let mut comp = compile_quote(&mut env, list!(v_qsym!("std", "if")).convert()).unwrap();
         assert_eq!(
@@ -379,7 +356,7 @@ mod tests {
         );
         assert_eq!(
             comp.types,
-            BTreeSet::from_iter(vec![ValueType::NonList(ValueTypeNonList::QualifiedSymbol)])
+            BTreeSet::from_iter(vec![ValueType::QualifiedSymbol])
         );
 
         let mut comp = compile_quote(
@@ -393,12 +370,10 @@ mod tests {
         );
         assert_eq!(
             comp.types,
-            BTreeSet::from_iter(vec![ValueType::List(ValueTypeList {
-                items: BTreeSet::from_iter(vec![
-                    ValueType::NonList(ValueTypeNonList::QualifiedSymbol),
-                    ValueType::NonList(ValueTypeNonList::Bool),
-                ]),
-            })])
+            BTreeSet::from_iter(vec![ValueType::List(BTreeSet::from_iter(vec![
+                ValueType::QualifiedSymbol,
+                ValueType::Bool,
+            ]),)])
         );
 
         assert_eq!(
