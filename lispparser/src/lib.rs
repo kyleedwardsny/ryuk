@@ -104,13 +104,6 @@ impl BackquoteStatus {
         }
     }
 
-    pub fn list_tail(&self) -> Self {
-        Self {
-            depth: self.depth,
-            status: ListItem::List(()),
-        }
-    }
-
     pub fn comma(&self) -> Result<Self> {
         if self.depth == 0 {
             Result::Err(Error::new(ErrorKind::IllegalComma, "Illegal comma"))
@@ -153,10 +146,6 @@ where
         match read_impl(&mut self.reader, BackquoteStatus::new()) {
             Result::Ok(r) => match r {
                 ReadImplResult::Value(v) => Option::Some(Result::Ok(v)),
-                ReadImplResult::InvalidToken(t) => Option::Some(Result::Err(Error::new(
-                    ErrorKind::InvalidToken,
-                    format!("Invalid token: '{}'", t),
-                ))),
                 ReadImplResult::EndOfFile => Option::None,
             },
             Result::Err(e) => Option::Some(Result::Err(e)),
@@ -192,21 +181,11 @@ fn skip_whitespace<I: Iterator<Item = char>>(peekable: &mut Peekable<I>) -> Resu
     Result::Ok(())
 }
 
-enum ReadDelimitedResult<T>
-where
-    T: ValueTypes + ?Sized,
-    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
-{
-    Value(Value<T>),
-    InvalidToken(String),
-    EndDelimiter,
-}
-
 fn read_delimited<T, I>(
     peekable: &mut Peekable<I>,
     delimiter: char,
     bq: BackquoteStatus,
-) -> Result<ReadDelimitedResult<T>>
+) -> Result<Option<Value<T>>>
 where
     T: ValueTypes + ?Sized,
     for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
@@ -223,11 +202,10 @@ where
     if let Option::Some(c) = peekable.peek() {
         if *c == delimiter {
             peekable.next();
-            Result::Ok(ReadDelimitedResult::EndDelimiter)
+            Result::Ok(Option::None)
         } else {
             match read_impl(peekable, bq)? {
-                ReadImplResult::Value(v) => Result::Ok(ReadDelimitedResult::Value(v)),
-                ReadImplResult::InvalidToken(t) => Result::Ok(ReadDelimitedResult::InvalidToken(t)),
+                ReadImplResult::Value(v) => Result::Ok(Option::Some(v)),
                 ReadImplResult::EndOfFile => Result::Err(Error::new(
                     ErrorKind::EndOfFile,
                     "End of file reached".to_string(),
@@ -242,11 +220,7 @@ where
     }
 }
 
-fn read_list<T, I>(
-    peekable: &mut Peekable<I>,
-    allow_dot: bool,
-    bq: BackquoteStatus,
-) -> Result<Value<T>>
+fn read_list<T, I>(peekable: &mut Peekable<I>, bq: BackquoteStatus) -> Result<ValueList<T>>
 where
     T: ValueTypes + ?Sized,
     for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
@@ -259,36 +233,18 @@ where
         Default + BorrowMut<<T::SemverTypes as SemverTypes>::Semver>,
     Value<T>: Into<T::ValueRef>,
 {
-    match read_delimited(peekable, ')', bq.list_item())? {
-        ReadDelimitedResult::Value(v) => Result::Ok(Value::<T>::Cons(ValueCons(
-            Cons {
-                car: v,
-                cdr: read_list(peekable, true, bq)?,
-            }
-            .into(),
-        ))),
-        ReadDelimitedResult::InvalidToken(t) => match (allow_dot, &*t) {
-            (true, ".") => match read_delimited(peekable, ')', bq.list_tail())? {
-                ReadDelimitedResult::Value(cdr) => match read_delimited::<T, I>(peekable, ')', bq)?
-                {
-                    ReadDelimitedResult::EndDelimiter => Result::Ok(cdr),
-                    _ => Result::Err(Error::new(
-                        ErrorKind::InvalidToken,
-                        "Expected ')', got something else",
-                    )),
-                },
-                _ => Result::Err(Error::new(
-                    ErrorKind::InvalidToken,
-                    "Expected value, got something else",
-                )),
-            },
-            _ => Result::Err(Error::new(
-                ErrorKind::InvalidToken,
-                format!("Invalid token: '{}'", t),
-            )),
+    Result::Ok(ValueList(
+        match read_delimited(peekable, ')', bq.list_item())? {
+            Option::Some(v) => Option::Some(
+                Cons {
+                    car: v,
+                    cdr: read_list(peekable, bq)?,
+                }
+                .into(),
+            ),
+            Option::None => Option::None,
         },
-        ReadDelimitedResult::EndDelimiter => Result::Ok(Value::Nil),
-    }
+    ))
 }
 
 fn read_string<I>(peekable: &mut Peekable<I>, end: char) -> Result<String>
@@ -424,7 +380,6 @@ where
     for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
 {
     Value(Value<T>),
-    InvalidToken(String),
     EndOfFile,
 }
 
@@ -436,10 +391,6 @@ where
     pub fn try_unwrap_value(self) -> Result<Value<T>> {
         match self {
             Self::Value(v) => Result::Ok(v),
-            Self::InvalidToken(t) => Result::Err(Error::new(
-                ErrorKind::InvalidToken,
-                format!("Invalid token: '{}'", t),
-            )),
             Self::EndOfFile => Result::Err(Error::new(ErrorKind::EndOfFile, "End of file reached")),
         }
     }
@@ -462,7 +413,7 @@ where
     if let Option::Some(&c) = peekable.peek() {
         if c == '(' {
             peekable.next();
-            Result::Ok(ReadImplResult::Value(read_list(peekable, false, bq)?))
+            Result::Ok(ReadImplResult::Value(Value::List(read_list(peekable, bq)?)))
         } else if c == '#' {
             peekable.next();
             Result::Ok(ReadImplResult::Value(read_macro(peekable)?))
@@ -499,22 +450,22 @@ where
             }
         } else if c == '\'' {
             peekable.next();
-            Result::Ok(ReadImplResult::Value(Value::Cons(ValueCons(
+            Result::Ok(ReadImplResult::Value(Value::List(ValueList(Option::Some(
                 Cons {
                     car: Value::QualifiedSymbol(ValueQualifiedSymbol {
                         package: "std".into(),
                         name: "quote".into(),
                     }),
-                    cdr: Value::Cons(ValueCons(
+                    cdr: ValueList(Option::Some(
                         Cons {
                             car: read_impl(peekable, bq)?.try_unwrap_value()?,
-                            cdr: Value::Nil,
+                            cdr: ValueList(Option::None),
                         }
                         .into(),
                     )),
                 }
                 .into(),
-            ))))
+            )))))
         } else if is_token_char(c) {
             match read_token(peekable)? {
                 ReadTokenResult::ValidToken(t1) => match peekable.peek() {
@@ -534,7 +485,10 @@ where
                         ValueUnqualifiedSymbol(t1.to_lowercase().into()),
                     ))),
                 },
-                ReadTokenResult::InvalidToken(t) => Result::Ok(ReadImplResult::InvalidToken(t)),
+                ReadTokenResult::InvalidToken(t) => Result::Err(Error::new(
+                    ErrorKind::InvalidToken,
+                    format!("Invalid token: '{}'", t),
+                )),
             }
         } else {
             peekable.next();
@@ -739,10 +693,10 @@ mod tests {
     #[test]
     fn test_read_backquote() {
         let s = concat!(
-            "`a `,b `(c) `(,@d) `(,e) `((,f) (,@g) . ,h) `,@i `(j . ,@k) ,l ,@m `,,n `,,@o ``,,p ",
-            "``,,,q `(`(,,r)) `(`(s . ,@t)) ``(,,@u) ``(,,v) ``(,@,w) ``(,@(,@x)) ``(,(,y)) (,z) ",
-            "(,@aa) `(,(,ab)) `(,(ac . ,@ad)) `(,(ae . (,@af))) ``(,(,(ah (,ai)))) ",
-            "``(,(aj . ,((,ak)))) `(`(,(al ,,@am))) `(`(an ,,@ao)) `(`(ap ,@,@aq))"
+            "`a `,b `(c) `(,@d) `(,e) `((,f) (,@g) ,h) `,@i `(j ,@k) ,l ,@m `,,n `,,@o ``,,p ",
+            "``,,,q `(`(,,r)) `(`(s ,@t)) ``(,,@u) ``(,,v) ``(,@,w) ``(,@(,@x)) ``(,(,y)) (,z) ",
+            "(,@aa) `(,(,ab)) `(,(ac ,@ad)) `(,(ae (,@af))) ``(,(,(ah (,ai)))) ",
+            "``(,(aj ,((,ak)))) `(`(,(al ,,@am))) `(`(an ,,@ao)) `(`(ap ,@,@aq))"
         );
         let mut i = LispParser::<ValueTypesRc, _>::new(s.chars().peekable());
         assert_eq!(i.next().unwrap().unwrap(), v_bq!(v_uqsym!("a")));
@@ -758,7 +712,7 @@ mod tests {
         );
         assert_eq!(
             i.next().unwrap().unwrap(),
-            v_bq!(v_tlist!(
+            v_bq!(v_list!(
                 v_list!(v_comma!(v_uqsym!("f"))),
                 v_list!(v_splice!(v_uqsym!("g"))),
                 v_comma!(v_uqsym!("h"))
@@ -770,13 +724,8 @@ mod tests {
         );
         assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("i"));
         assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            ErrorKind::IllegalSplice
-        );
-        assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("k"));
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            ErrorKind::InvalidCharacter
+            i.next().unwrap().unwrap(),
+            v_bq!(v_list!(v_uqsym!("j"), v_splice!(v_uqsym!("k"))))
         );
         assert_eq!(i.next().unwrap().unwrap_err().kind, ErrorKind::IllegalComma);
         assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("l"));
@@ -803,17 +752,11 @@ mod tests {
             v_bq!(v_list!(v_bq!(v_list!(v_comma!(v_comma!(v_uqsym!("r")))))))
         );
         assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            ErrorKind::IllegalSplice
-        );
-        assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("t"));
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            ErrorKind::InvalidCharacter
-        );
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            ErrorKind::InvalidCharacter
+            i.next().unwrap().unwrap(),
+            v_bq!(v_list!(v_bq!(v_list!(
+                v_uqsym!("s"),
+                v_splice!(v_uqsym!("t"))
+            ))))
         );
         assert_eq!(
             i.next().unwrap().unwrap_err().kind,
@@ -1045,16 +988,23 @@ mod tests {
         );
         assert_eq!(
             i.next().unwrap().unwrap(),
-            v_list!(v_uqsym!("s7"), v_nil!(), v_str!("s8"))
-        );
-        assert_eq!(
-            i.next().unwrap().unwrap(),
-            v_tlist!(v_bool!(true), v_bool!(false))
+            v_list!(v_uqsym!("s7"), v_list!(), v_str!("s8"))
         );
         assert_eq!(
             i.next().unwrap().unwrap_err().kind,
             crate::ErrorKind::InvalidToken
         );
+        assert_eq!(i.next().unwrap().unwrap(), v_bool!(false));
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            crate::ErrorKind::InvalidCharacter
+        );
+        assert_eq!(
+            i.next().unwrap().unwrap_err().kind,
+            crate::ErrorKind::InvalidToken
+        );
+        assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("s10"));
+        assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("s11"));
         assert_eq!(
             i.next().unwrap().unwrap_err().kind,
             crate::ErrorKind::InvalidToken
@@ -1086,7 +1036,7 @@ mod tests {
         let mut num = 0;
         for v in LispParser::<ValueTypesRc, _>::new(s.chars().peekable()) {
             num += 1;
-            assert_eq!(v.unwrap(), v_nil!());
+            assert_eq!(v.unwrap(), v_list!());
         }
         assert_eq!(num, 3);
     }
