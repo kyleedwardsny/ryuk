@@ -186,6 +186,33 @@ pub enum ValueType {
     Splice(Box<ValueType>),
 }
 
+impl<T> Value<T>
+where
+    T: ValueTypes + ?Sized,
+{
+    pub fn value_type(&self) -> ValueType {
+        match self {
+            Value::List(l) => {
+                ValueType::List(BTreeSet::from_iter(l.clone().map(|item| item.value_type())))
+            }
+            Value::UnqualifiedSymbol(_) => ValueType::UnqualifiedSymbol,
+            Value::QualifiedSymbol(_) => ValueType::QualifiedSymbol,
+            Value::Bool(_) => ValueType::Bool,
+            Value::String(_) => ValueType::String,
+            Value::Semver(_) => ValueType::Semver,
+            Value::LanguageDirective(_) => ValueType::LanguageDirective,
+            Value::Function(_) => ValueType::Function,
+            Value::Backquote(b) => {
+                ValueType::Backquote(Box::new(T::value_ref_to_value(&b.0).value_type()))
+            }
+            Value::Comma(c) => ValueType::Comma(Box::new(T::value_ref_to_value(&c.0).value_type())),
+            Value::Splice(s) => {
+                ValueType::Splice(Box::new(T::value_ref_to_value(&s.0).value_type()))
+            }
+        }
+    }
+}
+
 pub trait Evaluator<C, D>: Debug
 where
     C: ValueTypes + ?Sized + 'static,

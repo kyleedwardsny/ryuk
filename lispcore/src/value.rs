@@ -1,8 +1,6 @@
-use super::env::*;
 use super::error::*;
 use std::borrow::Borrow;
 use std::cmp::Ordering;
-use std::collections::BTreeSet;
 use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::rc::Rc;
@@ -657,30 +655,6 @@ where
             Value::Backquote(b) => Value::Backquote(b.convert::<T2>()),
             Value::Comma(c) => Value::Comma(c.convert::<T2>()),
             Value::Splice(s) => Value::Splice(s.convert::<T2>()),
-        }
-    }
-
-    pub fn value_type(&self) -> ValueType {
-        use std::iter::FromIterator;
-
-        match self {
-            Value::List(l) => {
-                ValueType::List(BTreeSet::from_iter(l.clone().map(|item| item.value_type())))
-            }
-            Value::UnqualifiedSymbol(_) => ValueType::UnqualifiedSymbol,
-            Value::QualifiedSymbol(_) => ValueType::QualifiedSymbol,
-            Value::Bool(_) => ValueType::Bool,
-            Value::String(_) => ValueType::String,
-            Value::Semver(_) => ValueType::Semver,
-            Value::LanguageDirective(_) => ValueType::LanguageDirective,
-            Value::Function(_) => ValueType::Function,
-            Value::Backquote(b) => {
-                ValueType::Backquote(Box::new(T::value_ref_to_value(&b.0).value_type()))
-            }
-            Value::Comma(c) => ValueType::Comma(Box::new(T::value_ref_to_value(&c.0).value_type())),
-            Value::Splice(s) => {
-                ValueType::Splice(Box::new(T::value_ref_to_value(&s.0).value_type()))
-            }
         }
     }
 }
