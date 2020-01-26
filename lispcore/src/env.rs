@@ -314,6 +314,17 @@ where
                             params.push(ListItem::Item(result.result));
                             types.extend(result.types);
                         }
+                        Value::Comma(ValueComma(v)) => {
+                            let v = C::value_ref_to_value(&v).clone();
+                            let bq = bq.comma();
+                            let result = backquote_comma_splice_push(
+                                compile_backquote(env, v, bq)?,
+                                bq,
+                                BackquoteCommaSplice::Backquote,
+                            );
+                            params.push(ListItem::Item(result.result));
+                            types.extend(result.types);
+                        }
                         Value::Splice(ValueSplice(v)) => {
                             let v = C::value_ref_to_value(&v).clone();
                             let bq = bq.splice();
@@ -1185,6 +1196,16 @@ mod tests {
             v_list!(v_bq!(v_qsym!("pvar", "var5"))),
             BTreeSet::from_iter(std::iter::once(ValueType::List(BTreeSet::from_iter(
                 std::iter::once(ValueType::Backquote(BTreeSet::from_iter(std::iter::once(
+                    ValueType::QualifiedSymbol,
+                )))),
+            )))),
+        );
+        test_compile_and_evaluate(
+            env,
+            v_bq!(v_list!(v_comma!(v_qsym!("pvar", "var5")))),
+            v_list!(v_list!(v_qsym!("p", "simplefunc2"))),
+            BTreeSet::from_iter(std::iter::once(ValueType::List(BTreeSet::from_iter(
+                std::iter::once(ValueType::List(BTreeSet::from_iter(std::iter::once(
                     ValueType::QualifiedSymbol,
                 )))),
             )))),
