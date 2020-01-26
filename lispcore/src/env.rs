@@ -297,7 +297,52 @@ where
                     BackquoteCommaSplice::Splice,
                 )
             }
-            Value::List(l) => panic!("Not implemented"),
+            Value::List(l) => {
+                let bq = bq.list_item();
+                let mut params = Vec::new();
+                let mut types = BTreeSet::new();
+                for item in l {
+                    match item {
+                        Value::Backquote(ValueBackquote(v)) => {
+                            let v = C::value_ref_to_value(&v).clone();
+                            let bq = bq.backquote();
+                            let result = backquote_comma_splice_push(
+                                compile_backquote(env, v, bq)?,
+                                bq,
+                                BackquoteCommaSplice::Backquote,
+                            );
+                            params.push(ListItem::Item(result.result));
+                            types.extend(result.types);
+                        }
+                        Value::Splice(ValueSplice(v)) => {
+                            let v = C::value_ref_to_value(&v).clone();
+                            let bq = bq.splice();
+                            let result = backquote_comma_splice_push(
+                                compile_backquote(env, v, bq)?,
+                                bq,
+                                BackquoteCommaSplice::Splice,
+                            );
+                            for t in result.types {
+                                match t {
+                                    ValueType::List(v) => types.extend(v),
+                                    _ => {
+                                        return Result::Err(Error::new(
+                                            ErrorKind::IncorrectType,
+                                            "Incorrect type",
+                                        ))
+                                    }
+                                }
+                            }
+                            params.push(ListItem::List(result.result));
+                        }
+                        _ => panic!("Not implemented"),
+                    }
+                }
+                CompilationResult {
+                    result: Box::new(ConcatenateListsEvaluator::new(params)),
+                    types: BTreeSet::from_iter(std::iter::once(ValueType::List(types))),
+                }
+            }
             _ => CompilationResult {
                 result: Box::new(LiteralEvaluator::new(v.clone())),
                 types: BTreeSet::from_iter(std::iter::once(v.value_type())),
@@ -1116,6 +1161,30 @@ mod tests {
             v_bq!(v_comma!(v_qsym!("pvar", "var3"))),
             BTreeSet::from_iter(std::iter::once(ValueType::Backquote(BTreeSet::from_iter(
                 std::iter::once(ValueType::Comma(BTreeSet::from_iter(std::iter::once(
+                    ValueType::QualifiedSymbol,
+                )))),
+            )))),
+        );
+        test_compile_and_evaluate(
+            env,
+            v_bq!(v_list!(v_splice!(v_qsym!("pvar", "var5")))),
+            v_list!(v_qsym!("p", "simplefunc2")),
+            BTreeSet::from_iter(std::iter::once(ValueType::List(BTreeSet::from_iter(
+                std::iter::once(ValueType::QualifiedSymbol),
+            )))),
+        );
+        assert_eq!(
+            env.compile(v_bq!(v_list!(v_splice!(v_qsym!("pvar", "var4")))))
+                .unwrap_err()
+                .kind,
+            ErrorKind::IncorrectType
+        );
+        test_compile_and_evaluate(
+            env,
+            v_bq!(v_list!(v_bq!(v_qsym!("pvar", "var5")))),
+            v_list!(v_bq!(v_qsym!("pvar", "var5"))),
+            BTreeSet::from_iter(std::iter::once(ValueType::List(BTreeSet::from_iter(
+                std::iter::once(ValueType::Backquote(BTreeSet::from_iter(std::iter::once(
                     ValueType::QualifiedSymbol,
                 )))),
             )))),
