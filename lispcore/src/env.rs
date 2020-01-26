@@ -156,6 +156,14 @@ where
                                 ))
                             }
                         },
+                        Value::Backquote(ValueBackquote(v)) => {
+                            let v = C::value_ref_to_value(&v).clone();
+                            TryCompilationResult::Compiled(compile_backquote(
+                                self.as_dyn_mut(),
+                                v,
+                                BackquoteStatus::new(),
+                            )?)
+                        }
                         _ => {
                             let t = v.value_type();
                             TryCompilationResult::Compiled(CompilationResult {
@@ -171,6 +179,133 @@ where
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+struct BackquoteStatus {
+    depth: u32,
+    status: ListItem<()>,
+}
+
+impl BackquoteStatus {
+    pub fn new() -> Self {
+        Self {
+            depth: 1,
+            status: ListItem::List(()),
+        }
+    }
+
+    pub fn backquote(&self) -> Self {
+        Self {
+            depth: self.depth + 1,
+            status: ListItem::List(()),
+        }
+    }
+
+    pub fn list_item(&self) -> Self {
+        Self {
+            depth: self.depth,
+            status: ListItem::Item(()),
+        }
+    }
+
+    pub fn comma(&self) -> Self {
+        if self.depth == 0 {
+            panic!("Unexpected comma");
+        } else {
+            Self {
+                depth: self.depth - 1,
+                status: ListItem::List(()),
+            }
+        }
+    }
+
+    pub fn splice(&self) -> Self {
+        if self.depth == 0 || self.status != ListItem::Item(()) {
+            panic!("Unexpected splice");
+        } else {
+            Self {
+                depth: self.depth - 1,
+                status: ListItem::List(()),
+            }
+        }
+    }
+}
+
+fn backquote_comma_splice_push<C, D>(
+    result: CompilationResult<C, D>,
+    bq: BackquoteStatus,
+    bcs: BackquoteCommaSplice,
+) -> CompilationResult<C, D>
+where
+    C: ValueTypes + ?Sized + 'static,
+    D: ValueTypesMut + ?Sized + 'static,
+    D::StringTypes: StringTypesMut,
+    D::SemverTypes: SemverTypesMut,
+{
+    if bq.depth > 0 {
+        CompilationResult {
+            result: Box::new(BackquoteCommaSplicePushEvaluator::new(bcs, result.result)),
+            types: BTreeSet::from_iter(std::iter::once(match bcs {
+                BackquoteCommaSplice::Backquote => ValueType::Backquote(result.types),
+                BackquoteCommaSplice::Comma => ValueType::Comma(result.types),
+                BackquoteCommaSplice::Splice => ValueType::Splice(result.types),
+            })),
+        }
+    } else {
+        result
+    }
+}
+
+fn compile_backquote<C, D>(
+    env: &mut dyn Environment<C, D>,
+    v: Value<C>,
+    bq: BackquoteStatus,
+) -> Result<CompilationResult<C, D>>
+where
+    C: ValueTypes + ?Sized + 'static,
+    D: ValueTypesMut + ?Sized + 'static,
+    D::StringTypes: StringTypesMut,
+    D::SemverTypes: SemverTypesMut,
+{
+    if bq.depth == 0 {
+        env.compile(v)
+    } else {
+        Result::Ok(match v {
+            Value::Backquote(ValueBackquote(v)) => {
+                let v = C::value_ref_to_value(&v).clone();
+                let bq = bq.backquote();
+                backquote_comma_splice_push(
+                    compile_backquote(env, v, bq)?,
+                    bq,
+                    BackquoteCommaSplice::Backquote,
+                )
+            }
+            Value::Comma(ValueComma(v)) => {
+                let v = C::value_ref_to_value(&v).clone();
+                let bq = bq.comma();
+                backquote_comma_splice_push(
+                    compile_backquote(env, v, bq)?,
+                    bq,
+                    BackquoteCommaSplice::Comma,
+                )
+            }
+            Value::Splice(ValueSplice(v)) => {
+                let v = C::value_ref_to_value(&v).clone();
+                let bq = bq.splice();
+                backquote_comma_splice_push(
+                    compile_backquote(env, v, bq)?,
+                    bq,
+                    BackquoteCommaSplice::Splice,
+                )
+            }
+            Value::List(l) => panic!("Not implemented"),
+            _ => CompilationResult {
+                result: Box::new(LiteralEvaluator::new(v.clone())),
+                types: BTreeSet::from_iter(std::iter::once(v.value_type())),
+            },
+        })
+    }
+}
+
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum ValueType {
     List(BTreeSet<ValueType>),
@@ -181,9 +316,9 @@ pub enum ValueType {
     Semver,
     LanguageDirective,
     Function,
-    Backquote(Box<ValueType>),
-    Comma(Box<ValueType>),
-    Splice(Box<ValueType>),
+    Backquote(BTreeSet<ValueType>),
+    Comma(BTreeSet<ValueType>),
+    Splice(BTreeSet<ValueType>),
 }
 
 impl<T> Value<T>
@@ -202,13 +337,15 @@ where
             Value::Semver(_) => ValueType::Semver,
             Value::LanguageDirective(_) => ValueType::LanguageDirective,
             Value::Function(_) => ValueType::Function,
-            Value::Backquote(b) => {
-                ValueType::Backquote(Box::new(T::value_ref_to_value(&b.0).value_type()))
-            }
-            Value::Comma(c) => ValueType::Comma(Box::new(T::value_ref_to_value(&c.0).value_type())),
-            Value::Splice(s) => {
-                ValueType::Splice(Box::new(T::value_ref_to_value(&s.0).value_type()))
-            }
+            Value::Backquote(b) => ValueType::Backquote(BTreeSet::from_iter(std::iter::once(
+                T::value_ref_to_value(&b.0).value_type(),
+            ))),
+            Value::Comma(c) => ValueType::Comma(BTreeSet::from_iter(std::iter::once(
+                T::value_ref_to_value(&c.0).value_type(),
+            ))),
+            Value::Splice(s) => ValueType::Splice(BTreeSet::from_iter(std::iter::once(
+                T::value_ref_to_value(&s.0).value_type(),
+            ))),
         }
     }
 }
@@ -354,36 +491,38 @@ where
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub enum BackquoteCommaSplice {
+    Backquote,
+    Comma,
+    Splice,
+}
+
 #[derive(Debug)]
-pub struct CommaSplicePushEvaluator<C, D>
+pub struct BackquoteCommaSplicePushEvaluator<C, D>
 where
     C: ValueTypes + ?Sized,
     D: ValueTypesMut + ?Sized,
     D::StringTypes: StringTypesMut,
     D::SemverTypes: SemverTypesMut,
 {
-    splice: bool,
-    commas: usize,
+    push: BackquoteCommaSplice,
     wrapped: Box<dyn Evaluator<C, D>>,
 }
 
-impl<C, D> CommaSplicePushEvaluator<C, D>
+impl<C, D> BackquoteCommaSplicePushEvaluator<C, D>
 where
     C: ValueTypes + ?Sized,
     D: ValueTypesMut + ?Sized,
     D::StringTypes: StringTypesMut,
     D::SemverTypes: SemverTypesMut,
 {
-    pub fn new(splice: bool, commas: usize, wrapped: Box<dyn Evaluator<C, D>>) -> Self {
-        Self {
-            splice,
-            commas,
-            wrapped,
-        }
+    pub fn new(push: BackquoteCommaSplice, wrapped: Box<dyn Evaluator<C, D>>) -> Self {
+        Self { push, wrapped }
     }
 }
 
-impl<C, D> Evaluator<C, D> for CommaSplicePushEvaluator<C, D>
+impl<C, D> Evaluator<C, D> for BackquoteCommaSplicePushEvaluator<C, D>
 where
     C: ValueTypes + ?Sized + 'static,
     D: ValueTypesMut + ?Sized + 'static,
@@ -391,14 +530,12 @@ where
     D::SemverTypes: SemverTypesMut,
 {
     fn evaluate(&mut self, env: &mut dyn Environment<C, D>) -> Result<Value<D>> {
-        let mut result = self.wrapped.evaluate(env)?;
-        for _ in 0..self.commas {
-            result = Value::Comma(ValueComma(D::value_ref_from_value(result)));
-        }
-        if self.splice {
-            result = Value::Splice(ValueSplice(D::value_ref_from_value(result)));
-        }
-        Result::Ok(result)
+        let result = D::value_ref_from_value(self.wrapped.evaluate(env)?);
+        Result::Ok(match self.push {
+            BackquoteCommaSplice::Backquote => Value::Backquote(ValueBackquote(result)),
+            BackquoteCommaSplice::Comma => Value::Comma(ValueComma(result)),
+            BackquoteCommaSplice::Splice => Value::Splice(ValueSplice(result)),
+        })
     }
 }
 
@@ -463,15 +600,21 @@ mod tests {
         assert_eq!(v_func!(qsym!("p", "f1")).value_type(), ValueType::Function);
         assert_eq!(
             v_bq!(v_qsym!("p", "f1")).value_type(),
-            ValueType::Backquote(Box::new(ValueType::QualifiedSymbol))
+            ValueType::Backquote(BTreeSet::from_iter(std::iter::once(
+                ValueType::QualifiedSymbol
+            )))
         );
         assert_eq!(
             v_comma!(v_qsym!("p", "f1")).value_type(),
-            ValueType::Comma(Box::new(ValueType::QualifiedSymbol))
+            ValueType::Comma(BTreeSet::from_iter(std::iter::once(
+                ValueType::QualifiedSymbol
+            )))
         );
         assert_eq!(
             v_splice!(v_qsym!("p", "f1")).value_type(),
-            ValueType::Splice(Box::new(ValueType::QualifiedSymbol))
+            ValueType::Splice(BTreeSet::from_iter(std::iter::once(
+                ValueType::QualifiedSymbol
+            )))
         );
     }
 
@@ -555,6 +698,19 @@ mod tests {
         }
     }
 
+    fn simplefunc2<C, D>(
+        _env: &mut dyn Environment<C, D>,
+        _params: Vec<Value<D>>,
+    ) -> Result<Value<D>>
+    where
+        C: ValueTypes + ?Sized,
+        D: ValueTypesMut + ?Sized,
+        D::StringTypes: StringTypesMut,
+        D::SemverTypes: SemverTypesMut,
+    {
+        Result::Ok(v_qsym!("pvar", "var3").convert())
+    }
+
     impl<C, D> Environment<C, D> for SimpleEnvironment
     where
         C: ValueTypes + ?Sized + 'static,
@@ -586,6 +742,15 @@ mod tests {
             ) {
                 ("pvar", "var1") => Option::Some(BTreeSet::from_iter(vec![ValueType::String])),
                 ("pvar", "var2") => Option::Some(BTreeSet::from_iter(vec![ValueType::Bool])),
+                ("pvar", "var3") => {
+                    Option::Some(BTreeSet::from_iter(vec![ValueType::QualifiedSymbol]))
+                }
+                ("pvar", "var4") => {
+                    Option::Some(BTreeSet::from_iter(vec![ValueType::UnqualifiedSymbol]))
+                }
+                ("pvar", "var5") => Option::Some(BTreeSet::from_iter(vec![ValueType::List(
+                    BTreeSet::from_iter(vec![ValueType::QualifiedSymbol]),
+                )])),
                 _ => Option::None,
             }
         }
@@ -598,10 +763,11 @@ mod tests {
                 C::StringTypes::string_ref_to_str(&name.package),
                 C::StringTypes::string_ref_to_str(&name.name),
             ) {
-                ("pvar", "var1") => Result::Ok(Value::String(ValueString(
-                    D::StringTypes::string_ref_from_static_str("str"),
-                ))),
-                ("pvar", "var2") => Result::Ok(Value::Bool(ValueBool(true))),
+                ("pvar", "var1") => Result::Ok(v_str!("str").convert()),
+                ("pvar", "var2") => Result::Ok(v_bool!(true).convert()),
+                ("pvar", "var3") => Result::Ok(v_qsym!("pvar", "var4").convert()),
+                ("pvar", "var4") => Result::Ok(v_uqsym!("var5").convert()),
+                ("pvar", "var5") => Result::Ok(v_list!(v_qsym!("p", "simplefunc2")).convert()),
                 _ => Result::Err(Error::new(ErrorKind::ValueNotDefined, "Value not defined")),
             }
         }
@@ -616,6 +782,7 @@ mod tests {
                 C::StringTypes::string_ref_to_str(&name.name),
             ) {
                 ("p", "simplefunc1") => simplefunc1::<C, D>(self, params),
+                ("p", "simplefunc2") => simplefunc2::<C, D>(self, params),
                 _ => Result::Err(Error::new(ErrorKind::ValueNotDefined, "Value not defined")),
             }
         }
@@ -695,7 +862,7 @@ mod tests {
         let mut comp = VariableEvaluator::new(qsym!("pvar", "var2"));
         assert_eq!(comp.evaluate(env).unwrap(), v_bool!(true));
 
-        let mut comp = VariableEvaluator::new(qsym!("pvar", "var3"));
+        let mut comp = VariableEvaluator::new(qsym!("pvar", "undef"));
         assert_eq!(
             comp.evaluate(env).unwrap_err().kind,
             ErrorKind::ValueNotDefined
@@ -744,37 +911,27 @@ mod tests {
     }
 
     #[test]
-    fn test_evaluate_comma_splice_push() {
+    fn test_evaluate_backquote_comma_splice_push() {
         let mut env = SimpleEnvironment;
         let env = &mut env as &mut dyn Environment<ValueTypesStatic, ValueTypesRc>;
 
-        let mut comp =
-            CommaSplicePushEvaluator::new(true, 2, Box::new(LiteralEvaluator::new(v_bool!(true))));
-        assert_eq!(
-            comp.evaluate(env).unwrap(),
-            v_splice!(v_comma!(v_comma!(v_bool!(true))))
+        let mut comp = BackquoteCommaSplicePushEvaluator::new(
+            BackquoteCommaSplice::Backquote,
+            Box::new(LiteralEvaluator::new(v_bool!(true))),
         );
+        assert_eq!(comp.evaluate(env).unwrap(), v_bq!(v_bool!(true)));
 
-        let mut comp =
-            CommaSplicePushEvaluator::new(false, 3, Box::new(LiteralEvaluator::new(v_str!("str"))));
-        assert_eq!(
-            comp.evaluate(env).unwrap(),
-            v_comma!(v_comma!(v_comma!(v_str!("str"))))
+        let mut comp = BackquoteCommaSplicePushEvaluator::new(
+            BackquoteCommaSplice::Comma,
+            Box::new(LiteralEvaluator::new(v_bool!(true))),
         );
+        assert_eq!(comp.evaluate(env).unwrap(), v_comma!(v_bool!(true)));
 
-        let mut comp = CommaSplicePushEvaluator::new(
-            true,
-            0,
-            Box::new(LiteralEvaluator::new(v_uqsym!("uqsym"))),
+        let mut comp = BackquoteCommaSplicePushEvaluator::new(
+            BackquoteCommaSplice::Splice,
+            Box::new(LiteralEvaluator::new(v_bool!(true))),
         );
-        assert_eq!(comp.evaluate(env).unwrap(), v_splice!(v_uqsym!("uqsym")));
-
-        let mut comp = CommaSplicePushEvaluator::new(
-            false,
-            0,
-            Box::new(LiteralEvaluator::new(v_qsym!("p", "qsym"))),
-        );
-        assert_eq!(comp.evaluate(env).unwrap(), v_qsym!("p", "qsym"));
+        assert_eq!(comp.evaluate(env).unwrap(), v_splice!(v_bool!(true)));
     }
 
     #[test]
@@ -826,7 +983,7 @@ mod tests {
             BTreeSet::from_iter(vec![ValueType::Bool]),
         );
         assert_eq!(
-            env.compile(v_uqsym!("var3")).unwrap_err().kind,
+            env.compile(v_uqsym!("undef")).unwrap_err().kind,
             ErrorKind::ValueNotDefined
         );
 
@@ -843,7 +1000,7 @@ mod tests {
             BTreeSet::from_iter(vec![ValueType::Bool]),
         );
         assert_eq!(
-            env.compile(v_qsym!("pvar", "var3")).unwrap_err().kind,
+            env.compile(v_qsym!("pvar", "undef")).unwrap_err().kind,
             ErrorKind::ValueNotDefined
         );
     }
@@ -933,6 +1090,63 @@ mod tests {
                 .unwrap_err()
                 .kind,
             ErrorKind::IncorrectParams
+        );
+    }
+
+    #[test]
+    fn test_compile_and_evaluate_backquote() {
+        let mut env = SimpleEnvironment;
+        let env = &mut env as &mut dyn Environment<ValueTypesStatic, ValueTypesRc>;
+
+        test_compile_and_evaluate(
+            env,
+            v_bq!(v_uqsym!("a")),
+            v_uqsym!("a"),
+            BTreeSet::from_iter(std::iter::once(ValueType::UnqualifiedSymbol)),
+        );
+        test_compile_and_evaluate(
+            env,
+            v_bq!(v_comma!(v_qsym!("pvar", "var3"))),
+            v_qsym!("pvar", "var4"),
+            BTreeSet::from_iter(std::iter::once(ValueType::QualifiedSymbol)),
+        );
+        test_compile_and_evaluate(
+            env,
+            v_bq!(v_bq!(v_comma!(v_qsym!("pvar", "var3")))),
+            v_bq!(v_comma!(v_qsym!("pvar", "var3"))),
+            BTreeSet::from_iter(std::iter::once(ValueType::Backquote(BTreeSet::from_iter(
+                std::iter::once(ValueType::Comma(BTreeSet::from_iter(std::iter::once(
+                    ValueType::QualifiedSymbol,
+                )))),
+            )))),
+        );
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_compile_and_evaluate_backquote_bad_splice_backquote() {
+        let mut env = SimpleEnvironment;
+        let env = &mut env as &mut dyn Environment<ValueTypesStatic, ValueTypesRc>;
+
+        test_compile_and_evaluate(
+            env,
+            v_bq!(v_splice!(v_uqsym!("a"))),
+            v_list!(),       // Doesn't matter
+            BTreeSet::new(), // Doesn't matter
+        );
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_compile_and_evaluate_backquote_bad_splice_comma() {
+        let mut env = SimpleEnvironment;
+        let env = &mut env as &mut dyn Environment<ValueTypesStatic, ValueTypesRc>;
+
+        test_compile_and_evaluate(
+            env,
+            v_bq!(v_bq!(v_comma!(v_splice!(v_uqsym!("a"))))),
+            v_list!(),       // Doesn't matter
+            BTreeSet::new(), // Doesn't matter
         );
     }
 }
