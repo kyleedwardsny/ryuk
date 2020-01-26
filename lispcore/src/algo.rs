@@ -4,27 +4,23 @@ use super::value::*;
 
 fn concat_lists_recursive<T, I>(list_item: ListItem<Value<T>>, mut rest: I) -> Result<ValueList<T>>
 where
-    T: ValueTypes + ?Sized,
-    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
-    Cons<T>: Into<T::ConsRef>,
+    T: ValueTypesMut + ?Sized,
+    T::StringTypes: StringTypesMut,
+    T::SemverTypes: SemverTypesMut,
     I: Iterator<Item = ListItem<Value<T>>>,
 {
     match list_item {
-        ListItem::Item(item) => Result::Ok(ValueList(Option::Some(
-            Cons {
-                car: item,
-                cdr: concat_lists(rest)?,
-            }
-            .into(),
-        ))),
+        ListItem::Item(item) => Result::Ok(ValueList(Option::Some(T::cons_ref_from_cons(Cons {
+            car: item,
+            cdr: concat_lists(rest)?,
+        })))),
         ListItem::List(Value::List(mut list)) => match list.next() {
-            Option::Some(item) => Result::Ok(ValueList(Option::Some(
-                Cons {
+            Option::Some(item) => {
+                Result::Ok(ValueList(Option::Some(T::cons_ref_from_cons(Cons {
                     car: item,
                     cdr: concat_lists_recursive(ListItem::List(Value::List(list)), rest)?,
-                }
-                .into(),
-            ))),
+                }))))
+            }
             Option::None => match rest.next() {
                 Option::None => Result::Ok(ValueList(Option::None)),
                 Option::Some(list) => concat_lists_recursive(list, rest),
@@ -36,9 +32,9 @@ where
 
 pub fn concat_lists<T, I>(mut lists: I) -> Result<ValueList<T>>
 where
-    T: ValueTypes + ?Sized,
-    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
-    Cons<T>: Into<T::ConsRef>,
+    T: ValueTypesMut + ?Sized,
+    T::StringTypes: StringTypesMut,
+    T::SemverTypes: SemverTypesMut,
     I: Iterator<Item = ListItem<Value<T>>>,
 {
     match lists.next() {

@@ -7,55 +7,80 @@ use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::rc::Rc;
 
-pub trait SemverTypes: Debug
-where
-    for<'a> &'a Self::Semver: IntoIterator<Item = &'a u64>,
-{
-    type Semver: ?Sized;
-    type SemverRef: Borrow<Self::Semver> + Clone + Debug;
+pub trait StringTypes: Debug {
+    type StringRef: Clone + Debug;
+
+    fn string_ref_to_str(s: &Self::StringRef) -> &str;
 }
 
-pub trait ValueTypes: Debug
-where
-    for<'a> &'a <Self::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
-{
-    type ConsRef: Borrow<Cons<Self>> + Clone + Debug;
-    type StringRef: Borrow<str> + Clone + Debug;
-    type ValueRef: Borrow<Value<Self>> + Clone + Debug;
+pub trait StringTypesMut: StringTypes {
+    fn string_ref_from_str(s: &str) -> Self::StringRef;
+
+    fn string_ref_from_static_str(s: &'static str) -> Self::StringRef;
+
+    fn string_ref_from_string(s: String) -> Self::StringRef;
+}
+
+pub trait SemverTypes: Debug {
+    type SemverIter: Iterator<Item = u64>;
+    type SemverRef: Clone + Debug;
+
+    fn semver_ref_to_iter(v: &Self::SemverRef) -> Self::SemverIter;
+}
+
+pub trait SemverTypesMut: SemverTypes {
+    fn semver_ref_extend<T>(v: &mut Self::SemverRef, iter: T)
+    where
+        T: IntoIterator<Item = u64>;
+
+    fn semver_ref_from_iter<T>(iter: T) -> Self::SemverRef
+    where
+        T: IntoIterator<Item = u64>;
+}
+
+pub trait ValueTypes: Debug {
+    type ConsRef: Clone + Debug;
+    type ValueRef: Clone + Debug;
+    type StringTypes: StringTypes + ?Sized;
     type SemverTypes: SemverTypes + ?Sized;
+
+    fn cons_ref_to_cons(c: &Self::ConsRef) -> &Cons<Self>;
+
+    fn value_ref_to_value(v: &Self::ValueRef) -> &Value<Self>;
+}
+
+pub trait ValueTypesMut: ValueTypes
+where
+    Self::StringTypes: StringTypesMut,
+    Self::SemverTypes: SemverTypesMut,
+{
+    fn cons_ref_from_cons(c: Cons<Self>) -> Self::ConsRef;
+
+    fn value_ref_from_value(v: Value<Self>) -> Self::ValueRef;
 }
 
 #[derive(Debug)]
 pub struct ValueList<T>(pub Option<T::ConsRef>)
 where
-    T: ValueTypes + ?Sized,
-    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>;
+    T: ValueTypes + ?Sized;
 
 impl<T> ValueList<T>
 where
     T: ValueTypes + ?Sized,
-    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
 {
     pub fn convert<T2>(&self) -> ValueList<T2>
     where
-        T2: ValueTypes + ?Sized,
-        for<'a> &'a <T2::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
-        for<'a> &'a str: Into<T2::StringRef>,
-        Cons<T2>: Into<T2::ConsRef>,
-        for<'a> &'a <T::SemverTypes as SemverTypes>::Semver:
-            Into<<T2::SemverTypes as SemverTypes>::SemverRef>,
-        Value<T2>: Into<T2::ValueRef>,
+        T2: ValueTypesMut + ?Sized,
+        T2::StringTypes: StringTypesMut,
+        T2::SemverTypes: SemverTypesMut,
     {
         ValueList(match &self.0 {
             Option::Some(c) => {
                 let cons = c.borrow();
-                Option::Some(
-                    Cons {
-                        car: cons.car.convert::<T2>(),
-                        cdr: cons.cdr.convert::<T2>(),
-                    }
-                    .into(),
-                )
+                Option::Some(T2::cons_ref_from_cons(Cons {
+                    car: T::cons_ref_to_cons(cons).car.convert::<T2>(),
+                    cdr: T::cons_ref_to_cons(cons).cdr.convert::<T2>(),
+                }))
             }
             Option::None => Option::None,
         })
@@ -64,10 +89,11 @@ where
     fn list_eq<T2>(&self, other: &ValueList<T2>) -> bool
     where
         T2: ValueTypes + ?Sized,
-        for<'a> &'a <T2::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
     {
         match (&self.0, &other.0) {
-            (Option::Some(c1), Option::Some(c2)) => c1.borrow() == c2.borrow(),
+            (Option::Some(c1), Option::Some(c2)) => {
+                T::cons_ref_to_cons(c1) == T2::cons_ref_to_cons(c2)
+            }
             (Option::None, Option::None) => true,
             _ => false,
         }
@@ -77,7 +103,6 @@ where
 impl<T> Clone for ValueList<T>
 where
     T: ValueTypes + ?Sized,
-    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
 {
     fn clone(&self) -> Self {
         Self(self.0.clone())
@@ -88,8 +113,6 @@ impl<T1, T2> PartialEq<ValueList<T2>> for ValueList<T1>
 where
     T1: ValueTypes + ?Sized,
     T2: ValueTypes + ?Sized,
-    for<'a> &'a <T1::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
-    for<'a> &'a <T2::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
 {
     fn eq(&self, other: &ValueList<T2>) -> bool {
         self.list_eq(other)
@@ -99,7 +122,6 @@ where
 impl<T> Iterator for ValueList<T>
 where
     T: ValueTypes + ?Sized,
-    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
 {
     type Item = Value<T>;
 
@@ -107,7 +129,7 @@ where
         match &self.0 {
             Option::None => Option::None,
             Option::Some(c) => {
-                let cons = c.borrow();
+                let cons = T::cons_ref_to_cons(c);
                 let car = cons.car.clone();
                 let cdr = cons.cdr.clone();
                 *self = cdr;
@@ -121,7 +143,6 @@ where
 pub struct Cons<T>
 where
     T: ValueTypes + ?Sized,
-    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
 {
     pub car: Value<T>,
     pub cdr: ValueList<T>,
@@ -130,7 +151,6 @@ where
 impl<T> Clone for Cons<T>
 where
     T: ValueTypes + ?Sized,
-    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
 {
     fn clone(&self) -> Self {
         Cons {
@@ -144,8 +164,6 @@ impl<T1, T2> PartialEq<Cons<T2>> for Cons<T1>
 where
     T1: ValueTypes + ?Sized,
     T2: ValueTypes + ?Sized,
-    for<'a> &'a <T1::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
-    for<'a> &'a <T2::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
     Value<T1>: PartialEq<Value<T2>>,
 {
     fn eq(&self, other: &Cons<T2>) -> bool {
@@ -153,66 +171,86 @@ where
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct ValueUnqualifiedSymbol<S>(pub S)
+#[derive(Debug)]
+pub struct ValueUnqualifiedSymbol<S>(pub S::StringRef)
 where
-    S: Borrow<str> + Clone;
+    S: StringTypes + ?Sized;
 
 impl<S> ValueUnqualifiedSymbol<S>
 where
-    S: Borrow<str> + Clone,
+    S: StringTypes + ?Sized,
 {
     pub fn convert<S2>(&self) -> ValueUnqualifiedSymbol<S2>
     where
-        S2: Borrow<str> + Clone,
-        for<'a> &'a str: Into<S2>,
+        S2: StringTypesMut + ?Sized,
     {
-        ValueUnqualifiedSymbol(self.0.borrow().into())
+        ValueUnqualifiedSymbol(S2::string_ref_from_str(S::string_ref_to_str(&self.0)))
+    }
+}
+
+impl<S> Clone for ValueUnqualifiedSymbol<S>
+where
+    S: StringTypes + ?Sized,
+{
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
     }
 }
 
 impl<S1, S2> PartialEq<ValueUnqualifiedSymbol<S2>> for ValueUnqualifiedSymbol<S1>
 where
-    S1: Borrow<str> + Clone,
-    S2: Borrow<str> + Clone,
+    S1: StringTypes + ?Sized,
+    S2: StringTypes + ?Sized,
 {
     fn eq(&self, rhs: &ValueUnqualifiedSymbol<S2>) -> bool {
-        self.0.borrow() == rhs.0.borrow()
+        S1::string_ref_to_str(&self.0) == S2::string_ref_to_str(&rhs.0)
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct ValueQualifiedSymbol<S>
 where
-    S: Borrow<str> + Clone,
+    S: StringTypes + ?Sized,
 {
-    pub package: S,
-    pub name: S,
+    pub package: S::StringRef,
+    pub name: S::StringRef,
 }
 
 impl<S> ValueQualifiedSymbol<S>
 where
-    S: Borrow<str> + Clone,
+    S: StringTypes + ?Sized,
 {
     pub fn convert<S2>(&self) -> ValueQualifiedSymbol<S2>
     where
-        S2: Borrow<str> + Clone,
-        for<'a> &'a str: Into<S2>,
+        S2: StringTypesMut + ?Sized,
     {
         ValueQualifiedSymbol {
-            package: self.package.borrow().into(),
-            name: self.name.borrow().into(),
+            package: S2::string_ref_from_str(S::string_ref_to_str(&self.package)),
+            name: S2::string_ref_from_str(S::string_ref_to_str(&self.name)),
+        }
+    }
+}
+
+impl<S> Clone for ValueQualifiedSymbol<S>
+where
+    S: StringTypes + ?Sized,
+{
+    fn clone(&self) -> Self {
+        Self {
+            package: self.package.clone(),
+            name: self.name.clone(),
         }
     }
 }
 
 impl<S1, S2> PartialEq<ValueQualifiedSymbol<S2>> for ValueQualifiedSymbol<S1>
 where
-    S1: Borrow<str> + Clone,
-    S2: Borrow<str> + Clone,
+    S1: StringTypes + ?Sized,
+    S2: StringTypes + ?Sized,
 {
     fn eq(&self, rhs: &ValueQualifiedSymbol<S2>) -> bool {
-        self.package.borrow() == rhs.package.borrow() && self.name.borrow() == rhs.name.borrow()
+        S1::string_ref_to_str(&self.package) == S2::string_ref_to_str(&rhs.package)
+            && S1::string_ref_to_str(&self.name) == S2::string_ref_to_str(&rhs.name)
     }
 }
 
@@ -220,26 +258,25 @@ where
 pub struct ValueBool(pub bool);
 
 #[derive(Debug)]
-pub struct ValueString<S>(pub S)
+pub struct ValueString<S>(pub S::StringRef)
 where
-    S: Borrow<str> + Clone;
+    S: StringTypes + ?Sized;
 
 impl<S> ValueString<S>
 where
-    S: Borrow<str> + Clone,
+    S: StringTypes + ?Sized,
 {
     pub fn convert<S2>(&self) -> ValueString<S2>
     where
-        S2: Borrow<str> + Clone,
-        for<'a> &'a str: Into<S2>,
+        S2: StringTypesMut + ?Sized,
     {
-        ValueString(self.0.borrow().into())
+        ValueString(S2::string_ref_from_str(S::string_ref_to_str(&self.0)))
     }
 }
 
 impl<S> Clone for ValueString<S>
 where
-    S: Borrow<str> + Clone,
+    S: StringTypes + ?Sized,
 {
     fn clone(&self) -> Self {
         Self(self.0.clone())
@@ -248,11 +285,11 @@ where
 
 impl<S1, S2> PartialEq<ValueString<S2>> for ValueString<S1>
 where
-    S1: Borrow<str> + Clone,
-    S2: Borrow<str> + Clone,
+    S1: StringTypes + ?Sized,
+    S2: StringTypes + ?Sized,
 {
     fn eq(&self, rhs: &ValueString<S2>) -> bool {
-        self.0.borrow() == rhs.0.borrow()
+        S1::string_ref_to_str(&self.0) == S2::string_ref_to_str(&rhs.0)
     }
 }
 
@@ -260,7 +297,6 @@ where
 pub struct ValueSemver<T>
 where
     T: SemverTypes + ?Sized,
-    for<'a> &'a T::Semver: IntoIterator<Item = &'a u64>,
 {
     pub major: u64,
     pub rest: T::SemverRef,
@@ -269,17 +305,14 @@ where
 impl<T> ValueSemver<T>
 where
     T: SemverTypes + ?Sized,
-    for<'a> &'a T::Semver: IntoIterator<Item = &'a u64>,
 {
     pub fn convert<T2>(&self) -> ValueSemver<T2>
     where
-        T2: SemverTypes + ?Sized,
-        for<'a> &'a T2::Semver: IntoIterator<Item = &'a u64>,
-        for<'a> &'a T::Semver: Into<T2::SemverRef>,
+        T2: SemverTypesMut + ?Sized,
     {
         ValueSemver {
             major: self.major,
-            rest: self.rest.borrow().into(),
+            rest: T2::semver_ref_from_iter(T::semver_ref_to_iter(&self.rest)),
         }
     }
 
@@ -294,7 +327,6 @@ where
 impl<T> Clone for ValueSemver<T>
 where
     T: SemverTypes + ?Sized,
-    for<'a> &'a T::Semver: IntoIterator<Item = &'a u64>,
 {
     fn clone(&self) -> Self {
         Self {
@@ -307,24 +339,22 @@ where
 pub struct SemverIter<'v, T>
 where
     T: SemverTypes + ?Sized,
-    for<'a> &'a T::Semver: IntoIterator<Item = &'a u64>,
 {
     v: &'v ValueSemver<T>,
-    iter: Option<<&'v T::Semver as IntoIterator>::IntoIter>,
+    iter: Option<T::SemverIter>,
 }
 
 impl<'v, T> Iterator for SemverIter<'v, T>
 where
     T: SemverTypes + ?Sized,
-    for<'a> &'a T::Semver: IntoIterator<Item = &'a u64>,
 {
-    type Item = &'v u64;
+    type Item = u64;
 
     fn next(&mut self) -> Option<Self::Item> {
         match &mut self.iter {
             Option::None => {
-                self.iter = Option::Some(self.v.rest.borrow().into_iter());
-                Option::Some(&self.v.major)
+                self.iter = Option::Some(T::semver_ref_to_iter(&self.v.rest));
+                Option::Some(self.v.major)
             }
             Option::Some(i) => i.next(),
         }
@@ -335,8 +365,6 @@ impl<T1, T2> PartialEq<ValueSemver<T2>> for ValueSemver<T1>
 where
     T1: SemverTypes + ?Sized,
     T2: SemverTypes + ?Sized,
-    for<'a> &'a T1::Semver: IntoIterator<Item = &'a u64>,
-    for<'a> &'a T2::Semver: IntoIterator<Item = &'a u64>,
 {
     fn eq(&self, other: &ValueSemver<T2>) -> bool {
         self.partial_cmp(other) == Option::Some(Ordering::Equal)
@@ -347,8 +375,6 @@ impl<T1, T2> PartialOrd<ValueSemver<T2>> for ValueSemver<T1>
 where
     T1: SemverTypes + ?Sized,
     T2: SemverTypes + ?Sized,
-    for<'a> &'a T1::Semver: IntoIterator<Item = &'a u64>,
-    for<'a> &'a T2::Semver: IntoIterator<Item = &'a u64>,
 {
     fn partial_cmp(&self, other: &ValueSemver<T2>) -> Option<Ordering> {
         let mut v1 = self.items();
@@ -372,32 +398,27 @@ where
 #[derive(Debug)]
 pub enum ValueLanguageDirective<S, V>
 where
-    S: Borrow<str> + Clone,
+    S: StringTypes + ?Sized,
     V: SemverTypes + ?Sized,
-    for<'a> &'a V::Semver: IntoIterator<Item = &'a u64>,
 {
     Kira(ValueSemver<V>),
-    Other(S),
+    Other(S::StringRef),
 }
 
 impl<S, V> ValueLanguageDirective<S, V>
 where
-    S: Borrow<str> + Clone,
+    S: StringTypes + ?Sized,
     V: SemverTypes + ?Sized,
-    for<'a> &'a V::Semver: IntoIterator<Item = &'a u64>,
 {
     pub fn convert<S2, V2>(&self) -> ValueLanguageDirective<S2, V2>
     where
-        S2: Borrow<str> + Clone,
-        V2: SemverTypes + ?Sized,
-        for<'a> &'a V2::Semver: IntoIterator<Item = &'a u64>,
-        for<'a> &'a V::Semver: Into<V2::SemverRef>,
-        for<'a> &'a str: Into<S2>,
+        S2: StringTypesMut + ?Sized,
+        V2: SemverTypesMut + ?Sized,
     {
         match self {
             ValueLanguageDirective::Kira(v) => ValueLanguageDirective::Kira(v.convert::<V2>()),
             ValueLanguageDirective::Other(name) => {
-                ValueLanguageDirective::Other(name.borrow().into())
+                ValueLanguageDirective::Other(S2::string_ref_from_str(S::string_ref_to_str(&name)))
             }
         }
     }
@@ -405,9 +426,8 @@ where
 
 impl<S, V> Clone for ValueLanguageDirective<S, V>
 where
-    S: Borrow<str> + Clone,
+    S: StringTypes + ?Sized,
     V: SemverTypes + ?Sized,
-    for<'a> &'a V::Semver: IntoIterator<Item = &'a u64>,
 {
     fn clone(&self) -> Self {
         match self {
@@ -419,17 +439,15 @@ where
 
 impl<S1, V1, S2, V2> PartialEq<ValueLanguageDirective<S2, V2>> for ValueLanguageDirective<S1, V1>
 where
-    S1: Borrow<str> + Clone,
-    S2: Borrow<str> + Clone,
+    S1: StringTypes + ?Sized,
+    S2: StringTypes + ?Sized,
     V1: SemverTypes + ?Sized,
     V2: SemverTypes + ?Sized,
-    for<'a> &'a V1::Semver: IntoIterator<Item = &'a u64>,
-    for<'a> &'a V2::Semver: IntoIterator<Item = &'a u64>,
 {
     fn eq(&self, rhs: &ValueLanguageDirective<S2, V2>) -> bool {
         eq_match!(self, rhs, {
             (ValueLanguageDirective::Kira(v1), ValueLanguageDirective::Kira(v2)) => v1 == v2,
-            (ValueLanguageDirective::Other(n1), ValueLanguageDirective::Other(n2)) => n1.borrow() == n2.borrow(),
+            (ValueLanguageDirective::Other(n1), ValueLanguageDirective::Other(n2)) => S1::string_ref_to_str(&n1) == S2::string_ref_to_str(&n2),
         })
     }
 }
@@ -437,16 +455,15 @@ where
 #[derive(Debug)]
 pub struct ValueFunction<S>(pub ValueQualifiedSymbol<S>)
 where
-    S: Borrow<str> + Clone;
+    S: StringTypes + ?Sized;
 
 impl<S> ValueFunction<S>
 where
-    S: Borrow<str> + Clone,
+    S: StringTypes + ?Sized,
 {
     pub fn convert<S2>(&self) -> ValueFunction<S2>
     where
-        S2: Borrow<str> + Clone,
-        for<'a> &'a str: Into<S2>,
+        S2: StringTypesMut + ?Sized,
     {
         ValueFunction(self.0.convert())
     }
@@ -454,8 +471,8 @@ where
 
 impl<S1, S2> PartialEq<ValueFunction<S2>> for ValueFunction<S1>
 where
-    S1: Borrow<str> + Clone,
-    S2: Borrow<str> + Clone,
+    S1: StringTypes + ?Sized,
+    S2: StringTypes + ?Sized,
     ValueQualifiedSymbol<S1>: PartialEq<ValueQualifiedSymbol<S2>>,
 {
     fn eq(&self, rhs: &ValueFunction<S2>) -> bool {
@@ -465,7 +482,8 @@ where
 
 impl<S> Clone for ValueFunction<S>
 where
-    S: Borrow<str> + Clone,
+    S: StringTypes + ?Sized,
+    ValueQualifiedSymbol<S>: Clone,
 {
     fn clone(&self) -> Self {
         Self(self.0.clone())
@@ -475,25 +493,21 @@ where
 #[derive(Debug)]
 pub struct ValueBackquote<T>(pub T::ValueRef)
 where
-    T: ValueTypes + ?Sized,
-    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>;
+    T: ValueTypes + ?Sized;
 
 impl<T> ValueBackquote<T>
 where
     T: ValueTypes + ?Sized,
-    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
 {
     pub fn convert<T2>(&self) -> ValueBackquote<T2>
     where
-        T2: ValueTypes + ?Sized,
-        for<'a> &'a <T2::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
-        for<'a> &'a str: Into<T2::StringRef>,
-        Cons<T2>: Into<T2::ConsRef>,
-        for<'a> &'a <T::SemverTypes as SemverTypes>::Semver:
-            Into<<T2::SemverTypes as SemverTypes>::SemverRef>,
-        Value<T2>: Into<T2::ValueRef>,
+        T2: ValueTypesMut + ?Sized,
+        T2::StringTypes: StringTypesMut,
+        T2::SemverTypes: SemverTypesMut,
     {
-        ValueBackquote(self.0.borrow().convert().into())
+        ValueBackquote(T2::value_ref_from_value(
+            T::value_ref_to_value(&self.0).convert(),
+        ))
     }
 }
 
@@ -501,19 +515,16 @@ impl<T1, T2> PartialEq<ValueBackquote<T2>> for ValueBackquote<T1>
 where
     T1: ValueTypes + ?Sized,
     T2: ValueTypes + ?Sized,
-    for<'a> &'a <T1::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
-    for<'a> &'a <T2::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
     Value<T1>: PartialEq<Value<T2>>,
 {
     fn eq(&self, rhs: &ValueBackquote<T2>) -> bool {
-        self.0.borrow() == rhs.0.borrow()
+        T1::value_ref_to_value(&self.0) == T2::value_ref_to_value(&rhs.0)
     }
 }
 
 impl<T> Clone for ValueBackquote<T>
 where
     T: ValueTypes + ?Sized,
-    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
 {
     fn clone(&self) -> Self {
         Self(self.0.clone())
@@ -523,25 +534,21 @@ where
 #[derive(Debug)]
 pub struct ValueComma<T>(pub T::ValueRef)
 where
-    T: ValueTypes + ?Sized,
-    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>;
+    T: ValueTypes + ?Sized;
 
 impl<T> ValueComma<T>
 where
     T: ValueTypes + ?Sized,
-    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
 {
     pub fn convert<T2>(&self) -> ValueComma<T2>
     where
-        T2: ValueTypes + ?Sized,
-        for<'a> &'a <T2::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
-        for<'a> &'a str: Into<T2::StringRef>,
-        Cons<T2>: Into<T2::ConsRef>,
-        for<'a> &'a <T::SemverTypes as SemverTypes>::Semver:
-            Into<<T2::SemverTypes as SemverTypes>::SemverRef>,
-        Value<T2>: Into<T2::ValueRef>,
+        T2: ValueTypesMut + ?Sized,
+        T2::StringTypes: StringTypesMut,
+        T2::SemverTypes: SemverTypesMut,
     {
-        ValueComma(self.0.borrow().convert().into())
+        ValueComma(T2::value_ref_from_value(
+            T::value_ref_to_value(&self.0).convert(),
+        ))
     }
 }
 
@@ -549,19 +556,16 @@ impl<T1, T2> PartialEq<ValueComma<T2>> for ValueComma<T1>
 where
     T1: ValueTypes + ?Sized,
     T2: ValueTypes + ?Sized,
-    for<'a> &'a <T1::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
-    for<'a> &'a <T2::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
     Value<T1>: PartialEq<Value<T2>>,
 {
     fn eq(&self, rhs: &ValueComma<T2>) -> bool {
-        self.0.borrow() == rhs.0.borrow()
+        T1::value_ref_to_value(&self.0) == T2::value_ref_to_value(&rhs.0)
     }
 }
 
 impl<T> Clone for ValueComma<T>
 where
     T: ValueTypes + ?Sized,
-    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
 {
     fn clone(&self) -> Self {
         Self(self.0.clone())
@@ -571,25 +575,21 @@ where
 #[derive(Debug)]
 pub struct ValueSplice<T>(pub T::ValueRef)
 where
-    T: ValueTypes + ?Sized,
-    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>;
+    T: ValueTypes + ?Sized;
 
 impl<T> ValueSplice<T>
 where
     T: ValueTypes + ?Sized,
-    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
 {
     pub fn convert<T2>(&self) -> ValueSplice<T2>
     where
-        T2: ValueTypes + ?Sized,
-        for<'a> &'a <T2::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
-        for<'a> &'a str: Into<T2::StringRef>,
-        Cons<T2>: Into<T2::ConsRef>,
-        for<'a> &'a <T::SemverTypes as SemverTypes>::Semver:
-            Into<<T2::SemverTypes as SemverTypes>::SemverRef>,
-        Value<T2>: Into<T2::ValueRef>,
+        T2: ValueTypesMut + ?Sized,
+        T2::StringTypes: StringTypesMut,
+        T2::SemverTypes: SemverTypesMut,
     {
-        ValueSplice(self.0.borrow().convert().into())
+        ValueSplice(T2::value_ref_from_value(
+            T::value_ref_to_value(&self.0).convert(),
+        ))
     }
 }
 
@@ -597,19 +597,16 @@ impl<T1, T2> PartialEq<ValueSplice<T2>> for ValueSplice<T1>
 where
     T1: ValueTypes + ?Sized,
     T2: ValueTypes + ?Sized,
-    for<'a> &'a <T1::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
-    for<'a> &'a <T2::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
     Value<T1>: PartialEq<Value<T2>>,
 {
     fn eq(&self, rhs: &ValueSplice<T2>) -> bool {
-        self.0.borrow() == rhs.0.borrow()
+        T1::value_ref_to_value(&self.0) == T2::value_ref_to_value(&rhs.0)
     }
 }
 
 impl<T> Clone for ValueSplice<T>
 where
     T: ValueTypes + ?Sized,
-    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
 {
     fn clone(&self) -> Self {
         Self(self.0.clone())
@@ -620,16 +617,15 @@ where
 pub enum Value<T>
 where
     T: ValueTypes + ?Sized,
-    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
 {
     List(ValueList<T>),
-    UnqualifiedSymbol(ValueUnqualifiedSymbol<T::StringRef>),
-    QualifiedSymbol(ValueQualifiedSymbol<T::StringRef>),
+    UnqualifiedSymbol(ValueUnqualifiedSymbol<T::StringTypes>),
+    QualifiedSymbol(ValueQualifiedSymbol<T::StringTypes>),
     Bool(ValueBool),
-    String(ValueString<T::StringRef>),
+    String(ValueString<T::StringTypes>),
     Semver(ValueSemver<T::SemverTypes>),
-    LanguageDirective(ValueLanguageDirective<T::StringRef, T::SemverTypes>),
-    Function(ValueFunction<T::StringRef>),
+    LanguageDirective(ValueLanguageDirective<T::StringTypes, T::SemverTypes>),
+    Function(ValueFunction<T::StringTypes>),
     Backquote(ValueBackquote<T>),
     Comma(ValueComma<T>),
     Splice(ValueSplice<T>),
@@ -638,29 +634,24 @@ where
 impl<T> Value<T>
 where
     T: ValueTypes + ?Sized,
-    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
 {
     pub fn convert<T2>(&self) -> Value<T2>
     where
-        T2: ValueTypes + ?Sized,
-        for<'a> &'a <T2::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
-        for<'a> &'a str: Into<T2::StringRef>,
-        Cons<T2>: Into<T2::ConsRef>,
-        for<'a> &'a <T::SemverTypes as SemverTypes>::Semver:
-            Into<<T2::SemverTypes as SemverTypes>::SemverRef>,
-        Value<T2>: Into<T2::ValueRef>,
+        T2: ValueTypesMut + ?Sized,
+        T2::StringTypes: StringTypesMut,
+        T2::SemverTypes: SemverTypesMut,
     {
         match self {
             Value::List(l) => Value::List(l.convert::<T2>()),
-            Value::UnqualifiedSymbol(s) => Value::UnqualifiedSymbol(s.convert::<T2::StringRef>()),
-            Value::QualifiedSymbol(s) => Value::QualifiedSymbol(s.convert::<T2::StringRef>()),
+            Value::UnqualifiedSymbol(s) => Value::UnqualifiedSymbol(s.convert::<T2::StringTypes>()),
+            Value::QualifiedSymbol(s) => Value::QualifiedSymbol(s.convert::<T2::StringTypes>()),
             Value::Bool(b) => Value::Bool(b.clone()),
-            Value::String(s) => Value::String(s.convert::<T2::StringRef>()),
+            Value::String(s) => Value::String(s.convert::<T2::StringTypes>()),
             Value::Semver(v) => Value::Semver(v.convert::<T2::SemverTypes>()),
             Value::LanguageDirective(l) => {
-                Value::LanguageDirective(l.convert::<T2::StringRef, T2::SemverTypes>())
+                Value::LanguageDirective(l.convert::<T2::StringTypes, T2::SemverTypes>())
             }
-            Value::Function(f) => Value::Function(f.convert::<T2::StringRef>()),
+            Value::Function(f) => Value::Function(f.convert::<T2::StringTypes>()),
             Value::Backquote(b) => Value::Backquote(b.convert::<T2>()),
             Value::Comma(c) => Value::Comma(c.convert::<T2>()),
             Value::Splice(s) => Value::Splice(s.convert::<T2>()),
@@ -681,9 +672,13 @@ where
             Value::Semver(_) => ValueType::Semver,
             Value::LanguageDirective(_) => ValueType::LanguageDirective,
             Value::Function(_) => ValueType::Function,
-            Value::Backquote(b) => ValueType::Backquote(Box::new(b.0.borrow().value_type())),
-            Value::Comma(c) => ValueType::Comma(Box::new(c.0.borrow().value_type())),
-            Value::Splice(s) => ValueType::Splice(Box::new(s.0.borrow().value_type())),
+            Value::Backquote(b) => {
+                ValueType::Backquote(Box::new(T::value_ref_to_value(&b.0).value_type()))
+            }
+            Value::Comma(c) => ValueType::Comma(Box::new(T::value_ref_to_value(&c.0).value_type())),
+            Value::Splice(s) => {
+                ValueType::Splice(Box::new(T::value_ref_to_value(&s.0).value_type()))
+            }
         }
     }
 }
@@ -691,7 +686,8 @@ where
 impl<T> Clone for Value<T>
 where
     T: ValueTypes + ?Sized,
-    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+    ValueUnqualifiedSymbol<T::StringTypes>: Clone,
+    ValueQualifiedSymbol<T::StringTypes>: Clone,
 {
     fn clone(&self) -> Self {
         match self {
@@ -715,7 +711,6 @@ macro_rules! try_from_value {
         impl<$l, $t> TryFrom<$in> for $out
         where
             $t: ValueTypes + ?Sized,
-            for<'a> &'a <$t::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
         {
             type Error = Error;
 
@@ -740,13 +735,13 @@ macro_rules! try_from_value {
 }
 
 try_from_value!(T, ValueList<T>, Value::List(l) => l);
-try_from_value!(T, ValueUnqualifiedSymbol<T::StringRef>, Value::UnqualifiedSymbol(s) => s);
-try_from_value!(T, ValueQualifiedSymbol<T::StringRef>, Value::QualifiedSymbol(s) => s);
+try_from_value!(T, ValueUnqualifiedSymbol<T::StringTypes>, Value::UnqualifiedSymbol(s) => s);
+try_from_value!(T, ValueQualifiedSymbol<T::StringTypes>, Value::QualifiedSymbol(s) => s);
 try_from_value!(T, ValueBool, Value::Bool(b) => b);
-try_from_value!(T, ValueString<T::StringRef>, Value::String(s) => s);
+try_from_value!(T, ValueString<T::StringTypes>, Value::String(s) => s);
 try_from_value!(T, ValueSemver<T::SemverTypes>, Value::Semver(v) => v);
-try_from_value!(T, ValueLanguageDirective<T::StringRef, T::SemverTypes>, Value::LanguageDirective(l) => l);
-try_from_value!(T, ValueFunction<T::StringRef>, Value::Function(f) => f);
+try_from_value!(T, ValueLanguageDirective<T::StringTypes, T::SemverTypes>, Value::LanguageDirective(l) => l);
+try_from_value!(T, ValueFunction<T::StringTypes>, Value::Function(f) => f);
 try_from_value!(T, ValueBackquote<T>, Value::Backquote(b) => b);
 try_from_value!(T, ValueComma<T>, Value::Comma(c) => c);
 try_from_value!(T, ValueSplice<T>, Value::Splice(s) => s);
@@ -756,7 +751,6 @@ macro_rules! from_value_type {
         impl<$t> From<$in> for Value<$t>
         where
             $t: ValueTypes + ?Sized,
-            for<'a> &'a <$t::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
         {
             fn from($param: $in) -> Self {
                 $result
@@ -766,13 +760,13 @@ macro_rules! from_value_type {
 }
 
 from_value_type!(T, ValueList<T>, l -> Value::List(l));
-from_value_type!(T, ValueUnqualifiedSymbol<T::StringRef>, s -> Value::UnqualifiedSymbol(s));
-from_value_type!(T, ValueQualifiedSymbol<T::StringRef>, s -> Value::QualifiedSymbol(s));
+from_value_type!(T, ValueUnqualifiedSymbol<T::StringTypes>, s -> Value::UnqualifiedSymbol(s));
+from_value_type!(T, ValueQualifiedSymbol<T::StringTypes>, s -> Value::QualifiedSymbol(s));
 from_value_type!(T, ValueBool, b -> Value::Bool(b));
-from_value_type!(T, ValueString<T::StringRef>, s -> Value::String(s));
+from_value_type!(T, ValueString<T::StringTypes>, s -> Value::String(s));
 from_value_type!(T, ValueSemver<T::SemverTypes>, v -> Value::Semver(v));
-from_value_type!(T, ValueLanguageDirective<T::StringRef, T::SemverTypes>, l -> Value::LanguageDirective(l));
-from_value_type!(T, ValueFunction<T::StringRef>, f -> Value::Function(f));
+from_value_type!(T, ValueLanguageDirective<T::StringTypes, T::SemverTypes>, l -> Value::LanguageDirective(l));
+from_value_type!(T, ValueFunction<T::StringTypes>, f -> Value::Function(f));
 from_value_type!(T, ValueBackquote<T>, b -> Value::Backquote(b));
 from_value_type!(T, ValueComma<T>, c -> Value::Comma(c));
 from_value_type!(T, ValueSplice<T>, s -> Value::Splice(s));
@@ -781,8 +775,6 @@ impl<T1, T2> PartialEq<Value<T2>> for Value<T1>
 where
     T1: ValueTypes + ?Sized,
     T2: ValueTypes + ?Sized,
-    for<'a> &'a <T1::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
-    for<'a> &'a <T2::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
 {
     fn eq(&self, rhs: &Value<T2>) -> bool {
         eq_match!(self, rhs, {
@@ -802,11 +794,58 @@ where
 }
 
 #[derive(Debug)]
+pub struct StringTypesString;
+
+impl StringTypes for StringTypesString {
+    type StringRef = String;
+
+    fn string_ref_to_str(s: &Self::StringRef) -> &str {
+        &*s
+    }
+}
+
+impl StringTypesMut for StringTypesString {
+    fn string_ref_from_str(s: &str) -> Self::StringRef {
+        s.to_string()
+    }
+
+    fn string_ref_from_static_str(s: &str) -> Self::StringRef {
+        Self::string_ref_from_str(s)
+    }
+
+    fn string_ref_from_string(s: String) -> Self::StringRef {
+        s
+    }
+}
+
+#[derive(Debug)]
 pub struct SemverTypesVec;
 
 impl SemverTypes for SemverTypesVec {
-    type Semver = Vec<u64>;
-    type SemverRef = Self::Semver;
+    type SemverIter = std::vec::IntoIter<u64>;
+    type SemverRef = Vec<u64>;
+
+    fn semver_ref_to_iter(v: &Self::SemverRef) -> Self::SemverIter {
+        v.clone().into_iter()
+    }
+}
+
+impl SemverTypesMut for SemverTypesVec {
+    fn semver_ref_extend<T>(v: &mut Self::SemverRef, iter: T)
+    where
+        T: IntoIterator<Item = u64>,
+    {
+        v.extend(iter)
+    }
+
+    fn semver_ref_from_iter<T>(iter: T) -> Self::SemverRef
+    where
+        T: IntoIterator<Item = u64>,
+    {
+        use std::iter::FromIterator;
+
+        Self::SemverRef::from_iter(iter)
+    }
 }
 
 #[derive(Debug)]
@@ -814,17 +853,50 @@ pub struct ValueTypesRc;
 
 impl ValueTypes for ValueTypesRc {
     type ConsRef = Rc<Cons<Self>>;
-    type StringRef = String;
     type ValueRef = Box<Value<Self>>;
+    type StringTypes = StringTypesString;
     type SemverTypes = SemverTypesVec;
+
+    fn cons_ref_to_cons(c: &Self::ConsRef) -> &Cons<Self> {
+        &*c
+    }
+
+    fn value_ref_to_value(v: &Self::ValueRef) -> &Value<Self> {
+        &*v
+    }
+}
+
+impl ValueTypesMut for ValueTypesRc {
+    fn cons_ref_from_cons(c: Cons<Self>) -> Self::ConsRef {
+        c.into()
+    }
+
+    fn value_ref_from_value(v: Value<Self>) -> Self::ValueRef {
+        v.into()
+    }
+}
+
+#[derive(Debug)]
+pub struct StringTypesStatic;
+
+impl StringTypes for StringTypesStatic {
+    type StringRef = &'static str;
+
+    fn string_ref_to_str(s: &Self::StringRef) -> &str {
+        *s
+    }
 }
 
 #[derive(Debug)]
 pub struct SemverTypesStatic;
 
 impl SemverTypes for SemverTypesStatic {
-    type Semver = [u64];
-    type SemverRef = &'static Self::Semver;
+    type SemverIter = std::iter::Map<std::slice::Iter<'static, u64>, fn(&'static u64) -> u64>;
+    type SemverRef = &'static [u64];
+
+    fn semver_ref_to_iter(v: &Self::SemverRef) -> Self::SemverIter {
+        (*v).into_iter().map(|comp| *comp)
+    }
 }
 
 #[derive(Debug)]
@@ -832,9 +904,17 @@ pub struct ValueTypesStatic;
 
 impl ValueTypes for ValueTypesStatic {
     type ConsRef = &'static Cons<Self>;
-    type StringRef = &'static str;
     type ValueRef = &'static Value<Self>;
+    type StringTypes = StringTypesStatic;
     type SemverTypes = SemverTypesStatic;
+
+    fn cons_ref_to_cons(c: &Self::ConsRef) -> &Cons<Self> {
+        *c
+    }
+
+    fn value_ref_to_value(v: &Self::ValueRef) -> &Value<Self> {
+        *v
+    }
 }
 
 #[macro_export]
@@ -864,7 +944,7 @@ macro_rules! v_list {
 #[macro_export]
 macro_rules! uqsym {
     ($name:expr) => {
-        $crate::value::ValueUnqualifiedSymbol::<&'static str>($name)
+        $crate::value::ValueUnqualifiedSymbol::<$crate::value::StringTypesStatic>($name)
     };
 }
 
@@ -878,7 +958,7 @@ macro_rules! v_uqsym {
 #[macro_export]
 macro_rules! qsym {
     ($package:expr, $name:expr) => {
-        $crate::value::ValueQualifiedSymbol::<&'static str> {
+        $crate::value::ValueQualifiedSymbol::<$crate::value::StringTypesStatic> {
             package: $package,
             name: $name,
         }
@@ -911,7 +991,7 @@ macro_rules! v_bool {
 #[macro_export]
 macro_rules! str {
     ($s:expr) => {
-        $crate::value::ValueString::<&'static str>($s)
+        $crate::value::ValueString::<$crate::value::StringTypesStatic>($s)
     };
 }
 
@@ -971,9 +1051,10 @@ macro_rules! v_lang {
 #[macro_export]
 macro_rules! lang_kira_ref {
     ($major:expr, $rest:expr) => {
-        $crate::value::ValueLanguageDirective::<&'static str, $crate::value::SemverTypesStatic>::Kira(vref!(
-            $major, $rest
-        ))
+        $crate::value::ValueLanguageDirective::<
+            $crate::value::StringTypesStatic,
+            $crate::value::SemverTypesStatic,
+        >::Kira(vref!($major, $rest))
     };
 }
 
@@ -1009,7 +1090,10 @@ macro_rules! v_lang_kira {
 #[macro_export]
 macro_rules! lang_other {
     ($name:expr) => {
-        $crate::value::ValueLanguageDirective::<&'static str, $crate::value::SemverTypesStatic>::Other($name)
+        $crate::value::ValueLanguageDirective::<
+            $crate::value::StringTypesStatic,
+            $crate::value::SemverTypesStatic,
+        >::Other($name)
     };
 }
 
@@ -1023,7 +1107,7 @@ macro_rules! v_lang_other {
 #[macro_export]
 macro_rules! func {
     ($name:expr) => {
-        $crate::value::ValueFunction::<&'static str>($name)
+        $crate::value::ValueFunction::<$crate::value::StringTypesStatic>($name)
     };
 }
 
@@ -1083,7 +1167,7 @@ mod tests {
     mod macro_tests {
         #[test]
         fn test_uqsym_macro() {
-            const UQSYM: super::ValueUnqualifiedSymbol<&'static str> = uqsym!("uqsym");
+            const UQSYM: super::ValueUnqualifiedSymbol<super::StringTypesStatic> = uqsym!("uqsym");
             assert_eq!(UQSYM.0, "uqsym");
         }
 
@@ -1098,7 +1182,8 @@ mod tests {
 
         #[test]
         fn test_qsym_macro() {
-            const QSYM: super::ValueQualifiedSymbol<&'static str> = qsym!("package", "qsym");
+            const QSYM: super::ValueQualifiedSymbol<super::StringTypesStatic> =
+                qsym!("package", "qsym");
             assert_eq!(QSYM.package, "package");
             assert_eq!(QSYM.name, "qsym");
         }
@@ -1140,7 +1225,7 @@ mod tests {
 
         #[test]
         fn test_str_macro() {
-            const S: super::ValueString<&'static str> = str!("str");
+            const S: super::ValueString<super::StringTypesStatic> = str!("str");
             assert_eq!(S.0, "str");
         }
 
@@ -1219,8 +1304,10 @@ mod tests {
 
         #[test]
         fn test_lang_kira_macro() {
-            const L1: super::ValueLanguageDirective<&'static str, super::SemverTypesStatic> =
-                lang_kira![1];
+            const L1: super::ValueLanguageDirective<
+                super::StringTypesStatic,
+                super::SemverTypesStatic,
+            > = lang_kira![1];
             match L1 {
                 super::ValueLanguageDirective::Kira(v) => {
                     assert_eq!(v.major, 1);
@@ -1229,8 +1316,10 @@ mod tests {
                 _ => panic!("Expected a Value::LanguageDirective with Kira"),
             }
 
-            const L2: super::ValueLanguageDirective<&'static str, super::SemverTypesStatic> =
-                lang_kira![1, 0];
+            const L2: super::ValueLanguageDirective<
+                super::StringTypesStatic,
+                super::SemverTypesStatic,
+            > = lang_kira![1, 0];
             match L2 {
                 super::ValueLanguageDirective::Kira(v) => {
                     assert_eq!(v.major, 1);
@@ -1263,8 +1352,10 @@ mod tests {
 
         #[test]
         fn test_lang_other_macro() {
-            const L1: super::ValueLanguageDirective<&'static str, super::SemverTypesStatic> =
-                lang_other!("not-kira");
+            const L1: super::ValueLanguageDirective<
+                super::StringTypesStatic,
+                super::SemverTypesStatic,
+            > = lang_other!("not-kira");
             match L1 {
                 super::ValueLanguageDirective::Other(n) => {
                     assert_eq!(n, "not-kira");
@@ -1286,10 +1377,10 @@ mod tests {
 
         #[test]
         fn test_func_macro() {
-            const F: super::ValueFunction<&'static str> = func!(qsym!("p", "f1"));
+            const F: super::ValueFunction<super::StringTypesStatic> = func!(qsym!("p", "f1"));
             assert_eq!(
                 F.0,
-                super::ValueQualifiedSymbol::<&'static str> {
+                super::ValueQualifiedSymbol::<super::StringTypesStatic> {
                     package: "p",
                     name: "f1"
                 }
@@ -1302,7 +1393,7 @@ mod tests {
             match F {
                 super::Value::Function(super::ValueFunction(name)) => assert_eq!(
                     name,
-                    super::ValueQualifiedSymbol::<&'static str> {
+                    super::ValueQualifiedSymbol::<super::StringTypesStatic> {
                         package: "p",
                         name: "f1"
                     }
@@ -1604,7 +1695,7 @@ mod tests {
             &list!()
         );
         assert_eq!(
-            TryInto::<&ValueString<&'static str>>::try_into(&v)
+            TryInto::<&ValueString<StringTypesStatic>>::try_into(&v)
                 .unwrap_err()
                 .kind,
             ErrorKind::IncorrectType
@@ -1612,8 +1703,7 @@ mod tests {
 
         let v = v_uqsym!("uqsym");
         assert_eq!(
-            TryInto::<&ValueUnqualifiedSymbol<<ValueTypesStatic as ValueTypes>::StringRef>>::try_into(&v)
-                .unwrap(),
+            TryInto::<&ValueUnqualifiedSymbol<StringTypesStatic>>::try_into(&v).unwrap(),
             &uqsym!("uqsym")
         );
         assert_eq!(
@@ -1625,8 +1715,7 @@ mod tests {
 
         let v = v_qsym!("p", "qsym");
         assert_eq!(
-            TryInto::<&ValueQualifiedSymbol<<ValueTypesStatic as ValueTypes>::StringRef>>::try_into(&v)
-                .unwrap(),
+            TryInto::<&ValueQualifiedSymbol<StringTypesStatic>>::try_into(&v).unwrap(),
             &qsym!("p", "qsym")
         );
         assert_eq!(
@@ -1647,8 +1736,7 @@ mod tests {
 
         let v = v_str!("str");
         assert_eq!(
-            TryInto::<&ValueString<<ValueTypesStatic as ValueTypes>::StringRef>>::try_into(&v)
-                .unwrap(),
+            TryInto::<&ValueString<StringTypesStatic>>::try_into(&v).unwrap(),
             &str!("str")
         );
         assert_eq!(
@@ -1660,8 +1748,7 @@ mod tests {
 
         let v = v_v![1, 0];
         assert_eq!(
-            TryInto::<&ValueSemver<<ValueTypesStatic as ValueTypes>::SemverTypes>>::try_into(&v)
-                .unwrap(),
+            TryInto::<&ValueSemver<SemverTypesStatic>>::try_into(&v).unwrap(),
             &v![1, 0]
         );
         assert_eq!(
@@ -1673,7 +1760,7 @@ mod tests {
 
         let v = v_lang_kira![1, 0];
         assert_eq!(
-            TryInto::<&ValueLanguageDirective<&'static str, SemverTypesStatic>>::try_into(&v)
+            TryInto::<&ValueLanguageDirective<StringTypesStatic, SemverTypesStatic>>::try_into(&v)
                 .unwrap(),
             &lang_kira![1, 0]
         );
@@ -1686,7 +1773,7 @@ mod tests {
 
         let v = v_func!(qsym!("p", "f1"));
         assert_eq!(
-            TryInto::<&ValueFunction<&'static str>>::try_into(&v).unwrap(),
+            TryInto::<&ValueFunction<StringTypesStatic>>::try_into(&v).unwrap(),
             &func!(qsym!("p", "f1"))
         );
         assert_eq!(
@@ -1743,7 +1830,7 @@ mod tests {
             list!()
         );
         assert_eq!(
-            TryInto::<ValueString<&'static str>>::try_into(v)
+            TryInto::<ValueString<StringTypesStatic>>::try_into(v)
                 .unwrap_err()
                 .kind,
             ErrorKind::IncorrectType
@@ -1751,8 +1838,7 @@ mod tests {
 
         let v = v_uqsym!("uqsym");
         assert_eq!(
-            TryInto::<ValueUnqualifiedSymbol<<ValueTypesStatic as ValueTypes>::StringRef>>::try_into(v.clone())
-                .unwrap(),
+            TryInto::<ValueUnqualifiedSymbol<StringTypesStatic>>::try_into(v.clone()).unwrap(),
             uqsym!("uqsym")
         );
         assert_eq!(
@@ -1764,10 +1850,7 @@ mod tests {
 
         let v = v_qsym!("p", "qsym");
         assert_eq!(
-            TryInto::<ValueQualifiedSymbol<<ValueTypesStatic as ValueTypes>::StringRef>>::try_into(
-                v.clone()
-            )
-            .unwrap(),
+            TryInto::<ValueQualifiedSymbol<StringTypesStatic>>::try_into(v.clone()).unwrap(),
             qsym!("p", "qsym")
         );
         assert_eq!(
@@ -1791,10 +1874,7 @@ mod tests {
 
         let v = v_str!("str");
         assert_eq!(
-            TryInto::<ValueString<<ValueTypesStatic as ValueTypes>::StringRef>>::try_into(
-                v.clone()
-            )
-            .unwrap(),
+            TryInto::<ValueString<StringTypesStatic>>::try_into(v.clone()).unwrap(),
             str!("str")
         );
         assert_eq!(
@@ -1806,10 +1886,7 @@ mod tests {
 
         let v = v_v![1, 0];
         assert_eq!(
-            TryInto::<ValueSemver<<ValueTypesStatic as ValueTypes>::SemverTypes>>::try_into(
-                v.clone()
-            )
-            .unwrap(),
+            TryInto::<ValueSemver<SemverTypesStatic>>::try_into(v.clone()).unwrap(),
             v![1, 0]
         );
         assert_eq!(
@@ -1821,8 +1898,10 @@ mod tests {
 
         let v = v_lang_kira![1, 0];
         assert_eq!(
-            TryInto::<ValueLanguageDirective<&'static str, SemverTypesStatic>>::try_into(v.clone())
-                .unwrap(),
+            TryInto::<ValueLanguageDirective<StringTypesStatic, SemverTypesStatic>>::try_into(
+                v.clone()
+            )
+            .unwrap(),
             lang_kira![1, 0]
         );
         assert_eq!(
@@ -1834,7 +1913,7 @@ mod tests {
 
         let v = v_func!(qsym!("p", "f1"));
         assert_eq!(
-            TryInto::<ValueFunction<&'static str>>::try_into(v.clone()).unwrap(),
+            TryInto::<ValueFunction<StringTypesStatic>>::try_into(v.clone()).unwrap(),
             func!(qsym!("p", "f1"))
         );
         assert_eq!(
