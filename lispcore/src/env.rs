@@ -1261,4 +1261,18 @@ mod tests {
             BTreeSet::new(), // Doesn't matter
         );
     }
+
+    #[test]
+    #[should_panic]
+    fn test_compile_and_evaluate_backquote_bad_splice_backquote_nested() {
+        let mut env = SimpleEnvironment;
+        let env = &mut env as &mut dyn Environment<ValueTypesStatic, ValueTypesRc>;
+
+        test_compile_and_evaluate(
+            env,
+            v_bq!(v_list!(v_bq!(v_splice!(v_uqsym!("a"))))),
+            v_list!(),       // Doesn't matter
+            BTreeSet::new(), // Doesn't matter
+        );
+    }
 }
