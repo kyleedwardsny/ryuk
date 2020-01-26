@@ -7,7 +7,6 @@ use std::collections::BTreeSet;
 struct IfEvaluator<T>
 where
     T: ValueTypes + ?Sized,
-    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
 {
     test: Box<dyn Evaluator<T>>,
     then: Box<dyn Evaluator<T>>,
@@ -17,7 +16,6 @@ where
 impl<T> IfEvaluator<T>
 where
     T: ValueTypes + ?Sized,
-    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
 {
     pub fn new(
         test: Box<dyn Evaluator<T>>,
@@ -31,7 +29,6 @@ where
 impl<T> Evaluator<T> for IfEvaluator<T>
 where
     T: ValueTypes + ?Sized + 'static,
-    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
 {
     fn evaluate(&mut self, env: &mut dyn Environment<T>) -> Result<Value<T>> {
         use std::convert::TryInto;
@@ -51,7 +48,6 @@ pub fn compile_if<T>(
 ) -> Result<CompilationResult<T>>
 where
     T: ValueTypes + ?Sized + 'static,
-    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
 {
     use std::iter::FromIterator;
 
@@ -124,7 +120,6 @@ pub fn compile_quote<T>(
 ) -> Result<CompilationResult<T>>
 where
     T: ValueTypes + ?Sized + 'static,
-    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
 {
     use std::iter::FromIterator;
 
@@ -170,28 +165,28 @@ mod tests {
 
         fn resolve_symbol_get_variable(
             &self,
-            _name: &ValueUnqualifiedSymbol<<ValueTypesRc as ValueTypes>::StringRef>,
-        ) -> Option<ValueQualifiedSymbol<<ValueTypesRc as ValueTypes>::StringRef>> {
+            _name: &ValueUnqualifiedSymbol<StringTypesString>,
+        ) -> Option<ValueQualifiedSymbol<StringTypesString>> {
             Option::None
         }
 
         fn compile_variable(
             &self,
-            _name: &ValueQualifiedSymbol<String>,
+            _name: &ValueQualifiedSymbol<StringTypesString>,
         ) -> Option<BTreeSet<ValueType>> {
             Option::None
         }
 
         fn evaluate_variable(
             &self,
-            _name: &ValueQualifiedSymbol<<ValueTypesRc as ValueTypes>::StringRef>,
+            _name: &ValueQualifiedSymbol<StringTypesString>,
         ) -> Result<Value<ValueTypesRc>> {
             Result::Err(Error::new(ErrorKind::ValueNotDefined, "Value not defined"))
         }
 
         fn evaluate_function(
             &mut self,
-            _name: &ValueQualifiedSymbol<<ValueTypesRc as ValueTypes>::StringRef>,
+            _name: &ValueQualifiedSymbol<StringTypesString>,
             _params: Vec<Value<ValueTypesRc>>,
         ) -> Result<Value<ValueTypesRc>> {
             Result::Err(Error::new(ErrorKind::ValueNotDefined, "Value not defined"))
@@ -199,14 +194,14 @@ mod tests {
 
         fn resolve_symbol_get_macro(
             &self,
-            _name: &ValueUnqualifiedSymbol<<ValueTypesRc as ValueTypes>::StringRef>,
-        ) -> Option<ValueQualifiedSymbol<<ValueTypesRc as ValueTypes>::StringRef>> {
+            _name: &ValueUnqualifiedSymbol<StringTypesString>,
+        ) -> Option<ValueQualifiedSymbol<StringTypesString>> {
             Option::None
         }
 
         fn compile_macro(
             &mut self,
-            name: &ValueQualifiedSymbol<String>,
+            name: &ValueQualifiedSymbol<StringTypesString>,
             params: ValueList<ValueTypesRc>,
         ) -> Option<Result<TryCompilationResult<ValueTypesRc>>> {
             use std::borrow::Borrow;
@@ -222,7 +217,7 @@ mod tests {
 
         fn compile_function(
             &self,
-            _name: &ValueQualifiedSymbol<String>,
+            _name: &ValueQualifiedSymbol<StringTypesString>,
             _params: &mut dyn Iterator<Item = &BTreeSet<ValueType>>,
         ) -> Option<Result<BTreeSet<ValueType>>> {
             Option::None
