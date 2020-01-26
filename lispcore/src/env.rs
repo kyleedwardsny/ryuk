@@ -346,7 +346,11 @@ where
                             }
                             params.push(ListItem::List(result.result));
                         }
-                        _ => panic!("Not implemented"),
+                        _ => {
+                            let result = compile_backquote(env, item, bq)?;
+                            params.push(ListItem::Item(result.result));
+                            types.extend(result.types);
+                        }
                     }
                 }
                 CompilationResult {
@@ -1203,6 +1207,24 @@ mod tests {
         test_compile_and_evaluate(
             env,
             v_bq!(v_list!(v_comma!(v_qsym!("pvar", "var5")))),
+            v_list!(v_list!(v_qsym!("p", "simplefunc2"))),
+            BTreeSet::from_iter(std::iter::once(ValueType::List(BTreeSet::from_iter(
+                std::iter::once(ValueType::List(BTreeSet::from_iter(std::iter::once(
+                    ValueType::QualifiedSymbol,
+                )))),
+            )))),
+        );
+        test_compile_and_evaluate(
+            env,
+            v_bq!(v_list!(v_qsym!("pvar", "var5"))),
+            v_list!(v_qsym!("pvar", "var5")),
+            BTreeSet::from_iter(std::iter::once(ValueType::List(BTreeSet::from_iter(
+                std::iter::once(ValueType::QualifiedSymbol),
+            )))),
+        );
+        test_compile_and_evaluate(
+            env,
+            v_bq!(v_list!(v_list!(v_splice!(v_qsym!("pvar", "var5"))))),
             v_list!(v_list!(v_qsym!("p", "simplefunc2"))),
             BTreeSet::from_iter(std::iter::once(ValueType::List(BTreeSet::from_iter(
                 std::iter::once(ValueType::List(BTreeSet::from_iter(std::iter::once(
