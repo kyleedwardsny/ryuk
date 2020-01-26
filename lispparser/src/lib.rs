@@ -1,6 +1,5 @@
 use ryuk_lispcore::list::ListItem;
 use ryuk_lispcore::value::*;
-use std::borrow::{Borrow, BorrowMut};
 use std::fmt::Formatter;
 use std::iter::Peekable;
 use std::marker::PhantomData;
@@ -52,10 +51,10 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 pub struct LispParser<T, I>
 where
-    T: ValueTypes + ?Sized,
-    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+    T: ValueTypesMut + ?Sized,
+    T::StringTypes: StringTypesMut,
+    T::SemverTypes: SemverTypesMut,
     I: Iterator<Item = char>,
-    String: Into<T::StringRef>,
 {
     reader: Peekable<I>,
     phantom_types: PhantomData<T>,
@@ -63,10 +62,10 @@ where
 
 impl<T, I> LispParser<T, I>
 where
-    T: ValueTypes + ?Sized,
-    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+    T: ValueTypesMut + ?Sized,
+    T::StringTypes: StringTypesMut,
+    T::SemverTypes: SemverTypesMut,
     I: Iterator<Item = char>,
-    String: Into<T::StringRef>,
 {
     pub fn new(reader: Peekable<I>) -> Self {
         Self {
@@ -129,16 +128,10 @@ impl BackquoteStatus {
 
 impl<T, I> Iterator for LispParser<T, I>
 where
-    T: ValueTypes + ?Sized,
-    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
-    for<'a> <T::SemverTypes as SemverTypes>::Semver: Extend<&'a u64>,
+    T: ValueTypesMut + ?Sized,
+    T::StringTypes: StringTypesMut,
+    T::SemverTypes: SemverTypesMut,
     I: Iterator<Item = char>,
-    String: Into<T::StringRef>,
-    &'static str: Into<T::StringRef>,
-    Cons<T>: Into<T::ConsRef>,
-    <T::SemverTypes as SemverTypes>::SemverRef:
-        Default + BorrowMut<<T::SemverTypes as SemverTypes>::Semver>,
-    Value<T>: Into<T::ValueRef>,
 {
     type Item = Result<Value<T>>;
 
@@ -187,16 +180,10 @@ fn read_delimited<T, I>(
     bq: BackquoteStatus,
 ) -> Result<Option<Value<T>>>
 where
-    T: ValueTypes + ?Sized,
-    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
-    for<'a> <T::SemverTypes as SemverTypes>::Semver: Extend<&'a u64>,
+    T: ValueTypesMut + ?Sized,
+    T::StringTypes: StringTypesMut,
+    T::SemverTypes: SemverTypesMut,
     I: Iterator<Item = char>,
-    String: Into<T::StringRef>,
-    &'static str: Into<T::StringRef>,
-    Cons<T>: Into<T::ConsRef>,
-    <T::SemverTypes as SemverTypes>::SemverRef:
-        Default + BorrowMut<<T::SemverTypes as SemverTypes>::Semver>,
-    Value<T>: Into<T::ValueRef>,
 {
     skip_whitespace(peekable)?;
     if let Option::Some(c) = peekable.peek() {
@@ -222,26 +209,17 @@ where
 
 fn read_list<T, I>(peekable: &mut Peekable<I>, bq: BackquoteStatus) -> Result<ValueList<T>>
 where
-    T: ValueTypes + ?Sized,
-    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
-    for<'a> <T::SemverTypes as SemverTypes>::Semver: Extend<&'a u64>,
+    T: ValueTypesMut + ?Sized,
+    T::StringTypes: StringTypesMut,
+    T::SemverTypes: SemverTypesMut,
     I: Iterator<Item = char>,
-    String: Into<T::StringRef>,
-    &'static str: Into<T::StringRef>,
-    Cons<T>: Into<T::ConsRef>,
-    <T::SemverTypes as SemverTypes>::SemverRef:
-        Default + BorrowMut<<T::SemverTypes as SemverTypes>::Semver>,
-    Value<T>: Into<T::ValueRef>,
 {
     Result::Ok(ValueList(
         match read_delimited(peekable, ')', bq.list_item())? {
-            Option::Some(v) => Option::Some(
-                Cons {
-                    car: v,
-                    cdr: read_list(peekable, bq)?,
-                }
-                .into(),
-            ),
+            Option::Some(v) => Option::Some(T::cons_ref_from_cons(Cons {
+                car: v,
+                cdr: read_list(peekable, bq)?,
+            })),
             Option::None => Option::None,
         },
     ))
@@ -273,13 +251,9 @@ fn read_language_directive<S, V, I>(
     peekable: &mut Peekable<I>,
 ) -> Result<ValueLanguageDirective<S, V>>
 where
-    V: SemverTypes + ?Sized,
-    for<'a> &'a V::Semver: IntoIterator<Item = &'a u64>,
-    for<'a> V::Semver: Extend<&'a u64>,
+    S: StringTypesMut + ?Sized,
+    V: SemverTypesMut + ?Sized,
     I: Iterator<Item = char>,
-    S: Borrow<str> + Clone,
-    String: Into<S>,
-    V::SemverRef: Default + BorrowMut<V::Semver>,
 {
     skip_whitespace(peekable)?;
 
@@ -288,19 +262,16 @@ where
         skip_whitespace(peekable)?;
         ValueLanguageDirective::Kira(parse_semver(&read_token(peekable)?.try_unwrap_token()?)?)
     } else {
-        ValueLanguageDirective::Other(t.into())
+        ValueLanguageDirective::Other(S::string_ref_from_string(t))
     })
 }
 
 fn read_macro<T, I>(peekable: &mut Peekable<I>) -> Result<Value<T>>
 where
-    T: ValueTypes + ?Sized,
-    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
-    for<'a> <T::SemverTypes as SemverTypes>::Semver: Extend<&'a u64>,
+    T: ValueTypesMut + ?Sized,
+    T::StringTypes: StringTypesMut,
+    T::SemverTypes: SemverTypesMut,
     I: Iterator<Item = char>,
-    String: Into<T::StringRef>,
-    <T::SemverTypes as SemverTypes>::SemverRef:
-        Default + BorrowMut<<T::SemverTypes as SemverTypes>::Semver>,
 {
     if let Option::Some(&c) = peekable.peek() {
         if c == 'v' {
@@ -376,8 +347,9 @@ where
 
 enum ReadImplResult<T>
 where
-    T: ValueTypes + ?Sized,
-    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+    T: ValueTypesMut + ?Sized,
+    T::StringTypes: StringTypesMut,
+    T::SemverTypes: SemverTypesMut,
 {
     Value(Value<T>),
     EndOfFile,
@@ -385,8 +357,9 @@ where
 
 impl<T> ReadImplResult<T>
 where
-    T: ValueTypes + ?Sized,
-    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
+    T: ValueTypesMut + ?Sized,
+    T::StringTypes: StringTypesMut,
+    T::SemverTypes: SemverTypesMut,
 {
     pub fn try_unwrap_value(self) -> Result<Value<T>> {
         match self {
@@ -398,16 +371,10 @@ where
 
 fn read_impl<T, I>(peekable: &mut Peekable<I>, bq: BackquoteStatus) -> Result<ReadImplResult<T>>
 where
-    T: ValueTypes + ?Sized,
-    for<'a> &'a <T::SemverTypes as SemverTypes>::Semver: IntoIterator<Item = &'a u64>,
-    for<'a> <T::SemverTypes as SemverTypes>::Semver: Extend<&'a u64>,
+    T: ValueTypesMut + ?Sized,
+    T::StringTypes: StringTypesMut,
+    T::SemverTypes: SemverTypesMut,
     I: Iterator<Item = char>,
-    String: Into<T::StringRef>,
-    &'static str: Into<T::StringRef>,
-    Cons<T>: Into<T::ConsRef>,
-    <T::SemverTypes as SemverTypes>::SemverRef:
-        Default + BorrowMut<<T::SemverTypes as SemverTypes>::Semver>,
-    Value<T>: Into<T::ValueRef>,
 {
     skip_whitespace(peekable)?;
     if let Option::Some(&c) = peekable.peek() {
@@ -420,29 +387,25 @@ where
         } else if c == '"' {
             peekable.next();
             Result::Ok(ReadImplResult::Value(Value::String(ValueString(
-                read_string(peekable, '"')?.into(),
+                T::StringTypes::string_ref_from_string(read_string(peekable, '"')?),
             ))))
         } else if c == '`' {
             peekable.next();
             Result::Ok(ReadImplResult::Value(Value::Backquote(ValueBackquote(
-                read_impl(peekable, bq.backquote())?
-                    .try_unwrap_value()?
-                    .into(),
+                T::value_ref_from_value(read_impl(peekable, bq.backquote())?.try_unwrap_value()?),
             ))))
         } else if c == ',' {
             peekable.next();
             match peekable.peek() {
                 Option::Some(&c2) => Result::Ok(ReadImplResult::Value(if c2 == '@' {
                     peekable.next();
-                    Value::Splice(ValueSplice(
-                        read_impl(peekable, bq.splice()?)?
-                            .try_unwrap_value()?
-                            .into(),
-                    ))
+                    Value::Splice(ValueSplice(T::value_ref_from_value(
+                        read_impl(peekable, bq.splice()?)?.try_unwrap_value()?,
+                    )))
                 } else {
-                    Value::Comma(ValueComma(
-                        read_impl(peekable, bq.comma()?)?.try_unwrap_value()?.into(),
-                    ))
+                    Value::Comma(ValueComma(T::value_ref_from_value(
+                        read_impl(peekable, bq.comma()?)?.try_unwrap_value()?,
+                    )))
                 })),
                 Option::None => {
                     Result::Err(Error::new(ErrorKind::EndOfFile, "End of file reached"))
@@ -451,20 +414,16 @@ where
         } else if c == '\'' {
             peekable.next();
             Result::Ok(ReadImplResult::Value(Value::List(ValueList(Option::Some(
-                Cons {
+                T::cons_ref_from_cons(Cons {
                     car: Value::QualifiedSymbol(ValueQualifiedSymbol {
-                        package: "std".into(),
-                        name: "quote".into(),
+                        package: T::StringTypes::string_ref_from_static_str("std"),
+                        name: T::StringTypes::string_ref_from_static_str("quote"),
                     }),
-                    cdr: ValueList(Option::Some(
-                        Cons {
-                            car: read_impl(peekable, bq)?.try_unwrap_value()?,
-                            cdr: ValueList(Option::None),
-                        }
-                        .into(),
-                    )),
-                }
-                .into(),
+                    cdr: ValueList(Option::Some(T::cons_ref_from_cons(Cons {
+                        car: read_impl(peekable, bq)?.try_unwrap_value()?,
+                        cdr: ValueList(Option::None),
+                    }))),
+                }),
             )))))
         } else if is_token_char(c) {
             match read_token(peekable)? {
@@ -473,16 +432,17 @@ where
                         peekable.next();
                         Result::Ok(ReadImplResult::Value(Value::QualifiedSymbol(
                             ValueQualifiedSymbol {
-                                package: t1.to_lowercase().into(),
-                                name: read_token(peekable)?
-                                    .try_unwrap_token()?
-                                    .to_lowercase()
-                                    .into(),
+                                package: T::StringTypes::string_ref_from_string(t1.to_lowercase()),
+                                name: T::StringTypes::string_ref_from_string(
+                                    read_token(peekable)?.try_unwrap_token()?.to_lowercase(),
+                                ),
                             },
                         )))
                     }
                     _ => Result::Ok(ReadImplResult::Value(Value::UnqualifiedSymbol(
-                        ValueUnqualifiedSymbol(t1.to_lowercase().into()),
+                        ValueUnqualifiedSymbol(T::StringTypes::string_ref_from_string(
+                            t1.to_lowercase(),
+                        )),
                     ))),
                 },
                 ReadTokenResult::InvalidToken(t) => Result::Err(Error::new(
@@ -504,13 +464,10 @@ where
 
 fn parse_semver<V>(s: &str) -> Result<ValueSemver<V>>
 where
-    V: SemverTypes + ?Sized,
-    for<'a> &'a V::Semver: IntoIterator<Item = &'a u64>,
-    for<'a> V::Semver: Extend<&'a u64>,
-    V::SemverRef: Default + BorrowMut<V::Semver>,
+    V: SemverTypesMut + ?Sized,
 {
     let mut major = Option::None;
-    let mut rest = V::SemverRef::default();
+    let mut rest = V::semver_ref_default();
 
     for component_str in s.split('.') {
         let mut component = 0u64;
@@ -541,7 +498,7 @@ where
         }
         match &mut major {
             Option::None => major = Option::Some(component),
-            Option::Some(_) => rest.borrow_mut().extend(&[component]),
+            Option::Some(_) => V::semver_ref_extend(&mut rest, std::iter::once(component)),
         }
     }
 

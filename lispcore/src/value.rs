@@ -36,6 +36,8 @@ pub trait SemverTypesMut: SemverTypes {
     fn semver_ref_from_iter<T>(iter: T) -> Self::SemverRef
     where
         T: IntoIterator<Item = u64>;
+
+    fn semver_ref_default() -> Self::SemverRef;
 }
 
 pub trait ValueTypes: Debug {
@@ -845,6 +847,10 @@ impl SemverTypesMut for SemverTypesVec {
         use std::iter::FromIterator;
 
         Self::SemverRef::from_iter(iter)
+    }
+
+    fn semver_ref_default() -> Self::SemverRef {
+        Self::SemverRef::default()
     }
 }
 
