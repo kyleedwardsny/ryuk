@@ -328,6 +328,54 @@ where
 }
 
 #[derive(Debug)]
+pub struct CommaSplicePushEvaluator<C, D>
+where
+    C: ValueTypes + ?Sized,
+    D: ValueTypesMut + ?Sized,
+    D::StringTypes: StringTypesMut,
+    D::SemverTypes: SemverTypesMut,
+{
+    splice: bool,
+    commas: usize,
+    wrapped: Box<dyn Evaluator<C, D>>,
+}
+
+impl<C, D> CommaSplicePushEvaluator<C, D>
+where
+    C: ValueTypes + ?Sized,
+    D: ValueTypesMut + ?Sized,
+    D::StringTypes: StringTypesMut,
+    D::SemverTypes: SemverTypesMut,
+{
+    pub fn new(splice: bool, commas: usize, wrapped: Box<dyn Evaluator<C, D>>) -> Self {
+        Self {
+            splice,
+            commas,
+            wrapped,
+        }
+    }
+}
+
+impl<C, D> Evaluator<C, D> for CommaSplicePushEvaluator<C, D>
+where
+    C: ValueTypes + ?Sized + 'static,
+    D: ValueTypesMut + ?Sized + 'static,
+    D::StringTypes: StringTypesMut,
+    D::SemverTypes: SemverTypesMut,
+{
+    fn evaluate(&mut self, env: &mut dyn Environment<C, D>) -> Result<Value<D>> {
+        let mut result = self.wrapped.evaluate(env)?;
+        for _ in 0..self.commas {
+            result = Value::Comma(ValueComma(D::value_ref_from_value(result)));
+        }
+        if self.splice {
+            result = Value::Splice(ValueSplice(D::value_ref_from_value(result)));
+        }
+        Result::Ok(result)
+    }
+}
+
+#[derive(Debug)]
 pub struct CompilationResult<C, D>
 where
     C: ValueTypes + ?Sized,
@@ -666,6 +714,40 @@ mod tests {
             comp.evaluate(env).unwrap_err().kind,
             ErrorKind::IncorrectType
         );
+    }
+
+    #[test]
+    fn test_evaluate_comma_splice_push() {
+        let mut env = SimpleEnvironment;
+        let env = &mut env as &mut dyn Environment<ValueTypesStatic, ValueTypesRc>;
+
+        let mut comp =
+            CommaSplicePushEvaluator::new(true, 2, Box::new(LiteralEvaluator::new(v_bool!(true))));
+        assert_eq!(
+            comp.evaluate(env).unwrap(),
+            v_splice!(v_comma!(v_comma!(v_bool!(true))))
+        );
+
+        let mut comp =
+            CommaSplicePushEvaluator::new(false, 3, Box::new(LiteralEvaluator::new(v_str!("str"))));
+        assert_eq!(
+            comp.evaluate(env).unwrap(),
+            v_comma!(v_comma!(v_comma!(v_str!("str"))))
+        );
+
+        let mut comp = CommaSplicePushEvaluator::new(
+            true,
+            0,
+            Box::new(LiteralEvaluator::new(v_uqsym!("uqsym"))),
+        );
+        assert_eq!(comp.evaluate(env).unwrap(), v_splice!(v_uqsym!("uqsym")));
+
+        let mut comp = CommaSplicePushEvaluator::new(
+            false,
+            0,
+            Box::new(LiteralEvaluator::new(v_qsym!("p", "qsym"))),
+        );
+        assert_eq!(comp.evaluate(env).unwrap(), v_qsym!("p", "qsym"));
     }
 
     #[test]
