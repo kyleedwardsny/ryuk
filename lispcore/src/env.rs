@@ -6,39 +6,41 @@ use std::collections::BTreeSet;
 use std::fmt::Debug;
 use std::iter::FromIterator;
 
-pub trait Environment<T>
+pub trait Environment<C, D>
 where
-    T: ValueTypes + ?Sized + 'static,
-    Value<T>: Clone,
+    C: ValueTypes + ?Sized + 'static,
+    D: ValueTypesMut + ?Sized + 'static,
+    D::StringTypes: StringTypesMut,
+    D::SemverTypes: SemverTypesMut,
 {
-    fn as_dyn_mut(&mut self) -> &mut (dyn Environment<T> + 'static);
+    fn as_dyn_mut(&mut self) -> &mut (dyn Environment<C, D> + 'static);
 
     fn resolve_symbol_get_variable(
         &self,
-        name: &ValueUnqualifiedSymbol<T::StringTypes>,
-    ) -> Option<ValueQualifiedSymbol<T::StringTypes>>;
+        name: &ValueUnqualifiedSymbol<C::StringTypes>,
+    ) -> Option<ValueQualifiedSymbol<C::StringTypes>>;
 
     fn compile_variable(
         &self,
-        name: &ValueQualifiedSymbol<T::StringTypes>,
+        name: &ValueQualifiedSymbol<C::StringTypes>,
     ) -> Option<BTreeSet<ValueType>>;
 
     fn resolve_symbol_get_macro(
         &self,
-        name: &ValueUnqualifiedSymbol<T::StringTypes>,
-    ) -> Option<ValueQualifiedSymbol<T::StringTypes>>;
+        name: &ValueUnqualifiedSymbol<C::StringTypes>,
+    ) -> Option<ValueQualifiedSymbol<C::StringTypes>>;
 
     fn compile_function(
         &self,
-        name: &ValueQualifiedSymbol<T::StringTypes>,
+        name: &ValueQualifiedSymbol<C::StringTypes>,
         params: &mut dyn Iterator<Item = &BTreeSet<ValueType>>,
     ) -> Option<Result<BTreeSet<ValueType>>>;
 
     fn compile_function_from_macro(
         &mut self,
-        name: &ValueQualifiedSymbol<T::StringTypes>,
-        params: ValueList<T>,
-    ) -> Option<Result<TryCompilationResult<T>>> {
+        name: &ValueQualifiedSymbol<C::StringTypes>,
+        params: ValueList<C>,
+    ) -> Option<Result<TryCompilationResult<C, D>>> {
         let mut compiled_params = Vec::new();
         for item in params.map(|v| self.compile(v)) {
             match item {
@@ -63,29 +65,29 @@ where
         )
     }
 
-    fn evaluate_variable(&self, name: &ValueQualifiedSymbol<T::StringTypes>) -> Result<Value<T>>;
+    fn evaluate_variable(&self, name: &ValueQualifiedSymbol<C::StringTypes>) -> Result<Value<D>>;
 
     fn evaluate_function(
         &mut self,
-        name: &ValueQualifiedSymbol<T::StringTypes>,
-        params: Vec<Value<T>>,
-    ) -> Result<Value<T>>;
+        name: &ValueQualifiedSymbol<C::StringTypes>,
+        params: Vec<Value<D>>,
+    ) -> Result<Value<D>>;
 
     fn compile_macro(
         &mut self,
-        name: &ValueQualifiedSymbol<T::StringTypes>,
-        params: ValueList<T>,
-    ) -> Option<Result<TryCompilationResult<T>>>;
+        name: &ValueQualifiedSymbol<C::StringTypes>,
+        params: ValueList<C>,
+    ) -> Option<Result<TryCompilationResult<C, D>>>;
 
-    fn compile(&mut self, v: Value<T>) -> Result<CompilationResult<T>> {
-        let mut result = TryCompilationResult::<T>::Uncompiled(v);
+    fn compile(&mut self, v: Value<C>) -> Result<CompilationResult<C, D>> {
+        let mut result = TryCompilationResult::<C, D>::Uncompiled(v);
 
         loop {
             match result {
                 TryCompilationResult::Uncompiled(v) => {
                     result = match v {
                         Value::List(ValueList(Option::Some(l))) => {
-                            let list = T::cons_ref_to_cons(&l);
+                            let list = C::cons_ref_to_cons(&l);
                             let name = match &list.car {
                                 Value::UnqualifiedSymbol(name) => {
                                     match self.resolve_symbol_get_macro(name) {
@@ -184,115 +186,139 @@ pub enum ValueType {
     Splice(Box<ValueType>),
 }
 
-pub trait Evaluator<T>: Debug
+pub trait Evaluator<C, D>: Debug
 where
-    T: ValueTypes + ?Sized + 'static,
+    C: ValueTypes + ?Sized + 'static,
+    D: ValueTypesMut + ?Sized + 'static,
+    D::StringTypes: StringTypesMut,
+    D::SemverTypes: SemverTypesMut,
 {
-    fn evaluate(&mut self, env: &mut dyn Environment<T>) -> Result<Value<T>>;
+    fn evaluate(&mut self, env: &mut dyn Environment<C, D>) -> Result<Value<D>>;
 }
 
 #[derive(Debug)]
-pub struct LiteralEvaluator<T>(Value<T>)
+pub struct LiteralEvaluator<L>(Value<L>)
 where
-    T: ValueTypes + ?Sized;
+    L: ValueTypes + ?Sized;
 
-impl<T> LiteralEvaluator<T>
+impl<L> LiteralEvaluator<L>
 where
-    T: ValueTypes + ?Sized,
+    L: ValueTypes + ?Sized,
 {
-    pub fn new(value: Value<T>) -> Self {
+    pub fn new(value: Value<L>) -> Self {
         Self(value)
     }
 }
 
-impl<T> Evaluator<T> for LiteralEvaluator<T>
+impl<L, C, D> Evaluator<C, D> for LiteralEvaluator<L>
 where
-    T: ValueTypes + ?Sized + 'static,
+    L: ValueTypes + ?Sized + 'static,
+    C: ValueTypes + ?Sized + 'static,
+    D: ValueTypesMut + ?Sized + 'static,
+    D::StringTypes: StringTypesMut,
+    D::SemverTypes: SemverTypesMut,
 {
-    fn evaluate(&mut self, _env: &mut dyn Environment<T>) -> Result<Value<T>> {
-        Result::Ok(self.0.clone())
+    fn evaluate(&mut self, _env: &mut dyn Environment<C, D>) -> Result<Value<D>> {
+        Result::Ok(self.0.convert())
     }
 }
 
 #[derive(Debug)]
-pub struct VariableEvaluator<T>(ValueQualifiedSymbol<T::StringTypes>)
+pub struct VariableEvaluator<S>(ValueQualifiedSymbol<S>)
 where
-    T: ValueTypes + ?Sized + 'static;
+    S: StringTypes + ?Sized + 'static;
 
-impl<T> VariableEvaluator<T>
+impl<S> VariableEvaluator<S>
 where
-    T: ValueTypes + ?Sized,
+    S: StringTypes + ?Sized,
 {
-    pub fn new(name: ValueQualifiedSymbol<T::StringTypes>) -> Self {
+    pub fn new(name: ValueQualifiedSymbol<S>) -> Self {
         Self(name)
     }
 }
 
-impl<T> Evaluator<T> for VariableEvaluator<T>
+impl<C, D> Evaluator<C, D> for VariableEvaluator<C::StringTypes>
 where
-    T: ValueTypes + ?Sized + 'static,
+    C: ValueTypes + ?Sized + 'static,
+    D: ValueTypesMut + ?Sized + 'static,
+    D::StringTypes: StringTypesMut,
+    D::SemverTypes: SemverTypesMut,
 {
-    fn evaluate(&mut self, env: &mut dyn Environment<T>) -> Result<Value<T>> {
+    fn evaluate(&mut self, env: &mut dyn Environment<C, D>) -> Result<Value<D>> {
         env.evaluate_variable(&self.0)
     }
 }
 
 #[derive(Debug)]
-pub struct FunctionCallEvaluator<T>
+pub struct FunctionCallEvaluator<C, D>
 where
-    T: ValueTypes + ?Sized,
+    C: ValueTypes + ?Sized + 'static,
+    D: ValueTypesMut + ?Sized + 'static,
+    D::StringTypes: StringTypesMut,
+    D::SemverTypes: SemverTypesMut,
 {
-    name: ValueFunction<T::StringTypes>,
-    params: Vec<Box<dyn Evaluator<T>>>,
+    name: ValueFunction<C::StringTypes>,
+    params: Vec<Box<dyn Evaluator<C, D>>>,
 }
 
-impl<T> FunctionCallEvaluator<T>
+impl<C, D> FunctionCallEvaluator<C, D>
 where
-    T: ValueTypes + ?Sized,
+    C: ValueTypes + ?Sized + 'static,
+    D: ValueTypesMut + ?Sized + 'static,
+    D::StringTypes: StringTypesMut,
+    D::SemverTypes: SemverTypesMut,
 {
-    pub fn new(name: ValueFunction<T::StringTypes>, params: Vec<Box<dyn Evaluator<T>>>) -> Self {
+    pub fn new(name: ValueFunction<C::StringTypes>, params: Vec<Box<dyn Evaluator<C, D>>>) -> Self {
         Self { name, params }
     }
 }
 
-impl<T> Evaluator<T> for FunctionCallEvaluator<T>
+impl<C, D> Evaluator<C, D> for FunctionCallEvaluator<C, D>
 where
-    T: ValueTypes + ?Sized + 'static,
+    C: ValueTypes + ?Sized + 'static,
+    D: ValueTypesMut + ?Sized + 'static,
+    D::StringTypes: StringTypesMut,
+    D::SemverTypes: SemverTypesMut,
 {
-    fn evaluate(&mut self, env: &mut dyn Environment<T>) -> Result<Value<T>> {
+    fn evaluate(&mut self, env: &mut dyn Environment<C, D>) -> Result<Value<D>> {
         use std::borrow::BorrowMut;
 
         let params = (&mut self.params)
             .into_iter()
-            .map(|p| BorrowMut::<dyn Evaluator<T>>::borrow_mut(p).evaluate(env))
-            .collect::<Result<Vec<Value<T>>>>()?;
+            .map(|p| BorrowMut::<dyn Evaluator<C, D>>::borrow_mut(p).evaluate(env))
+            .collect::<Result<Vec<Value<D>>>>()?;
         env.evaluate_function(&self.name.0, params)
     }
 }
 
 #[derive(Debug)]
-pub struct ConcatenateListsEvaluator<T>(Vec<ListItem<Box<dyn Evaluator<T>>>>)
+pub struct ConcatenateListsEvaluator<C, D>(Vec<ListItem<Box<dyn Evaluator<C, D>>>>)
 where
-    T: ValueTypes + ?Sized;
+    C: ValueTypes + ?Sized,
+    D: ValueTypesMut + ?Sized,
+    D::StringTypes: StringTypesMut,
+    D::SemverTypes: SemverTypesMut;
 
-impl<T> ConcatenateListsEvaluator<T>
+impl<C, D> ConcatenateListsEvaluator<C, D>
 where
-    T: ValueTypesMut + ?Sized,
-    T::StringTypes: StringTypesMut,
-    T::SemverTypes: SemverTypesMut,
+    C: ValueTypes + ?Sized,
+    D: ValueTypesMut + ?Sized,
+    D::StringTypes: StringTypesMut,
+    D::SemverTypes: SemverTypesMut,
 {
-    pub fn new(items: Vec<ListItem<Box<dyn Evaluator<T>>>>) -> Self {
+    pub fn new(items: Vec<ListItem<Box<dyn Evaluator<C, D>>>>) -> Self {
         Self(items)
     }
 }
 
-impl<T> Evaluator<T> for ConcatenateListsEvaluator<T>
+impl<C, D> Evaluator<C, D> for ConcatenateListsEvaluator<C, D>
 where
-    T: ValueTypesMut + ?Sized + 'static,
-    T::StringTypes: StringTypesMut,
-    T::SemverTypes: SemverTypesMut,
+    C: ValueTypes + ?Sized + 'static,
+    D: ValueTypesMut + ?Sized + 'static,
+    D::StringTypes: StringTypesMut,
+    D::SemverTypes: SemverTypesMut,
 {
-    fn evaluate(&mut self, env: &mut dyn Environment<T>) -> Result<Value<T>> {
+    fn evaluate(&mut self, env: &mut dyn Environment<C, D>) -> Result<Value<D>> {
         let mut items = Vec::new();
         for item in &mut self.0 {
             items.push(item.as_mut().map(|comp| comp.evaluate(env)).transpose()?);
@@ -302,20 +328,26 @@ where
 }
 
 #[derive(Debug)]
-pub struct CompilationResult<T>
+pub struct CompilationResult<C, D>
 where
-    T: ValueTypes + ?Sized,
+    C: ValueTypes + ?Sized,
+    D: ValueTypesMut + ?Sized,
+    D::StringTypes: StringTypesMut,
+    D::SemverTypes: SemverTypesMut,
 {
-    pub result: Box<dyn Evaluator<T> + 'static>,
+    pub result: Box<dyn Evaluator<C, D> + 'static>,
     pub types: BTreeSet<ValueType>,
 }
 
-pub enum TryCompilationResult<T>
+pub enum TryCompilationResult<C, D>
 where
-    T: ValueTypes + ?Sized,
+    C: ValueTypes + ?Sized,
+    D: ValueTypesMut + ?Sized,
+    D::StringTypes: StringTypesMut,
+    D::SemverTypes: SemverTypesMut,
 {
-    Compiled(CompilationResult<T>),
-    Uncompiled(Value<T>),
+    Compiled(CompilationResult<C, D>),
+    Uncompiled(Value<C>),
 }
 
 #[cfg(test)]
@@ -370,16 +402,28 @@ mod tests {
 
     struct SimpleEnvironment;
 
-    fn simplemacro1() -> Result<TryCompilationResult<ValueTypesRc>> {
+    fn simplemacro1<C, D>() -> Result<TryCompilationResult<C, D>>
+    where
+        C: ValueTypes + ?Sized + 'static,
+        D: ValueTypesMut + ?Sized + 'static,
+        D::StringTypes: StringTypesMut,
+        D::SemverTypes: SemverTypesMut,
+    {
         Result::Ok(TryCompilationResult::Compiled(CompilationResult {
-            result: Box::new(LiteralEvaluator::new(v_str!("Hello world!").convert())),
+            result: Box::new(LiteralEvaluator::new(v_str!("Hello world!"))),
             types: BTreeSet::from_iter(vec![ValueType::String]),
         }))
     }
 
-    fn simplemacro2() -> Result<TryCompilationResult<ValueTypesRc>> {
+    fn simplemacro2<C, D>() -> Result<TryCompilationResult<C, D>>
+    where
+        C: ValueTypes + ?Sized + 'static,
+        D: ValueTypesMut + ?Sized + 'static,
+        D::StringTypes: StringTypesMut,
+        D::SemverTypes: SemverTypesMut,
+    {
         Result::Ok(TryCompilationResult::Compiled(CompilationResult {
-            result: Box::new(LiteralEvaluator::new(v_bool!(true).convert())),
+            result: Box::new(LiteralEvaluator::new(v_bool!(true))),
             types: BTreeSet::from_iter(vec![ValueType::Bool]),
         }))
     }
@@ -406,10 +450,16 @@ mod tests {
         }
     }
 
-    fn simplefunc1(
-        _env: &mut dyn Environment<ValueTypesRc>,
-        params: Vec<Value<ValueTypesRc>>,
-    ) -> Result<Value<ValueTypesRc>> {
+    fn simplefunc1<C, D>(
+        _env: &mut dyn Environment<C, D>,
+        params: Vec<Value<D>>,
+    ) -> Result<Value<D>>
+    where
+        C: ValueTypes + ?Sized,
+        D: ValueTypesMut + ?Sized,
+        D::StringTypes: StringTypesMut,
+        D::SemverTypes: SemverTypesMut,
+    {
         let mut params = params.into_iter();
         let result = match params.next() {
             Option::Some(p) => p,
@@ -430,26 +480,35 @@ mod tests {
         }
     }
 
-    impl Environment<ValueTypesRc> for SimpleEnvironment {
-        fn as_dyn_mut(&mut self) -> &mut (dyn Environment<ValueTypesRc> + 'static) {
-            self as &mut (dyn Environment<ValueTypesRc> + 'static)
+    impl<C, D> Environment<C, D> for SimpleEnvironment
+    where
+        C: ValueTypes + ?Sized + 'static,
+        D: ValueTypesMut + ?Sized + 'static,
+        D::StringTypes: StringTypesMut,
+        D::SemverTypes: SemverTypesMut,
+    {
+        fn as_dyn_mut(&mut self) -> &mut (dyn Environment<C, D> + 'static) {
+            self as &mut (dyn Environment<C, D> + 'static)
         }
 
         fn resolve_symbol_get_variable(
             &self,
-            name: &ValueUnqualifiedSymbol<StringTypesString>,
-        ) -> Option<ValueQualifiedSymbol<StringTypesString>> {
+            name: &ValueUnqualifiedSymbol<C::StringTypes>,
+        ) -> Option<ValueQualifiedSymbol<C::StringTypes>> {
             Option::Some(ValueQualifiedSymbol {
-                package: "pvar".to_string(),
+                package: C::StringTypes::string_ref_from_static_str("pvar"),
                 name: name.0.clone(),
             })
         }
 
         fn compile_variable(
             &self,
-            name: &ValueQualifiedSymbol<StringTypesString>,
+            name: &ValueQualifiedSymbol<C::StringTypes>,
         ) -> Option<BTreeSet<ValueType>> {
-            match (&*name.package, &*name.name) {
+            match (
+                C::StringTypes::string_ref_to_str(&name.package),
+                C::StringTypes::string_ref_to_str(&name.name),
+            ) {
                 ("pvar", "var1") => Option::Some(BTreeSet::from_iter(vec![ValueType::String])),
                 ("pvar", "var2") => Option::Some(BTreeSet::from_iter(vec![ValueType::Bool])),
                 _ => Option::None,
@@ -458,10 +517,15 @@ mod tests {
 
         fn evaluate_variable(
             &self,
-            name: &ValueQualifiedSymbol<StringTypesString>,
-        ) -> Result<Value<ValueTypesRc>> {
-            match (&*name.package, &*name.name) {
-                ("pvar", "var1") => Result::Ok(Value::String(ValueString("str".to_string()))),
+            name: &ValueQualifiedSymbol<C::StringTypes>,
+        ) -> Result<Value<D>> {
+            match (
+                C::StringTypes::string_ref_to_str(&name.package),
+                C::StringTypes::string_ref_to_str(&name.name),
+            ) {
+                ("pvar", "var1") => Result::Ok(Value::String(ValueString(
+                    D::StringTypes::string_ref_from_static_str("str"),
+                ))),
                 ("pvar", "var2") => Result::Ok(Value::Bool(ValueBool(true))),
                 _ => Result::Err(Error::new(ErrorKind::ValueNotDefined, "Value not defined")),
             }
@@ -469,31 +533,37 @@ mod tests {
 
         fn evaluate_function(
             &mut self,
-            name: &ValueQualifiedSymbol<StringTypesString>,
-            params: Vec<Value<ValueTypesRc>>,
-        ) -> Result<Value<ValueTypesRc>> {
-            match (&*name.package, &*name.name) {
-                ("p", "simplefunc1") => simplefunc1(self, params),
+            name: &ValueQualifiedSymbol<C::StringTypes>,
+            params: Vec<Value<D>>,
+        ) -> Result<Value<D>> {
+            match (
+                C::StringTypes::string_ref_to_str(&name.package),
+                C::StringTypes::string_ref_to_str(&name.name),
+            ) {
+                ("p", "simplefunc1") => simplefunc1::<C, D>(self, params),
                 _ => Result::Err(Error::new(ErrorKind::ValueNotDefined, "Value not defined")),
             }
         }
 
         fn resolve_symbol_get_macro(
             &self,
-            name: &ValueUnqualifiedSymbol<StringTypesString>,
-        ) -> Option<ValueQualifiedSymbol<StringTypesString>> {
+            name: &ValueUnqualifiedSymbol<C::StringTypes>,
+        ) -> Option<ValueQualifiedSymbol<C::StringTypes>> {
             Option::Some(ValueQualifiedSymbol {
-                package: "p".to_string(),
+                package: C::StringTypes::string_ref_from_static_str("p"),
                 name: name.0.clone(),
             })
         }
 
         fn compile_macro(
             &mut self,
-            name: &ValueQualifiedSymbol<StringTypesString>,
-            params: ValueList<ValueTypesRc>,
-        ) -> Option<Result<TryCompilationResult<ValueTypesRc>>> {
-            match (&*name.package, &*name.name) {
+            name: &ValueQualifiedSymbol<C::StringTypes>,
+            params: ValueList<C>,
+        ) -> Option<Result<TryCompilationResult<C, D>>> {
+            match (
+                C::StringTypes::string_ref_to_str(&name.package),
+                C::StringTypes::string_ref_to_str(&name.name),
+            ) {
                 ("p", "simplemacro1") => Option::Some(simplemacro1()),
                 ("p", "simplemacro2") => Option::Some(simplemacro2()),
                 ("p", "simplefunc1") => self.compile_function_from_macro(name, params),
@@ -503,10 +573,13 @@ mod tests {
 
         fn compile_function(
             &self,
-            name: &ValueQualifiedSymbol<StringTypesString>,
+            name: &ValueQualifiedSymbol<C::StringTypes>,
             params: &mut dyn Iterator<Item = &BTreeSet<ValueType>>,
         ) -> Option<Result<BTreeSet<ValueType>>> {
-            match (&*name.package, &*name.name) {
+            match (
+                C::StringTypes::string_ref_to_str(&name.package),
+                C::StringTypes::string_ref_to_str(&name.name),
+            ) {
                 ("p", "simplefunc1") => Option::Some(compile_simplefunc1(params)),
                 _ => Option::None,
             }
@@ -514,12 +587,12 @@ mod tests {
     }
 
     fn test_compile_and_evaluate(
-        env: &mut SimpleEnvironment,
+        env: &mut dyn Environment<ValueTypesStatic, ValueTypesRc>,
         code: Value<ValueTypesStatic>,
         result: Value<ValueTypesStatic>,
         types: BTreeSet<ValueType>,
     ) {
-        let mut comp = env.compile(code.convert()).unwrap();
+        let mut comp = env.compile(code).unwrap();
         assert_eq!(comp.types, types);
         assert_eq!(comp.result.evaluate(env).unwrap(), result);
     }
@@ -527,27 +600,29 @@ mod tests {
     #[test]
     fn test_evaluate_literal() {
         let mut env = SimpleEnvironment;
+        let env = &mut env as &mut dyn Environment<ValueTypesStatic, ValueTypesRc>;
 
-        let mut comp = LiteralEvaluator::new(v_str!("Hello world!").convert());
-        assert_eq!(comp.evaluate(&mut env).unwrap(), v_str!("Hello world!"));
+        let mut comp = LiteralEvaluator::new(v_str!("Hello world!"));
+        assert_eq!(comp.evaluate(env).unwrap(), v_str!("Hello world!"));
 
-        let mut comp = LiteralEvaluator::new(v_bool!(true).convert());
-        assert_eq!(comp.evaluate(&mut env).unwrap(), v_bool!(true));
+        let mut comp = LiteralEvaluator::new(v_bool!(true));
+        assert_eq!(comp.evaluate(env).unwrap(), v_bool!(true));
     }
 
     #[test]
     fn test_evaluate_variable() {
         let mut env = SimpleEnvironment;
+        let env = &mut env as &mut dyn Environment<ValueTypesStatic, ValueTypesRc>;
 
-        let mut comp = VariableEvaluator::new(qsym!("pvar", "var1").convert());
-        assert_eq!(comp.evaluate(&mut env).unwrap(), v_str!("str"));
+        let mut comp = VariableEvaluator::new(qsym!("pvar", "var1"));
+        assert_eq!(comp.evaluate(env).unwrap(), v_str!("str"));
 
-        let mut comp = VariableEvaluator::new(qsym!("pvar", "var2").convert());
-        assert_eq!(comp.evaluate(&mut env).unwrap(), v_bool!(true));
+        let mut comp = VariableEvaluator::new(qsym!("pvar", "var2"));
+        assert_eq!(comp.evaluate(env).unwrap(), v_bool!(true));
 
-        let mut comp = VariableEvaluator::new(qsym!("pvar", "var3").convert());
+        let mut comp = VariableEvaluator::new(qsym!("pvar", "var3"));
         assert_eq!(
-            comp.evaluate(&mut env).unwrap_err().kind,
+            comp.evaluate(env).unwrap_err().kind,
             ErrorKind::ValueNotDefined
         );
     }
@@ -555,44 +630,40 @@ mod tests {
     #[test]
     fn test_evaluate_function() {
         let mut env = SimpleEnvironment;
+        let env = &mut env as &mut dyn Environment<ValueTypesStatic, ValueTypesRc>;
 
         let mut comp = FunctionCallEvaluator::new(
-            func!(qsym!("p", "simplefunc1")).convert(),
-            vec![Box::new(LiteralEvaluator::new(
-                v_str!("Hello world!").convert(),
-            ))],
+            func!(qsym!("p", "simplefunc1")),
+            vec![Box::new(LiteralEvaluator::new(v_str!("Hello world!")))],
         );
-        assert_eq!(comp.evaluate(&mut env).unwrap(), v_str!("Hello world!"));
+        assert_eq!(comp.evaluate(env).unwrap(), v_str!("Hello world!"));
 
         let mut comp = FunctionCallEvaluator::new(
-            func!(qsym!("p", "simplefunc1")).convert(),
-            vec![Box::new(LiteralEvaluator::new(v_bool!(true).convert()))],
+            func!(qsym!("p", "simplefunc1")),
+            vec![Box::new(LiteralEvaluator::new(v_bool!(true)))],
         );
-        assert_eq!(comp.evaluate(&mut env).unwrap(), v_bool!(true));
+        assert_eq!(comp.evaluate(env).unwrap(), v_bool!(true));
     }
 
     #[test]
     fn test_evaluate_concatenate_lists() {
         let mut env = SimpleEnvironment;
+        let env = &mut env as &mut dyn Environment<ValueTypesStatic, ValueTypesRc>;
 
         let mut comp = ConcatenateListsEvaluator::new(vec![
-            ListItem::List(Box::new(LiteralEvaluator::new(
-                v_list!(v_str!("str")).convert(),
-            ))),
-            ListItem::List(Box::new(LiteralEvaluator::new(
-                v_list!(v_bool!(true)).convert(),
-            ))),
+            ListItem::List(Box::new(LiteralEvaluator::new(v_list!(v_str!("str"))))),
+            ListItem::List(Box::new(LiteralEvaluator::new(v_list!(v_bool!(true))))),
         ]);
         assert_eq!(
-            comp.evaluate(&mut env).unwrap(),
+            comp.evaluate(env).unwrap(),
             v_list!(v_str!("str"), v_bool!(true))
         );
 
         let mut comp = ConcatenateListsEvaluator::new(vec![ListItem::List(Box::new(
-            LiteralEvaluator::new(v_bool!(true).convert()),
+            LiteralEvaluator::new(v_bool!(true)),
         ))]);
         assert_eq!(
-            comp.evaluate(&mut env).unwrap_err().kind,
+            comp.evaluate(env).unwrap_err().kind,
             ErrorKind::IncorrectType
         );
     }
@@ -600,26 +671,28 @@ mod tests {
     #[test]
     fn test_compile_and_evaluate_literal() {
         let mut env = SimpleEnvironment;
+        let env = &mut env as &mut dyn Environment<ValueTypesStatic, ValueTypesRc>;
+
         test_compile_and_evaluate(
-            &mut env,
+            env,
             v_list!(),
             v_list!(),
             BTreeSet::from_iter(vec![ValueType::List(BTreeSet::new())]),
         );
         test_compile_and_evaluate(
-            &mut env,
+            env,
             v_bool!(true),
             v_bool!(true),
             BTreeSet::from_iter(vec![ValueType::Bool]),
         );
         test_compile_and_evaluate(
-            &mut env,
+            env,
             v_str!("Hello world!"),
             v_str!("Hello world!"),
             BTreeSet::from_iter(vec![ValueType::String]),
         );
         test_compile_and_evaluate(
-            &mut env,
+            env,
             v_v![1, 0],
             v_v![1, 0],
             BTreeSet::from_iter(vec![ValueType::Semver]),
@@ -629,39 +702,39 @@ mod tests {
     #[test]
     fn test_compile_and_evaluate_variable() {
         let mut env = SimpleEnvironment;
+        let env = &mut env as &mut dyn Environment<ValueTypesStatic, ValueTypesRc>;
+
         test_compile_and_evaluate(
-            &mut env,
+            env,
             v_uqsym!("var1"),
             v_str!("str"),
             BTreeSet::from_iter(vec![ValueType::String]),
         );
         test_compile_and_evaluate(
-            &mut env,
+            env,
             v_uqsym!("var2"),
             v_bool!(true),
             BTreeSet::from_iter(vec![ValueType::Bool]),
         );
         assert_eq!(
-            env.compile(v_uqsym!("var3").convert()).unwrap_err().kind,
+            env.compile(v_uqsym!("var3")).unwrap_err().kind,
             ErrorKind::ValueNotDefined
         );
 
         test_compile_and_evaluate(
-            &mut env,
+            env,
             v_qsym!("pvar", "var1"),
             v_str!("str"),
             BTreeSet::from_iter(vec![ValueType::String]),
         );
         test_compile_and_evaluate(
-            &mut env,
+            env,
             v_qsym!("pvar", "var2"),
             v_bool!(true),
             BTreeSet::from_iter(vec![ValueType::Bool]),
         );
         assert_eq!(
-            env.compile(v_qsym!("pvar", "var3").convert())
-                .unwrap_err()
-                .kind,
+            env.compile(v_qsym!("pvar", "var3")).unwrap_err().kind,
             ErrorKind::ValueNotDefined
         );
     }
@@ -669,40 +742,41 @@ mod tests {
     #[test]
     fn test_compile_and_evaluate_macro() {
         let mut env = SimpleEnvironment;
+        let env = &mut env as &mut dyn Environment<ValueTypesStatic, ValueTypesRc>;
 
         test_compile_and_evaluate(
-            &mut env,
+            env,
             v_list!(v_uqsym!("simplemacro1")),
             v_str!("Hello world!"),
             BTreeSet::from_iter(vec![ValueType::String]),
         );
         test_compile_and_evaluate(
-            &mut env,
+            env,
             v_list!(v_uqsym!("simplemacro2")),
             v_bool!(true),
             BTreeSet::from_iter(vec![ValueType::Bool]),
         );
         assert_eq!(
-            env.compile(v_list!(v_uqsym!("simplemacro3")).convert())
+            env.compile(v_list!(v_uqsym!("simplemacro3")))
                 .unwrap_err()
                 .kind,
             ErrorKind::ValueNotDefined
         );
 
         test_compile_and_evaluate(
-            &mut env,
+            env,
             v_list!(v_qsym!("p", "simplemacro1")),
             v_str!("Hello world!"),
             BTreeSet::from_iter(vec![ValueType::String]),
         );
         test_compile_and_evaluate(
-            &mut env,
+            env,
             v_list!(v_qsym!("p", "simplemacro2")),
             v_bool!(true),
             BTreeSet::from_iter(vec![ValueType::Bool]),
         );
         assert_eq!(
-            env.compile(v_list!(v_qsym!("p", "simplemacro3")).convert())
+            env.compile(v_list!(v_qsym!("p", "simplemacro3")))
                 .unwrap_err()
                 .kind,
             ErrorKind::ValueNotDefined
@@ -712,40 +786,41 @@ mod tests {
     #[test]
     fn test_compile_and_evaluate_function() {
         let mut env = SimpleEnvironment;
+        let env = &mut env as &mut dyn Environment<ValueTypesStatic, ValueTypesRc>;
 
         test_compile_and_evaluate(
-            &mut env,
+            env,
             v_list!(v_uqsym!("simplefunc1"), v_str!("Hello world!")),
             v_str!("Hello world!"),
             BTreeSet::from_iter(vec![ValueType::String]),
         );
         test_compile_and_evaluate(
-            &mut env,
+            env,
             v_list!(v_uqsym!("simplefunc1"), v_bool!(true)),
             v_bool!(true),
             BTreeSet::from_iter(vec![ValueType::Bool]),
         );
         assert_eq!(
-            env.compile(v_list!(v_uqsym!("simplefunc1")).convert())
+            env.compile(v_list!(v_uqsym!("simplefunc1")))
                 .unwrap_err()
                 .kind,
             ErrorKind::IncorrectParams
         );
 
         test_compile_and_evaluate(
-            &mut env,
+            env,
             v_list!(v_qsym!("p", "simplefunc1"), v_str!("Hello world!")),
             v_str!("Hello world!"),
             BTreeSet::from_iter(vec![ValueType::String]),
         );
         test_compile_and_evaluate(
-            &mut env,
+            env,
             v_list!(v_qsym!("p", "simplefunc1"), v_bool!(true)),
             v_bool!(true),
             BTreeSet::from_iter(vec![ValueType::Bool]),
         );
         assert_eq!(
-            env.compile(v_list!(v_qsym!("p", "simplefunc1")).convert())
+            env.compile(v_list!(v_qsym!("p", "simplefunc1")))
                 .unwrap_err()
                 .kind,
             ErrorKind::IncorrectParams

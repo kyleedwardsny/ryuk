@@ -11,12 +11,12 @@ pub trait StringTypes: Debug {
     type StringRef: Clone + Debug;
 
     fn string_ref_to_str(s: &Self::StringRef) -> &str;
+
+    fn string_ref_from_static_str(s: &'static str) -> Self::StringRef;
 }
 
 pub trait StringTypesMut: StringTypes {
     fn string_ref_from_str(s: &str) -> Self::StringRef;
-
-    fn string_ref_from_static_str(s: &'static str) -> Self::StringRef;
 
     fn string_ref_from_string(s: String) -> Self::StringRef;
 }
@@ -804,15 +804,15 @@ impl StringTypes for StringTypesString {
     fn string_ref_to_str(s: &Self::StringRef) -> &str {
         &*s
     }
+
+    fn string_ref_from_static_str(s: &'static str) -> Self::StringRef {
+        s.to_string()
+    }
 }
 
 impl StringTypesMut for StringTypesString {
     fn string_ref_from_str(s: &str) -> Self::StringRef {
         s.to_string()
-    }
-
-    fn string_ref_from_static_str(s: &str) -> Self::StringRef {
-        Self::string_ref_from_str(s)
     }
 
     fn string_ref_from_string(s: String) -> Self::StringRef {
@@ -890,6 +890,10 @@ impl StringTypes for StringTypesStatic {
 
     fn string_ref_to_str(s: &Self::StringRef) -> &str {
         *s
+    }
+
+    fn string_ref_from_static_str(s: &'static str) -> Self::StringRef {
+        s
     }
 }
 
