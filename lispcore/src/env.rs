@@ -625,6 +625,208 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::RefCell;
+    use std::collections::HashSet;
+    use std::rc::Rc;
+
+    #[derive(Debug)]
+    struct SideEffectEvaluator<C, D>
+    where
+        C: ValueTypes + ?Sized,
+        D: ValueTypesMut + ?Sized,
+        D::StringTypes: StringTypesMut,
+        D::SemverTypes: SemverTypesMut,
+    {
+        eval_side_effects: Rc<RefCell<HashSet<String>>>,
+        name: String,
+        value: Box<dyn Evaluator<C, D>>,
+    }
+
+    impl<C, D> SideEffectEvaluator<C, D>
+    where
+        C: ValueTypes + ?Sized,
+        D: ValueTypesMut + ?Sized,
+        D::StringTypes: StringTypesMut,
+        D::SemverTypes: SemverTypesMut,
+    {
+        pub fn new(
+            eval_side_effects: Rc<RefCell<HashSet<String>>>,
+            name: String,
+            value: Box<dyn Evaluator<C, D>>,
+        ) -> Self {
+            Self {
+                eval_side_effects,
+                name,
+                value,
+            }
+        }
+    }
+
+    impl<C, D> Evaluator<C, D> for SideEffectEvaluator<C, D>
+    where
+        C: ValueTypes + ?Sized + 'static,
+        D: ValueTypesMut + ?Sized + 'static,
+        D::StringTypes: StringTypesMut,
+        D::SemverTypes: SemverTypesMut,
+    {
+        fn evaluate(&mut self, env: &mut dyn Environment<C, D>) -> Result<Value<D>> {
+            self.eval_side_effects
+                .borrow_mut()
+                .insert(self.name.clone());
+            self.value.evaluate(env)
+        }
+    }
+
+    struct SideEffectEnvironment {
+        comp_side_effects: Rc<RefCell<HashSet<String>>>,
+        eval_side_effects: Rc<RefCell<HashSet<String>>>,
+    }
+
+    impl SideEffectEnvironment {
+        pub fn new() -> Self {
+            Self {
+                comp_side_effects: Rc::new(RefCell::new(HashSet::new())),
+                eval_side_effects: Rc::new(RefCell::new(HashSet::new())),
+            }
+        }
+
+        fn compile_side_effect<C, D>(
+            &mut self,
+            mut params: ValueList<C>,
+        ) -> Result<CompilationResult<C, D>>
+        where
+            C: ValueTypes + ?Sized + 'static,
+            D: ValueTypesMut + ?Sized + 'static,
+            D::StringTypes: StringTypesMut,
+            D::SemverTypes: SemverTypesMut,
+        {
+            use std::convert::TryInto;
+
+            let side_effect: ValueString<C::StringTypes> = match params.next() {
+                Option::Some(s) => s,
+                Option::None => {
+                    return Result::Err(Error::new(
+                        ErrorKind::IncorrectParams,
+                        "Incorrect parameters",
+                    ))
+                }
+            }
+            .try_into()?;
+            let side_effect_name = C::StringTypes::string_ref_to_str(&side_effect.0);
+
+            let value = self.compile(match params.next() {
+                Option::Some(v) => v,
+                Option::None => {
+                    return Result::Err(Error::new(
+                        ErrorKind::IncorrectParams,
+                        "Incorrect parameters",
+                    ))
+                }
+            })?;
+
+            let retval = match params.next() {
+                Option::Some(_) => {
+                    return Result::Err(Error::new(
+                        ErrorKind::IncorrectParams,
+                        "Incorrect parameters",
+                    ))
+                }
+                Option::None => CompilationResult {
+                    result: Box::new(SideEffectEvaluator::new(
+                        self.eval_side_effects.clone(),
+                        side_effect_name.to_string(),
+                        value.result,
+                    )),
+                    types: value.types,
+                },
+            };
+
+            self.comp_side_effects
+                .borrow_mut()
+                .insert(side_effect_name.to_string());
+
+            Result::Ok(retval)
+        }
+    }
+
+    impl<C, D> Environment<C, D> for SideEffectEnvironment
+    where
+        C: ValueTypes + ?Sized + 'static,
+        D: ValueTypesMut + ?Sized + 'static,
+        D::StringTypes: StringTypesMut,
+        D::SemverTypes: SemverTypesMut,
+    {
+        fn as_dyn_mut(&mut self) -> &mut (dyn Environment<C, D> + 'static) {
+            self
+        }
+
+        fn resolve_symbol_get_variable(
+            &self,
+            _name: &ValueUnqualifiedSymbol<C::StringTypes>,
+        ) -> Option<ValueQualifiedSymbol<C::StringTypes>> {
+            Option::None
+        }
+
+        fn compile_variable(
+            &self,
+            _name: &ValueQualifiedSymbol<C::StringTypes>,
+        ) -> Option<BTreeSet<ValueType>> {
+            Option::None
+        }
+
+        fn resolve_symbol_get_macro(
+            &self,
+            name: &ValueUnqualifiedSymbol<C::StringTypes>,
+        ) -> Option<ValueQualifiedSymbol<C::StringTypes>> {
+            match C::StringTypes::string_ref_to_str(&name.0) {
+                "side-effect" => Option::Some(ValueQualifiedSymbol::<C::StringTypes> {
+                    package: C::StringTypes::string_ref_from_static_str("test"),
+                    name: name.0.clone(),
+                }),
+                _ => Option::None,
+            }
+        }
+
+        fn compile_function(
+            &self,
+            _name: &ValueQualifiedSymbol<C::StringTypes>,
+            _params: &mut dyn Iterator<Item = &BTreeSet<ValueType>>,
+        ) -> Option<Result<BTreeSet<ValueType>>> {
+            Option::None
+        }
+
+        fn evaluate_variable(
+            &self,
+            _name: &ValueQualifiedSymbol<C::StringTypes>,
+        ) -> Result<Value<D>> {
+            Result::Err(Error::new(ErrorKind::ValueNotDefined, "Value not defined"))
+        }
+
+        fn evaluate_function(
+            &mut self,
+            _name: &ValueQualifiedSymbol<C::StringTypes>,
+            _params: Vec<Value<D>>,
+        ) -> Result<Value<D>> {
+            Result::Err(Error::new(ErrorKind::ValueNotDefined, "Value not defined"))
+        }
+
+        fn compile_macro(
+            &mut self,
+            name: &ValueQualifiedSymbol<C::StringTypes>,
+            params: ValueList<C>,
+        ) -> Option<Result<TryCompilationResult<C, D>>> {
+            match (
+                C::StringTypes::string_ref_to_str(&name.package),
+                C::StringTypes::string_ref_to_str(&name.name),
+            ) {
+                ("test", "side-effect") => Option::Some(match self.compile_side_effect(params) {
+                    Result::Ok(r) => Result::Ok(TryCompilationResult::Compiled(r)),
+                    Result::Err(e) => Result::Err(e),
+                }),
+                _ => Option::None,
+            }
+        }
+    }
 
     #[test]
     fn test_value_type() {
@@ -1273,6 +1475,66 @@ mod tests {
             v_bq!(v_list!(v_bq!(v_splice!(v_uqsym!("a"))))),
             v_list!(),       // Doesn't matter
             BTreeSet::new(), // Doesn't matter
+        );
+    }
+
+    #[test]
+    fn test_side_effect_environment() {
+        let mut env = SideEffectEnvironment::new();
+        assert_eq!(*env.comp_side_effects.borrow(), HashSet::new());
+        assert_eq!(*env.eval_side_effects.borrow(), HashSet::new());
+
+        let mut comp: CompilationResult<_, ValueTypesRc> = env
+            .compile(v_list!(v_uqsym!("side-effect"), v_str!("a"), v_bool!(true)))
+            .unwrap();
+        assert_eq!(
+            comp.types,
+            BTreeSet::from_iter(std::iter::once(ValueType::Bool))
+        );
+        assert_eq!(
+            *env.comp_side_effects.borrow(),
+            HashSet::from_iter(std::iter::once("a".to_string()))
+        );
+        assert_eq!(*env.eval_side_effects.borrow(), HashSet::new());
+
+        assert_eq!(comp.result.evaluate(&mut env).unwrap(), v_bool!(true));
+        assert_eq!(
+            *env.comp_side_effects.borrow(),
+            HashSet::from_iter(std::iter::once("a".to_string()))
+        );
+        assert_eq!(
+            *env.eval_side_effects.borrow(),
+            HashSet::from_iter(std::iter::once("a".to_string()))
+        );
+
+        let mut comp: CompilationResult<_, ValueTypesRc> = env
+            .compile(v_list!(
+                v_qsym!("test", "side-effect"),
+                v_str!("b"),
+                v_str!("str")
+            ))
+            .unwrap();
+        assert_eq!(
+            comp.types,
+            BTreeSet::from_iter(std::iter::once(ValueType::String))
+        );
+        assert_eq!(
+            *env.comp_side_effects.borrow(),
+            HashSet::from_iter(vec!["a".to_string(), "b".to_string()])
+        );
+        assert_eq!(
+            *env.eval_side_effects.borrow(),
+            HashSet::from_iter(std::iter::once("a".to_string()))
+        );
+
+        assert_eq!(comp.result.evaluate(&mut env).unwrap(), v_str!("str"));
+        assert_eq!(
+            *env.comp_side_effects.borrow(),
+            HashSet::from_iter(vec!["a".to_string(), "b".to_string()])
+        );
+        assert_eq!(
+            *env.eval_side_effects.borrow(),
+            HashSet::from_iter(vec!["a".to_string(), "b".to_string()])
         );
     }
 }
