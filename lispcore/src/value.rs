@@ -2,11 +2,12 @@ use super::error::*;
 use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::convert::TryFrom;
-use std::fmt::Debug;
+use std::fmt::{Debug, Display};
+use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
 pub trait StringTypes: Debug {
-    type StringRef: Clone + Debug;
+    type StringRef: Clone + Debug + Display + Hash;
 
     fn string_ref_to_str(s: &Self::StringRef) -> &str;
 
@@ -251,6 +252,21 @@ where
     fn eq(&self, rhs: &ValueQualifiedSymbol<S2>) -> bool {
         S1::string_ref_to_str(&self.package) == S2::string_ref_to_str(&rhs.package)
             && S1::string_ref_to_str(&self.name) == S2::string_ref_to_str(&rhs.name)
+    }
+}
+
+impl<S> Eq for ValueQualifiedSymbol<S> where S: StringTypes + ?Sized {}
+
+impl<S> Hash for ValueQualifiedSymbol<S>
+where
+    S: StringTypes + ?Sized,
+{
+    fn hash<H>(&self, state: &mut H)
+    where
+        H: Hasher,
+    {
+        self.package.hash(state);
+        self.name.hash(state);
     }
 }
 
@@ -688,12 +704,12 @@ macro_rules! try_from_value {
         where
             $t: ValueTypes + ?Sized,
         {
-            type Error = Error;
+            type Error = Error<$t>;
 
-            fn try_from(v: $in) -> Result<Self> {
+            fn try_from(v: $in) -> Result<Self, $t> {
                 match v {
                     $match => Result::Ok($result),
-                    _ => Result::Err(Error::new(ErrorKind::IncorrectType, "Incorrect type")),
+                    _ => Result::Err(e_type_error!($t)),
                 }
             }
         }

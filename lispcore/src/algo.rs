@@ -2,7 +2,10 @@ use super::error::*;
 use super::list::*;
 use super::value::*;
 
-fn concat_lists_recursive<T, I>(list_item: ListItem<Value<T>>, mut rest: I) -> Result<ValueList<T>>
+fn concat_lists_recursive<T, I>(
+    list_item: ListItem<Value<T>>,
+    mut rest: I,
+) -> Result<ValueList<T>, T>
 where
     T: ValueTypesMut + ?Sized,
     T::StringTypes: StringTypesMut,
@@ -26,11 +29,11 @@ where
                 Option::Some(list) => concat_lists_recursive(list, rest),
             },
         },
-        _ => Result::Err(Error::new(ErrorKind::IncorrectType, "Incorrect type")),
+        _ => Result::Err(e_type_error!(T)),
     }
 }
 
-pub fn concat_lists<T, I>(mut lists: I) -> Result<ValueList<T>>
+pub fn concat_lists<T, I>(mut lists: I) -> Result<ValueList<T>, T>
 where
     T: ValueTypesMut + ?Sized,
     T::StringTypes: StringTypesMut,

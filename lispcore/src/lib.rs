@@ -10,8 +10,9 @@ macro_rules! eq_match {
 }
 
 #[macro_use]
+pub mod error;
+#[macro_use]
 pub mod value;
 pub mod algo;
 pub mod env;
-pub mod error;
 pub mod list;

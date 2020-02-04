@@ -1,35 +1,76 @@
+use super::value::*;
+use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 
 #[derive(Debug)]
-pub struct Error {
-    pub kind: ErrorKind,
-    pub error: Box<dyn std::error::Error>,
+pub struct Error<T>
+where
+    T: ValueTypes + ?Sized,
+{
+    pub kind: ValueQualifiedSymbol<T::StringTypes>,
+    pub fields: HashMap<ValueQualifiedSymbol<T::StringTypes>, Value<T>>,
 }
 
-impl Error {
-    pub fn new(kind: ErrorKind, error: impl Into<Box<dyn std::error::Error>>) -> Error {
-        Error {
-            kind,
-            error: error.into(),
+impl<T> Error<T>
+where
+    T: ValueTypes + ?Sized,
+{
+    pub fn new(
+        kind: ValueQualifiedSymbol<T::StringTypes>,
+        fields: HashMap<ValueQualifiedSymbol<T::StringTypes>, Value<T>>,
+    ) -> Self {
+        Self { kind, fields }
+    }
+}
+
+impl<T> std::error::Error for Error<T> where T: ValueTypes + ?Sized {}
+
+impl<T> Display for Error<T>
+where
+    T: ValueTypes + ?Sized,
+{
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        write!(f, "<ERROR {}:{}>", self.kind.package, self.kind.name)
+    }
+}
+
+pub type Result<T, ET> = std::result::Result<T, Error<ET>>;
+
+#[macro_export]
+macro_rules! e_std_cond {
+    ($t:ident, $name:expr) => {
+        $crate::error::Error::<$t> {
+            kind: $crate::value::ValueQualifiedSymbol::<$t::StringTypes> {
+                package:
+                    <$t::StringTypes as $crate::value::StringTypes>::string_ref_from_static_str(
+                        "std",
+                    ),
+                name: <$t::StringTypes as $crate::value::StringTypes>::string_ref_from_static_str(
+                    $name,
+                ),
+            },
+            fields: ::std::collections::HashMap::new(),
         }
-    }
+    };
 }
 
-#[derive(Debug, PartialEq)]
-pub enum ErrorKind {
-    IncorrectType,
-    ValueNotDefined,
-    NotAFunction,
-    NoPackageForSymbol,
-    IncorrectParams,
+#[macro_export]
+macro_rules! e_type_error {
+    ($t:ident) => {
+        e_std_cond!($t, "type-error")
+    };
 }
 
-impl std::error::Error for Error {}
-
-impl Display for Error {
-    fn fmt(&self, formatter: &mut Formatter) -> std::result::Result<(), std::fmt::Error> {
-        Display::fmt(&self.error, formatter)
-    }
+#[macro_export]
+macro_rules! e_unbound_variable {
+    ($t:ident) => {
+        e_std_cond!($t, "unbound-variable")
+    };
 }
 
-pub type Result<T> = std::result::Result<T, Error>;
+#[macro_export]
+macro_rules! e_undefined_function {
+    ($t:ident) => {
+        e_std_cond!($t, "undefined-function")
+    };
+}

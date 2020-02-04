@@ -34,13 +34,13 @@ where
         &self,
         name: &ValueQualifiedSymbol<C::StringTypes>,
         params: &mut dyn Iterator<Item = &BTreeSet<ValueType>>,
-    ) -> Option<Result<BTreeSet<ValueType>>>;
+    ) -> Option<Result<BTreeSet<ValueType>, D>>;
 
     fn compile_function_from_macro(
         &mut self,
         name: &ValueQualifiedSymbol<C::StringTypes>,
         params: ValueList<C>,
-    ) -> Option<Result<TryCompilationResult<C, D>>> {
+    ) -> Option<Result<TryCompilationResult<C, D>, D>> {
         let mut compiled_params = Vec::new();
         for item in params.map(|v| self.compile(v)) {
             match item {
@@ -65,21 +65,22 @@ where
         )
     }
 
-    fn evaluate_variable(&self, name: &ValueQualifiedSymbol<C::StringTypes>) -> Result<Value<D>>;
+    fn evaluate_variable(&self, name: &ValueQualifiedSymbol<C::StringTypes>)
+        -> Result<Value<D>, D>;
 
     fn evaluate_function(
         &mut self,
         name: &ValueQualifiedSymbol<C::StringTypes>,
         params: Vec<Value<D>>,
-    ) -> Result<Value<D>>;
+    ) -> Result<Value<D>, D>;
 
     fn compile_macro(
         &mut self,
         name: &ValueQualifiedSymbol<C::StringTypes>,
         params: ValueList<C>,
-    ) -> Option<Result<TryCompilationResult<C, D>>>;
+    ) -> Option<Result<TryCompilationResult<C, D>, D>>;
 
-    fn compile(&mut self, v: Value<C>) -> Result<CompilationResult<C, D>> {
+    fn compile(&mut self, v: Value<C>) -> Result<CompilationResult<C, D>, D> {
         let mut result = TryCompilationResult::<C, D>::Uncompiled(v);
 
         loop {
@@ -93,29 +94,16 @@ where
                                     match self.resolve_symbol_get_macro(name) {
                                         Option::Some(name) => name,
                                         Option::None => {
-                                            return Result::Err(Error::new(
-                                                ErrorKind::ValueNotDefined,
-                                                "Value not defined",
-                                            ))
+                                            return Result::Err(e_undefined_function!(D))
                                         }
                                     }
                                 }
                                 Value::QualifiedSymbol(name) => (*name).clone(),
-                                _ => {
-                                    return Result::Err(Error::new(
-                                        ErrorKind::IncorrectType,
-                                        "Incorrect type",
-                                    ))
-                                }
+                                _ => return Result::Err(e_type_error!(D)),
                             };
                             match self.compile_macro(&name, list.cdr.clone()) {
                                 Option::Some(r) => r?,
-                                Option::None => {
-                                    return Result::Err(Error::new(
-                                        ErrorKind::ValueNotDefined,
-                                        "Value not defined",
-                                    ))
-                                }
+                                Option::None => return Result::Err(e_undefined_function!(D)),
                             }
                         }
                         Value::UnqualifiedSymbol(name) => {
@@ -127,19 +115,9 @@ where
                                             types,
                                         })
                                     }
-                                    Option::None => {
-                                        return Result::Err(Error::new(
-                                            ErrorKind::ValueNotDefined,
-                                            "Value not defined",
-                                        ))
-                                    }
+                                    Option::None => return Result::Err(e_unbound_variable!(D)),
                                 },
-                                Option::None => {
-                                    return Result::Err(Error::new(
-                                        ErrorKind::ValueNotDefined,
-                                        "Value not defined",
-                                    ))
-                                }
+                                Option::None => return Result::Err(e_unbound_variable!(D)),
                             }
                         }
                         Value::QualifiedSymbol(name) => match self.compile_variable(&name) {
@@ -149,12 +127,7 @@ where
                                     types,
                                 })
                             }
-                            Option::None => {
-                                return Result::Err(Error::new(
-                                    ErrorKind::ValueNotDefined,
-                                    "Value not defined",
-                                ))
-                            }
+                            Option::None => return Result::Err(e_unbound_variable!(D)),
                         },
                         Value::Backquote(ValueBackquote(v)) => {
                             let v = C::value_ref_to_value(&v).clone();
@@ -259,7 +232,7 @@ fn compile_backquote<C, D>(
     env: &mut dyn Environment<C, D>,
     v: Value<C>,
     bq: BackquoteStatus,
-) -> Result<CompilationResult<C, D>>
+) -> Result<CompilationResult<C, D>, D>
 where
     C: ValueTypes + ?Sized + 'static,
     D: ValueTypesMut + ?Sized + 'static,
@@ -336,12 +309,7 @@ where
                             for t in result.types {
                                 match t {
                                     ValueType::List(v) => types.extend(v),
-                                    _ => {
-                                        return Result::Err(Error::new(
-                                            ErrorKind::IncorrectType,
-                                            "Incorrect type",
-                                        ))
-                                    }
+                                    _ => return Result::Err(e_type_error!(D)),
                                 }
                             }
                             params.push(ListItem::List(result.result));
@@ -417,7 +385,7 @@ where
     D::StringTypes: StringTypesMut,
     D::SemverTypes: SemverTypesMut,
 {
-    fn evaluate(&mut self, env: &mut dyn Environment<C, D>) -> Result<Value<D>>;
+    fn evaluate(&mut self, env: &mut dyn Environment<C, D>) -> Result<Value<D>, D>;
 }
 
 #[derive(Debug)]
@@ -442,7 +410,7 @@ where
     D::StringTypes: StringTypesMut,
     D::SemverTypes: SemverTypesMut,
 {
-    fn evaluate(&mut self, _env: &mut dyn Environment<C, D>) -> Result<Value<D>> {
+    fn evaluate(&mut self, _env: &mut dyn Environment<C, D>) -> Result<Value<D>, D> {
         Result::Ok(self.0.convert())
     }
 }
@@ -468,7 +436,7 @@ where
     D::StringTypes: StringTypesMut,
     D::SemverTypes: SemverTypesMut,
 {
-    fn evaluate(&mut self, env: &mut dyn Environment<C, D>) -> Result<Value<D>> {
+    fn evaluate(&mut self, env: &mut dyn Environment<C, D>) -> Result<Value<D>, D> {
         env.evaluate_variable(&self.0)
     }
 }
@@ -504,13 +472,13 @@ where
     D::StringTypes: StringTypesMut,
     D::SemverTypes: SemverTypesMut,
 {
-    fn evaluate(&mut self, env: &mut dyn Environment<C, D>) -> Result<Value<D>> {
+    fn evaluate(&mut self, env: &mut dyn Environment<C, D>) -> Result<Value<D>, D> {
         use std::borrow::BorrowMut;
 
         let params = (&mut self.params)
             .into_iter()
             .map(|p| BorrowMut::<dyn Evaluator<C, D>>::borrow_mut(p).evaluate(env))
-            .collect::<Result<Vec<Value<D>>>>()?;
+            .collect::<Result<Vec<Value<D>>, D>>()?;
         env.evaluate_function(&self.name.0, params)
     }
 }
@@ -542,7 +510,7 @@ where
     D::StringTypes: StringTypesMut,
     D::SemverTypes: SemverTypesMut,
 {
-    fn evaluate(&mut self, env: &mut dyn Environment<C, D>) -> Result<Value<D>> {
+    fn evaluate(&mut self, env: &mut dyn Environment<C, D>) -> Result<Value<D>, D> {
         let mut items = Vec::new();
         for item in &mut self.0 {
             items.push(item.as_mut().map(|comp| comp.evaluate(env)).transpose()?);
@@ -589,7 +557,7 @@ where
     D::StringTypes: StringTypesMut,
     D::SemverTypes: SemverTypesMut,
 {
-    fn evaluate(&mut self, env: &mut dyn Environment<C, D>) -> Result<Value<D>> {
+    fn evaluate(&mut self, env: &mut dyn Environment<C, D>) -> Result<Value<D>, D> {
         let result = D::value_ref_from_value(self.wrapped.evaluate(env)?);
         Result::Ok(match self.push {
             BackquoteCommaSplice::Backquote => Value::Backquote(ValueBackquote(result)),

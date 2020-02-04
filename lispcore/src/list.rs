@@ -1,4 +1,5 @@
 use super::error::*;
+use super::value::ValueTypes;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ListItem<T> {
@@ -7,10 +8,13 @@ pub enum ListItem<T> {
 }
 
 impl<T> ListItem<T> {
-    pub fn try_unwrap_item(self) -> Result<T> {
+    pub fn try_unwrap_item<ET>(self) -> Result<T, ET>
+    where
+        ET: ValueTypes + ?Sized,
+    {
         match self {
             Self::Item(item) => Result::Ok(item),
-            _ => Result::Err(Error::new(ErrorKind::IncorrectType, "Incorrect type")),
+            _ => Result::Err(e_type_error!(ET)),
         }
     }
 
