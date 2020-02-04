@@ -88,9 +88,8 @@ mod tests {
             concat_lists::<ValueTypesRc, _>(
                 vec![ListItem::List(v_bool!(true).convert()),].into_iter(),
             )
-            .unwrap_err()
-            .kind,
-            ErrorKind::IncorrectType
+            .unwrap_err(),
+            e_type_error!(ValueTypesRc)
         );
     }
 }

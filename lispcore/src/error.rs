@@ -34,23 +34,41 @@ where
     }
 }
 
+impl<T> PartialEq<Error<T>> for Error<T>
+where
+    T: ValueTypes + ?Sized,
+{
+    fn eq(&self, rhs: &Error<T>) -> bool {
+        self.kind == rhs.kind && self.fields == rhs.fields
+    }
+}
+
+impl<T> Eq for Error<T> where T: ValueTypes + ?Sized {}
+
 pub type Result<T, ET> = std::result::Result<T, Error<ET>>;
 
 #[macro_export]
 macro_rules! e_std_cond {
     ($t:ident, $name:expr) => {
         $crate::error::Error::<$t> {
-            kind: $crate::value::ValueQualifiedSymbol::<$t::StringTypes> {
+            kind: $crate::value::ValueQualifiedSymbol::<<$t as $crate::value::ValueTypes>::StringTypes> {
                 package:
-                    <$t::StringTypes as $crate::value::StringTypes>::string_ref_from_static_str(
+                    <<$t as $crate::value::ValueTypes>::StringTypes as $crate::value::StringTypes>::string_ref_from_static_str(
                         "std",
                     ),
-                name: <$t::StringTypes as $crate::value::StringTypes>::string_ref_from_static_str(
+                name: <<$t as $crate::value::ValueTypes>::StringTypes as $crate::value::StringTypes>::string_ref_from_static_str(
                     $name,
                 ),
             },
             fields: ::std::collections::HashMap::new(),
         }
+    };
+}
+
+#[macro_export]
+macro_rules! e_program_error {
+    ($t:ident) => {
+        e_std_cond!($t, "program-error")
     };
 }
 

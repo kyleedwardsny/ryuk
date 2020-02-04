@@ -637,7 +637,7 @@ mod tests {
         D::StringTypes: StringTypesMut,
         D::SemverTypes: SemverTypesMut,
     {
-        fn evaluate(&mut self, env: &mut dyn Environment<C, D>) -> Result<Value<D>> {
+        fn evaluate(&mut self, env: &mut dyn Environment<C, D>) -> Result<Value<D>, D> {
             self.eval_side_effects
                 .borrow_mut()
                 .insert(self.name.clone());
@@ -661,7 +661,7 @@ mod tests {
         fn compile_side_effect<C, D>(
             &mut self,
             mut params: ValueList<C>,
-        ) -> Result<CompilationResult<C, D>>
+        ) -> Result<CompilationResult<C, D>, D>
         where
             C: ValueTypes + ?Sized + 'static,
             D: ValueTypesMut + ?Sized + 'static,
@@ -672,33 +672,18 @@ mod tests {
 
             let side_effect: ValueString<C::StringTypes> = match params.next() {
                 Option::Some(s) => s,
-                Option::None => {
-                    return Result::Err(Error::new(
-                        ErrorKind::IncorrectParams,
-                        "Incorrect parameters",
-                    ))
-                }
+                Option::None => return Result::Err(e_program_error!(D)),
             }
             .try_into()?;
             let side_effect_name = C::StringTypes::string_ref_to_str(&side_effect.0);
 
             let value = self.compile(match params.next() {
                 Option::Some(v) => v,
-                Option::None => {
-                    return Result::Err(Error::new(
-                        ErrorKind::IncorrectParams,
-                        "Incorrect parameters",
-                    ))
-                }
+                Option::None => return Result::Err(e_program_error!(D)),
             })?;
 
             let retval = match params.next() {
-                Option::Some(_) => {
-                    return Result::Err(Error::new(
-                        ErrorKind::IncorrectParams,
-                        "Incorrect parameters",
-                    ))
-                }
+                Option::Some(_) => return Result::Err(e_program_error!(D)),
                 Option::None => CompilationResult {
                     result: Box::new(SideEffectEvaluator::new(
                         self.eval_side_effects.clone(),
@@ -759,30 +744,30 @@ mod tests {
             &self,
             _name: &ValueQualifiedSymbol<C::StringTypes>,
             _params: &mut dyn Iterator<Item = &BTreeSet<ValueType>>,
-        ) -> Option<Result<BTreeSet<ValueType>>> {
+        ) -> Option<Result<BTreeSet<ValueType>, D>> {
             Option::None
         }
 
         fn evaluate_variable(
             &self,
             _name: &ValueQualifiedSymbol<C::StringTypes>,
-        ) -> Result<Value<D>> {
-            Result::Err(Error::new(ErrorKind::ValueNotDefined, "Value not defined"))
+        ) -> Result<Value<D>, D> {
+            Result::Err(e_unbound_variable!(D))
         }
 
         fn evaluate_function(
             &mut self,
             _name: &ValueQualifiedSymbol<C::StringTypes>,
             _params: Vec<Value<D>>,
-        ) -> Result<Value<D>> {
-            Result::Err(Error::new(ErrorKind::ValueNotDefined, "Value not defined"))
+        ) -> Result<Value<D>, D> {
+            Result::Err(e_undefined_function!(D))
         }
 
         fn compile_macro(
             &mut self,
             name: &ValueQualifiedSymbol<C::StringTypes>,
             params: ValueList<C>,
-        ) -> Option<Result<TryCompilationResult<C, D>>> {
+        ) -> Option<Result<TryCompilationResult<C, D>, D>> {
             match (
                 C::StringTypes::string_ref_to_str(&name.package),
                 C::StringTypes::string_ref_to_str(&name.name),
@@ -850,7 +835,7 @@ mod tests {
 
     struct SimpleEnvironment;
 
-    fn simplemacro1<C, D>() -> Result<TryCompilationResult<C, D>>
+    fn simplemacro1<C, D>() -> Result<TryCompilationResult<C, D>, D>
     where
         C: ValueTypes + ?Sized + 'static,
         D: ValueTypesMut + ?Sized + 'static,
@@ -863,7 +848,7 @@ mod tests {
         }))
     }
 
-    fn simplemacro2<C, D>() -> Result<TryCompilationResult<C, D>>
+    fn simplemacro2<C, D>() -> Result<TryCompilationResult<C, D>, D>
     where
         C: ValueTypes + ?Sized + 'static,
         D: ValueTypesMut + ?Sized + 'static,
@@ -876,32 +861,27 @@ mod tests {
         }))
     }
 
-    fn compile_simplefunc1(
+    fn compile_simplefunc1<D>(
         params: &mut dyn Iterator<Item = &BTreeSet<ValueType>>,
-    ) -> Result<BTreeSet<ValueType>> {
+    ) -> Result<BTreeSet<ValueType>, D>
+    where
+        D: ValueTypes + ?Sized,
+    {
         let result = match params.next() {
             Option::Some(p) => (*p).clone(),
-            Option::None => {
-                return Result::Err(Error::new(
-                    ErrorKind::IncorrectParams,
-                    "Incorrect parameters",
-                ))
-            }
+            Option::None => return Result::Err(e_program_error!(D)),
         };
 
         match params.next() {
             Option::None => Result::Ok(result),
-            Option::Some(_) => Result::Err(Error::new(
-                ErrorKind::IncorrectParams,
-                "Incorrect parameters",
-            )),
+            Option::Some(_) => Result::Err(e_program_error!(D)),
         }
     }
 
     fn simplefunc1<C, D>(
         _env: &mut dyn Environment<C, D>,
         params: Vec<Value<D>>,
-    ) -> Result<Value<D>>
+    ) -> Result<Value<D>, D>
     where
         C: ValueTypes + ?Sized,
         D: ValueTypesMut + ?Sized,
@@ -911,27 +891,19 @@ mod tests {
         let mut params = params.into_iter();
         let result = match params.next() {
             Option::Some(p) => p,
-            Option::None => {
-                return Result::Err(Error::new(
-                    ErrorKind::IncorrectParams,
-                    "Incorrect parameters",
-                ))
-            }
+            Option::None => return Result::Err(e_program_error!(D)),
         };
 
         match params.next() {
             Option::None => Result::Ok(result),
-            Option::Some(_) => Result::Err(Error::new(
-                ErrorKind::IncorrectParams,
-                "Incorrect parameters",
-            )),
+            Option::Some(_) => Result::Err(e_program_error!(D)),
         }
     }
 
     fn simplefunc2<C, D>(
         _env: &mut dyn Environment<C, D>,
         _params: Vec<Value<D>>,
-    ) -> Result<Value<D>>
+    ) -> Result<Value<D>, D>
     where
         C: ValueTypes + ?Sized,
         D: ValueTypesMut + ?Sized,
@@ -988,7 +960,7 @@ mod tests {
         fn evaluate_variable(
             &self,
             name: &ValueQualifiedSymbol<C::StringTypes>,
-        ) -> Result<Value<D>> {
+        ) -> Result<Value<D>, D> {
             match (
                 C::StringTypes::string_ref_to_str(&name.package),
                 C::StringTypes::string_ref_to_str(&name.name),
@@ -998,7 +970,7 @@ mod tests {
                 ("pvar", "var3") => Result::Ok(v_qsym!("pvar", "var4").convert()),
                 ("pvar", "var4") => Result::Ok(v_uqsym!("var5").convert()),
                 ("pvar", "var5") => Result::Ok(v_list!(v_qsym!("p", "simplefunc2")).convert()),
-                _ => Result::Err(Error::new(ErrorKind::ValueNotDefined, "Value not defined")),
+                _ => Result::Err(e_unbound_variable!(D)),
             }
         }
 
@@ -1006,14 +978,14 @@ mod tests {
             &mut self,
             name: &ValueQualifiedSymbol<C::StringTypes>,
             params: Vec<Value<D>>,
-        ) -> Result<Value<D>> {
+        ) -> Result<Value<D>, D> {
             match (
                 C::StringTypes::string_ref_to_str(&name.package),
                 C::StringTypes::string_ref_to_str(&name.name),
             ) {
                 ("p", "simplefunc1") => simplefunc1::<C, D>(self, params),
                 ("p", "simplefunc2") => simplefunc2::<C, D>(self, params),
-                _ => Result::Err(Error::new(ErrorKind::ValueNotDefined, "Value not defined")),
+                _ => Result::Err(e_undefined_function!(D)),
             }
         }
 
@@ -1031,7 +1003,7 @@ mod tests {
             &mut self,
             name: &ValueQualifiedSymbol<C::StringTypes>,
             params: ValueList<C>,
-        ) -> Option<Result<TryCompilationResult<C, D>>> {
+        ) -> Option<Result<TryCompilationResult<C, D>, D>> {
             match (
                 C::StringTypes::string_ref_to_str(&name.package),
                 C::StringTypes::string_ref_to_str(&name.name),
@@ -1047,7 +1019,7 @@ mod tests {
             &self,
             name: &ValueQualifiedSymbol<C::StringTypes>,
             params: &mut dyn Iterator<Item = &BTreeSet<ValueType>>,
-        ) -> Option<Result<BTreeSet<ValueType>>> {
+        ) -> Option<Result<BTreeSet<ValueType>, D>> {
             match (
                 C::StringTypes::string_ref_to_str(&name.package),
                 C::StringTypes::string_ref_to_str(&name.name),
@@ -1094,8 +1066,8 @@ mod tests {
 
         let mut comp = VariableEvaluator::new(qsym!("pvar", "undef"));
         assert_eq!(
-            comp.evaluate(env).unwrap_err().kind,
-            ErrorKind::ValueNotDefined
+            comp.evaluate(env).unwrap_err(),
+            e_unbound_variable!(ValueTypesRc)
         );
     }
 
@@ -1134,10 +1106,7 @@ mod tests {
         let mut comp = ConcatenateListsEvaluator::new(vec![ListItem::List(Box::new(
             LiteralEvaluator::new(v_bool!(true)),
         ))]);
-        assert_eq!(
-            comp.evaluate(env).unwrap_err().kind,
-            ErrorKind::IncorrectType
-        );
+        assert_eq!(comp.evaluate(env).unwrap_err(), e_type_error!(ValueTypesRc));
     }
 
     #[test]
@@ -1213,8 +1182,8 @@ mod tests {
             BTreeSet::from_iter(vec![ValueType::Bool]),
         );
         assert_eq!(
-            env.compile(v_uqsym!("undef")).unwrap_err().kind,
-            ErrorKind::ValueNotDefined
+            env.compile(v_uqsym!("undef")).unwrap_err(),
+            e_unbound_variable!(ValueTypesRc)
         );
 
         test_compile_and_evaluate(
@@ -1230,8 +1199,8 @@ mod tests {
             BTreeSet::from_iter(vec![ValueType::Bool]),
         );
         assert_eq!(
-            env.compile(v_qsym!("pvar", "undef")).unwrap_err().kind,
-            ErrorKind::ValueNotDefined
+            env.compile(v_qsym!("pvar", "undef")).unwrap_err(),
+            e_unbound_variable!(ValueTypesRc)
         );
     }
 
@@ -1253,10 +1222,8 @@ mod tests {
             BTreeSet::from_iter(vec![ValueType::Bool]),
         );
         assert_eq!(
-            env.compile(v_list!(v_uqsym!("simplemacro3")))
-                .unwrap_err()
-                .kind,
-            ErrorKind::ValueNotDefined
+            env.compile(v_list!(v_uqsym!("simplemacro3"))).unwrap_err(),
+            e_undefined_function!(ValueTypesRc)
         );
 
         test_compile_and_evaluate(
@@ -1273,9 +1240,8 @@ mod tests {
         );
         assert_eq!(
             env.compile(v_list!(v_qsym!("p", "simplemacro3")))
-                .unwrap_err()
-                .kind,
-            ErrorKind::ValueNotDefined
+                .unwrap_err(),
+            e_undefined_function!(ValueTypesRc)
         );
     }
 
@@ -1297,10 +1263,8 @@ mod tests {
             BTreeSet::from_iter(vec![ValueType::Bool]),
         );
         assert_eq!(
-            env.compile(v_list!(v_uqsym!("simplefunc1")))
-                .unwrap_err()
-                .kind,
-            ErrorKind::IncorrectParams
+            env.compile(v_list!(v_uqsym!("simplefunc1"))).unwrap_err(),
+            e_program_error!(ValueTypesRc)
         );
 
         test_compile_and_evaluate(
@@ -1317,9 +1281,8 @@ mod tests {
         );
         assert_eq!(
             env.compile(v_list!(v_qsym!("p", "simplefunc1")))
-                .unwrap_err()
-                .kind,
-            ErrorKind::IncorrectParams
+                .unwrap_err(),
+            e_program_error!(ValueTypesRc)
         );
     }
 
@@ -1360,9 +1323,8 @@ mod tests {
         );
         assert_eq!(
             env.compile(v_bq!(v_list!(v_splice!(v_qsym!("pvar", "var4")))))
-                .unwrap_err()
-                .kind,
-            ErrorKind::IncorrectType
+                .unwrap_err(),
+            e_type_error!(ValueTypesRc)
         );
         test_compile_and_evaluate(
             env,
