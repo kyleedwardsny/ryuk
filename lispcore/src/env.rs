@@ -674,7 +674,8 @@ mod tests {
                 Option::Some(s) => s,
                 Option::None => return Result::Err(e_program_error!(D)),
             }
-            .try_into()?;
+            .try_into()
+            .unwrap();
             let side_effect_name = C::StringTypes::string_ref_to_str(&side_effect.0);
 
             let value = self.compile(match params.next() {

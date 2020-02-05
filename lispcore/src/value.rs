@@ -3,7 +3,6 @@ use std::cmp::Ordering;
 use std::convert::TryFrom;
 use std::fmt::{Debug, Display};
 use std::hash::{Hash, Hasher};
-use std::marker::PhantomData;
 use std::rc::Rc;
 
 pub trait StringTypes: Debug {
@@ -698,30 +697,18 @@ where
     }
 }
 
-#[derive(Debug)]
-pub struct ValueConversionError<Dest>(pub PhantomData<Dest>);
-
-impl<T, Dest> From<ValueConversionError<Dest>> for super::error::Error<T>
-where
-    T: ValueTypes + ?Sized,
-{
-    fn from(_e: ValueConversionError<Dest>) -> Self {
-        e_type_error!(T)
-    }
-}
-
 macro_rules! try_from_value {
     ($l:lifetime, $t:ident, $in:ty, $out:ty, $match:pat => $result:expr) => {
         impl<$l, $t> TryFrom<$in> for $out
         where
             $t: ValueTypes + ?Sized,
         {
-            type Error = ValueConversionError<Self>;
+            type Error = $in;
 
-            fn try_from(v: $in) -> std::result::Result<Self, ValueConversionError<Self>> {
+            fn try_from(v: $in) -> std::result::Result<Self, $in> {
                 match v {
                     $match => std::result::Result::Ok($result),
-                    _ => std::result::Result::Err(ValueConversionError(PhantomData)),
+                    _ => std::result::Result::Err(v),
                 }
             }
         }
@@ -1703,39 +1690,57 @@ mod tests {
             TryInto::<&ValueList<ValueTypesStatic>>::try_into(&v).unwrap(),
             &list!()
         );
-        TryInto::<&ValueString<StringTypesStatic>>::try_into(&v).unwrap_err();
+        assert_eq!(
+            TryInto::<&ValueString<StringTypesStatic>>::try_into(&v).unwrap_err(),
+            &v_list!()
+        );
 
         let v = v_uqsym!("uqsym");
         assert_eq!(
             TryInto::<&ValueUnqualifiedSymbol<StringTypesStatic>>::try_into(&v).unwrap(),
             &uqsym!("uqsym")
         );
-        TryInto::<&ValueList<ValueTypesStatic>>::try_into(&v).unwrap_err();
+        assert_eq!(
+            TryInto::<&ValueList<ValueTypesStatic>>::try_into(&v).unwrap_err(),
+            &v_uqsym!("uqsym")
+        );
 
         let v = v_qsym!("p", "qsym");
         assert_eq!(
             TryInto::<&ValueQualifiedSymbol<StringTypesStatic>>::try_into(&v).unwrap(),
             &qsym!("p", "qsym")
         );
-        TryInto::<&ValueList<ValueTypesStatic>>::try_into(&v).unwrap_err();
+        assert_eq!(
+            TryInto::<&ValueList<ValueTypesStatic>>::try_into(&v).unwrap_err(),
+            &v_qsym!("p", "qsym")
+        );
 
         let v = v_bool!(true);
         assert_eq!(TryInto::<&ValueBool>::try_into(&v).unwrap(), &bool!(true));
-        TryInto::<&ValueList<ValueTypesStatic>>::try_into(&v).unwrap_err();
+        assert_eq!(
+            TryInto::<&ValueList<ValueTypesStatic>>::try_into(&v).unwrap_err(),
+            &v_bool!(true)
+        );
 
         let v = v_str!("str");
         assert_eq!(
             TryInto::<&ValueString<StringTypesStatic>>::try_into(&v).unwrap(),
             &str!("str")
         );
-        TryInto::<&ValueList<ValueTypesStatic>>::try_into(&v).unwrap_err();
+        assert_eq!(
+            TryInto::<&ValueList<ValueTypesStatic>>::try_into(&v).unwrap_err(),
+            &v_str!("str")
+        );
 
         let v = v_v![1, 0];
         assert_eq!(
             TryInto::<&ValueSemver<SemverTypesStatic>>::try_into(&v).unwrap(),
             &v![1, 0]
         );
-        TryInto::<&ValueList<ValueTypesStatic>>::try_into(&v).unwrap_err();
+        assert_eq!(
+            TryInto::<&ValueList<ValueTypesStatic>>::try_into(&v).unwrap_err(),
+            &v_v![1, 0]
+        );
 
         let v = v_lang_kira![1, 0];
         assert_eq!(
@@ -1743,35 +1748,50 @@ mod tests {
                 .unwrap(),
             &lang_kira![1, 0]
         );
-        TryInto::<&ValueList<ValueTypesStatic>>::try_into(&v).unwrap_err();
+        assert_eq!(
+            TryInto::<&ValueList<ValueTypesStatic>>::try_into(&v).unwrap_err(),
+            &v_lang_kira![1, 0]
+        );
 
         let v = v_func!(qsym!("p", "f1"));
         assert_eq!(
             TryInto::<&ValueFunction<StringTypesStatic>>::try_into(&v).unwrap(),
             &func!(qsym!("p", "f1"))
         );
-        TryInto::<&ValueList<ValueTypesStatic>>::try_into(&v).unwrap_err();
+        assert_eq!(
+            TryInto::<&ValueList<ValueTypesStatic>>::try_into(&v).unwrap_err(),
+            &v_func!(qsym!("p", "f1"))
+        );
 
         let v = v_bq!(v_bool!(true));
         assert_eq!(
             TryInto::<&ValueBackquote<ValueTypesStatic>>::try_into(&v).unwrap(),
             &bq!(v_bool!(true))
         );
-        TryInto::<&ValueList<ValueTypesStatic>>::try_into(&v).unwrap_err();
+        assert_eq!(
+            TryInto::<&ValueList<ValueTypesStatic>>::try_into(&v).unwrap_err(),
+            &v_bq!(v_bool!(true))
+        );
 
         let v = v_comma!(v_bool!(true));
         assert_eq!(
             TryInto::<&ValueComma<ValueTypesStatic>>::try_into(&v).unwrap(),
             &comma!(v_bool!(true))
         );
-        TryInto::<&ValueList<ValueTypesStatic>>::try_into(&v).unwrap_err();
+        assert_eq!(
+            TryInto::<&ValueList<ValueTypesStatic>>::try_into(&v).unwrap_err(),
+            &v_comma!(v_bool!(true))
+        );
 
         let v = v_splice!(v_bool!(true));
         assert_eq!(
             TryInto::<&ValueSplice<ValueTypesStatic>>::try_into(&v).unwrap(),
             &splice!(v_bool!(true))
         );
-        TryInto::<&ValueList<ValueTypesStatic>>::try_into(&v).unwrap_err();
+        assert_eq!(
+            TryInto::<&ValueList<ValueTypesStatic>>::try_into(&v).unwrap_err(),
+            &v_splice!(v_bool!(true))
+        );
     }
 
     #[test]
@@ -1783,42 +1803,60 @@ mod tests {
             TryInto::<ValueList<ValueTypesStatic>>::try_into(v.clone()).unwrap(),
             list!()
         );
-        TryInto::<ValueString<StringTypesStatic>>::try_into(v).unwrap_err();
+        assert_eq!(
+            TryInto::<ValueString<StringTypesStatic>>::try_into(v).unwrap_err(),
+            v_list!()
+        );
 
         let v = v_uqsym!("uqsym");
         assert_eq!(
             TryInto::<ValueUnqualifiedSymbol<StringTypesStatic>>::try_into(v.clone()).unwrap(),
             uqsym!("uqsym")
         );
-        TryInto::<ValueList<ValueTypesStatic>>::try_into(v).unwrap_err();
+        assert_eq!(
+            TryInto::<ValueList<ValueTypesStatic>>::try_into(v).unwrap_err(),
+            v_uqsym!("uqsym")
+        );
 
         let v = v_qsym!("p", "qsym");
         assert_eq!(
             TryInto::<ValueQualifiedSymbol<StringTypesStatic>>::try_into(v.clone()).unwrap(),
             qsym!("p", "qsym")
         );
-        TryInto::<ValueList<ValueTypesStatic>>::try_into(v).unwrap_err();
+        assert_eq!(
+            TryInto::<ValueList<ValueTypesStatic>>::try_into(v).unwrap_err(),
+            v_qsym!("p", "qsym")
+        );
 
         let v = v_bool!(true);
         assert_eq!(
             TryInto::<ValueBool>::try_into(v.clone()).unwrap(),
             bool!(true)
         );
-        TryInto::<ValueList<ValueTypesStatic>>::try_into(v).unwrap_err();
+        assert_eq!(
+            TryInto::<ValueList<ValueTypesStatic>>::try_into(v).unwrap_err(),
+            v_bool!(true)
+        );
 
         let v = v_str!("str");
         assert_eq!(
             TryInto::<ValueString<StringTypesStatic>>::try_into(v.clone()).unwrap(),
             str!("str")
         );
-        TryInto::<ValueList<ValueTypesStatic>>::try_into(v).unwrap_err();
+        assert_eq!(
+            TryInto::<ValueList<ValueTypesStatic>>::try_into(v).unwrap_err(),
+            v_str!("str")
+        );
 
         let v = v_v![1, 0];
         assert_eq!(
             TryInto::<ValueSemver<SemverTypesStatic>>::try_into(v.clone()).unwrap(),
             v![1, 0]
         );
-        TryInto::<ValueList<ValueTypesStatic>>::try_into(v).unwrap_err();
+        assert_eq!(
+            TryInto::<ValueList<ValueTypesStatic>>::try_into(v).unwrap_err(),
+            v_v![1, 0]
+        );
 
         let v = v_lang_kira![1, 0];
         assert_eq!(
@@ -1828,35 +1866,50 @@ mod tests {
             .unwrap(),
             lang_kira![1, 0]
         );
-        TryInto::<ValueList<ValueTypesStatic>>::try_into(v).unwrap_err();
+        assert_eq!(
+            TryInto::<ValueList<ValueTypesStatic>>::try_into(v).unwrap_err(),
+            v_lang_kira![1, 0]
+        );
 
         let v = v_func!(qsym!("p", "f1"));
         assert_eq!(
             TryInto::<ValueFunction<StringTypesStatic>>::try_into(v.clone()).unwrap(),
             func!(qsym!("p", "f1"))
         );
-        TryInto::<ValueList<ValueTypesStatic>>::try_into(v).unwrap_err();
+        assert_eq!(
+            TryInto::<ValueList<ValueTypesStatic>>::try_into(v).unwrap_err(),
+            v_func!(qsym!("p", "f1"))
+        );
 
         let v = v_bq!(v_bool!(true));
         assert_eq!(
             TryInto::<ValueBackquote<ValueTypesStatic>>::try_into(v.clone()).unwrap(),
             bq!(v_bool!(true))
         );
-        TryInto::<ValueList<ValueTypesStatic>>::try_into(v).unwrap_err();
+        assert_eq!(
+            TryInto::<ValueList<ValueTypesStatic>>::try_into(v).unwrap_err(),
+            v_bq!(v_bool!(true))
+        );
 
         let v = v_comma!(v_bool!(true));
         assert_eq!(
             TryInto::<ValueComma<ValueTypesStatic>>::try_into(v.clone()).unwrap(),
             comma!(v_bool!(true))
         );
-        TryInto::<ValueList<ValueTypesStatic>>::try_into(v).unwrap_err();
+        assert_eq!(
+            TryInto::<ValueList<ValueTypesStatic>>::try_into(v).unwrap_err(),
+            v_comma!(v_bool!(true))
+        );
 
         let v = v_splice!(v_bool!(true));
         assert_eq!(
             TryInto::<ValueSplice<ValueTypesStatic>>::try_into(v.clone()).unwrap(),
             splice!(v_bool!(true))
         );
-        TryInto::<ValueList<ValueTypesStatic>>::try_into(v).unwrap_err();
+        assert_eq!(
+            TryInto::<ValueList<ValueTypesStatic>>::try_into(v).unwrap_err(),
+            v_splice!(v_bool!(true))
+        );
     }
 
     #[test]
