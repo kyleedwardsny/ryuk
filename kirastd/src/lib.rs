@@ -1,6 +1,7 @@
 use ryuk_lispcore::env::*;
 use ryuk_lispcore::error::*;
 use ryuk_lispcore::value::*;
+use ryuk_lispcore::*;
 use std::collections::BTreeSet;
 
 #[derive(Debug)]
@@ -39,10 +40,10 @@ where
     D::StringTypes: StringTypesMut,
     D::SemverTypes: SemverTypesMut,
 {
-    fn evaluate(&mut self, env: &mut dyn Environment<C, D>) -> Result<Value<D>> {
+    fn evaluate(&mut self, env: &mut dyn Environment<C, D>) -> Result<Value<D>, D> {
         use std::convert::TryInto;
 
-        let b: ValueBool = self.test.evaluate(env)?.try_into()?;
+        let b: ValueBool = self.test.evaluate(env)?.try_into().unwrap();
         if b.0 {
             self.then.evaluate(env)
         } else {
@@ -54,7 +55,7 @@ where
 pub fn compile_if<C, D>(
     env: &mut dyn Environment<C, D>,
     mut params: ValueList<C>,
-) -> Result<CompilationResult<C, D>>
+) -> Result<CompilationResult<C, D>, D>
 where
     C: ValueTypes + ?Sized + 'static,
     D: ValueTypesMut + ?Sized + 'static,
@@ -70,15 +71,12 @@ where
         Option::Some(test_item) => {
             let test_comp = env.compile(test_item)?;
             if test_comp.types != BTreeSet::from_iter(vec![ValueType::Bool]) {
-                return Result::Err(Error::new(ErrorKind::IncorrectType, "Incorrect type"));
+                return Result::Err(e_type_error!(D));
             }
             test = test_comp.result;
         }
         _ => {
-            return Result::Err(Error::new(
-                ErrorKind::IncorrectParams,
-                "Incorrect parameters",
-            ))
+            return Result::Err(e_program_error!(D));
         }
     }
 
@@ -90,10 +88,7 @@ where
             then = then_comp.result;
         }
         _ => {
-            return Result::Err(Error::new(
-                ErrorKind::IncorrectParams,
-                "Incorrect parameters",
-            ))
+            return Result::Err(e_program_error!(D));
         }
     }
 
@@ -114,10 +109,7 @@ where
 
     match params.next() {
         Option::Some(_) => {
-            return Result::Err(Error::new(
-                ErrorKind::IncorrectParams,
-                "Incorrect parameters",
-            ))
+            return Result::Err(e_program_error!(D));
         }
         _ => (),
     }
@@ -131,7 +123,7 @@ where
 pub fn compile_quote<C, D>(
     _env: &mut dyn Environment<C, D>,
     mut params: ValueList<C>,
-) -> Result<CompilationResult<C, D>>
+) -> Result<CompilationResult<C, D>, D>
 where
     C: ValueTypes + ?Sized + 'static,
     D: ValueTypesMut + ?Sized + 'static,
@@ -144,19 +136,13 @@ where
     match params.next() {
         Option::Some(val) => result = val,
         _ => {
-            return Result::Err(Error::new(
-                ErrorKind::IncorrectParams,
-                "Incorrect parameters",
-            ))
+            return Result::Err(e_program_error!(D));
         }
     }
 
     match params.next() {
         Option::Some(_) => {
-            return Result::Err(Error::new(
-                ErrorKind::IncorrectParams,
-                "Incorrect parameters",
-            ))
+            return Result::Err(e_program_error!(D));
         }
         _ => (),
     }
@@ -171,7 +157,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ryuk_lispcore::*;
 
     struct SimpleEnvironment;
 
@@ -203,16 +188,16 @@ mod tests {
         fn evaluate_variable(
             &self,
             _name: &ValueQualifiedSymbol<C::StringTypes>,
-        ) -> Result<Value<D>> {
-            Result::Err(Error::new(ErrorKind::ValueNotDefined, "Value not defined"))
+        ) -> Result<Value<D>, D> {
+            Result::Err(e_unbound_variable!(D))
         }
 
         fn evaluate_function(
             &mut self,
             _name: &ValueQualifiedSymbol<C::StringTypes>,
             _params: Vec<Value<D>>,
-        ) -> Result<Value<D>> {
-            Result::Err(Error::new(ErrorKind::ValueNotDefined, "Value not defined"))
+        ) -> Result<Value<D>, D> {
+            Result::Err(e_undefined_function!(D))
         }
 
         fn resolve_symbol_get_macro(
@@ -226,7 +211,7 @@ mod tests {
             &mut self,
             name: &ValueQualifiedSymbol<C::StringTypes>,
             params: ValueList<C>,
-        ) -> Option<Result<TryCompilationResult<C, D>>> {
+        ) -> Option<Result<TryCompilationResult<C, D>, D>> {
             match (
                 C::StringTypes::string_ref_to_str(&name.package),
                 C::StringTypes::string_ref_to_str(&name.name),
@@ -243,7 +228,7 @@ mod tests {
             &self,
             _name: &ValueQualifiedSymbol<C::StringTypes>,
             _params: &mut dyn Iterator<Item = &BTreeSet<ValueType>>,
-        ) -> Option<Result<BTreeSet<ValueType>>> {
+        ) -> Option<Result<BTreeSet<ValueType>, D>> {
             Option::None
         }
     }
@@ -280,16 +265,20 @@ mod tests {
             Box::new(LiteralEvaluator::new(v_list!())),
         );
         assert_eq!(comp.evaluate(env).unwrap(), v_list!());
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_evaluate_if_bad_test() {
+        let mut env = SimpleEnvironment;
+        let env = &mut env as &mut dyn Environment<ValueTypesStatic, ValueTypesRc>;
 
         let mut comp = IfEvaluator::new(
             Box::new(LiteralEvaluator::new(v_str!("true"))),
             Box::new(LiteralEvaluator::new(v_str!("yes"))),
             Box::new(LiteralEvaluator::new(v_list!())),
         );
-        assert_eq!(
-            comp.evaluate(env).unwrap_err().kind,
-            ErrorKind::IncorrectType
-        );
+        comp.evaluate(env).ok();
     }
 
     #[test]
@@ -322,25 +311,23 @@ mod tests {
         );
 
         assert_eq!(
-            compile_if(env, list!()).unwrap_err().kind,
-            ErrorKind::IncorrectParams
+            compile_if(env, list!()).unwrap_err(),
+            e_program_error!(ValueTypesRc)
         );
 
         assert_eq!(
-            compile_if(env, list!(v_bool!(true))).unwrap_err().kind,
-            ErrorKind::IncorrectParams
+            compile_if(env, list!(v_bool!(true))).unwrap_err(),
+            e_program_error!(ValueTypesRc)
         );
 
         assert_eq!(
-            compile_if(env, list!(v_bool!(true), v_list!(), v_list!(), v_list!()))
-                .unwrap_err()
-                .kind,
-            ErrorKind::IncorrectParams
+            compile_if(env, list!(v_bool!(true), v_list!(), v_list!(), v_list!())).unwrap_err(),
+            e_program_error!(ValueTypesRc)
         );
 
         assert_eq!(
-            compile_if(env, list!(v_str!("str"))).unwrap_err().kind,
-            ErrorKind::IncorrectType
+            compile_if(env, list!(v_str!("str"))).unwrap_err(),
+            e_type_error!(ValueTypesRc)
         );
     }
 
@@ -377,15 +364,13 @@ mod tests {
         );
 
         assert_eq!(
-            compile_quote(env, list!()).unwrap_err().kind,
-            ErrorKind::IncorrectParams
+            compile_quote(env, list!()).unwrap_err(),
+            e_program_error!(ValueTypesRc)
         );
 
         assert_eq!(
-            compile_quote(env, list!(v_list!(), v_list!()))
-                .unwrap_err()
-                .kind,
-            ErrorKind::IncorrectParams
+            compile_quote(env, list!(v_list!(), v_list!())).unwrap_err(),
+            e_program_error!(ValueTypesRc)
         );
     }
 }
