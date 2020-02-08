@@ -64,13 +64,15 @@ where
 {
     use std::iter::FromIterator;
 
-    let mut types = BTreeSet::new();
+    let mut return_type;
 
     let test;
     match params.next() {
         Option::Some(test_item) => {
             let test_comp = env.compile(test_item)?;
-            if test_comp.types != BTreeSet::from_iter(vec![ValueType::Bool]) {
+            if test_comp.return_type
+                != ValueType::Some(BTreeSet::from_iter(std::iter::once(ValueTypeSome::Bool)))
+            {
                 return Result::Err(e_type_error!(D));
             }
             test = test_comp.result;
@@ -84,7 +86,7 @@ where
     match params.next() {
         Option::Some(then_item) => {
             let then_comp = env.compile(then_item)?;
-            types.append(&mut then_comp.types.clone());
+            return_type = then_comp.return_type;
             then = then_comp.result;
         }
         _ => {
@@ -95,12 +97,14 @@ where
     let els;
     match params.next() {
         Option::Some(els_item) => {
-            let els_comp = env.compile(els_item)?;
-            types.append(&mut els_comp.types.clone());
+            let mut els_comp = env.compile(els_item)?;
+            return_type.append(&mut els_comp.return_type);
             els = els_comp.result;
         }
         Option::None => {
-            types.insert(ValueType::List(BTreeSet::new()));
+            return_type.append(&mut ValueType::Some(BTreeSet::from_iter(std::iter::once(
+                ValueTypeSome::List(ValueType::Some(BTreeSet::new())),
+            ))));
             els = Box::new(LiteralEvaluator::new(Value::<ValueTypesStatic>::List(
                 ValueList(Option::None),
             )));
@@ -116,7 +120,7 @@ where
 
     Result::Ok(CompilationResult {
         result: Box::new(IfEvaluator::new(test, then, els)),
-        types,
+        return_type,
     })
 }
 
@@ -147,10 +151,10 @@ where
         _ => (),
     }
 
-    let types = BTreeSet::from_iter(vec![result.value_type()]);
+    let return_type = ValueType::Some(BTreeSet::from_iter(std::iter::once(result.value_type())));
     Result::Ok(CompilationResult {
         result: Box::new(LiteralEvaluator::new(result)),
-        types,
+        return_type,
     })
 }
 
@@ -181,7 +185,7 @@ mod tests {
         fn compile_variable(
             &self,
             _name: &ValueQualifiedSymbol<C::StringTypes>,
-        ) -> Option<BTreeSet<ValueType>> {
+        ) -> Option<ValueType> {
             Option::None
         }
 
@@ -227,8 +231,8 @@ mod tests {
         fn compile_function(
             &self,
             _name: &ValueQualifiedSymbol<C::StringTypes>,
-            _params: &mut dyn Iterator<Item = &BTreeSet<ValueType>>,
-        ) -> Option<Result<BTreeSet<ValueType>, D>> {
+            _params: &mut dyn Iterator<Item = &ValueType>,
+        ) -> Option<Result<ValueType, D>> {
             Option::None
         }
     }
@@ -290,24 +294,36 @@ mod tests {
 
         let mut comp = compile_if(env, list!(v_bool!(true), v_str!("yes"), v_str!("no"))).unwrap();
         assert_eq!(comp.result.evaluate(env).unwrap(), v_str!("yes"));
-        assert_eq!(comp.types, BTreeSet::from_iter(vec![ValueType::String]));
+        assert_eq!(
+            comp.return_type,
+            ValueType::Some(BTreeSet::from_iter(std::iter::once(ValueTypeSome::String)))
+        );
 
         let mut comp = compile_if(env, list!(v_bool!(false), v_str!("yes"), v_str!("no"))).unwrap();
         assert_eq!(comp.result.evaluate(env).unwrap(), v_str!("no"));
-        assert_eq!(comp.types, BTreeSet::from_iter(vec![ValueType::String]));
+        assert_eq!(
+            comp.return_type,
+            ValueType::Some(BTreeSet::from_iter(std::iter::once(ValueTypeSome::String)))
+        );
 
         let mut comp = compile_if(env, list!(v_bool!(true), v_str!("yes"))).unwrap();
         assert_eq!(comp.result.evaluate(env).unwrap(), v_str!("yes"));
         assert_eq!(
-            comp.types,
-            BTreeSet::from_iter(vec![ValueType::List(BTreeSet::new()), ValueType::String,])
+            comp.return_type,
+            ValueType::Some(BTreeSet::from_iter(vec![
+                ValueTypeSome::List(ValueType::Some(BTreeSet::new())),
+                ValueTypeSome::String
+            ]))
         );
 
         let mut comp = compile_if(env, list!(v_bool!(false), v_str!("yes"))).unwrap();
         assert_eq!(comp.result.evaluate(env).unwrap(), v_list!());
         assert_eq!(
-            comp.types,
-            BTreeSet::from_iter(vec![ValueType::List(BTreeSet::new()), ValueType::String,])
+            comp.return_type,
+            ValueType::Some(BTreeSet::from_iter(vec![
+                ValueTypeSome::List(ValueType::Some(BTreeSet::new())),
+                ValueTypeSome::String
+            ]))
         );
 
         assert_eq!(
@@ -340,13 +356,18 @@ mod tests {
 
         let mut comp = compile_quote(env, list!(v_str!("str"))).unwrap();
         assert_eq!(comp.result.evaluate(env).unwrap(), v_str!("str"));
-        assert_eq!(comp.types, BTreeSet::from_iter(vec![ValueType::String]));
+        assert_eq!(
+            comp.return_type,
+            ValueType::Some(BTreeSet::from_iter(std::iter::once(ValueTypeSome::String)))
+        );
 
         let mut comp = compile_quote(env, list!(v_qsym!("std", "if"))).unwrap();
         assert_eq!(comp.result.evaluate(env).unwrap(), v_qsym!("std", "if"));
         assert_eq!(
-            comp.types,
-            BTreeSet::from_iter(vec![ValueType::QualifiedSymbol])
+            comp.return_type,
+            ValueType::Some(BTreeSet::from_iter(std::iter::once(
+                ValueTypeSome::QualifiedSymbol
+            )))
         );
 
         let mut comp =
@@ -356,11 +377,13 @@ mod tests {
             v_list!(v_qsym!("std", "if"), v_bool!(true))
         );
         assert_eq!(
-            comp.types,
-            BTreeSet::from_iter(vec![ValueType::List(BTreeSet::from_iter(vec![
-                ValueType::QualifiedSymbol,
-                ValueType::Bool,
-            ]),)])
+            comp.return_type,
+            ValueType::Some(BTreeSet::from_iter(std::iter::once(ValueTypeSome::List(
+                ValueType::Some(BTreeSet::from_iter(vec![
+                    ValueTypeSome::QualifiedSymbol,
+                    ValueTypeSome::Bool,
+                ])),
+            ))))
         );
 
         assert_eq!(
