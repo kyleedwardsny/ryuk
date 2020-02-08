@@ -1,53 +1,21 @@
+use ryuk_lispcore::error::*;
 use ryuk_lispcore::list::ListItem;
 use ryuk_lispcore::value::*;
-use std::fmt::Formatter;
+use ryuk_lispcore::*;
 use std::iter::Peekable;
 use std::marker::PhantomData;
 
-#[derive(Debug)]
-pub struct Error {
-    pub kind: ErrorKind,
-    pub error: Box<dyn std::error::Error>,
+macro_rules! e_parse_error {
+    ($t:ident) => {
+        e_std_cond!($t, "parse-error")
+    };
 }
 
-#[derive(Debug, PartialEq)]
-pub enum ErrorKind {
-    EndOfFile,
-    IoError,
-    InvalidToken,
-    InvalidCharacter,
-    InvalidSemverComponent,
-    IllegalComma,
-    IllegalSplice,
+macro_rules! e_end_of_file {
+    ($t:ident) => {
+        e_std_cond!($t, "end-of-file")
+    };
 }
-
-impl Error {
-    pub fn new<E>(kind: ErrorKind, error: E) -> Error
-    where
-        E: Into<Box<dyn std::error::Error>>,
-    {
-        Error {
-            kind,
-            error: error.into(),
-        }
-    }
-}
-
-impl std::error::Error for Error {}
-
-impl From<std::io::Error> for Error {
-    fn from(e: std::io::Error) -> Self {
-        Error::new(ErrorKind::IoError, e)
-    }
-}
-
-impl std::fmt::Display for Error {
-    fn fmt(&self, formatter: &mut Formatter) -> std::result::Result<(), std::fmt::Error> {
-        self.error.fmt(formatter)
-    }
-}
-
-pub type Result<T> = std::result::Result<T, Error>;
 
 pub struct LispParser<T, I>
 where
@@ -103,9 +71,12 @@ impl BackquoteStatus {
         }
     }
 
-    pub fn comma(&self) -> Result<Self> {
+    pub fn comma<T>(&self) -> Result<Self, T>
+    where
+        T: ValueTypes + ?Sized,
+    {
         if self.depth == 0 {
-            Result::Err(Error::new(ErrorKind::IllegalComma, "Illegal comma"))
+            Result::Err(e_parse_error!(T))
         } else {
             Result::Ok(Self {
                 depth: self.depth - 1,
@@ -114,9 +85,12 @@ impl BackquoteStatus {
         }
     }
 
-    pub fn splice(&self) -> Result<Self> {
+    pub fn splice<T>(&self) -> Result<Self, T>
+    where
+        T: ValueTypes + ?Sized,
+    {
         if self.depth == 0 || self.status != ListItem::Item(()) {
-            Result::Err(Error::new(ErrorKind::IllegalSplice, "Illegal splice"))
+            Result::Err(e_parse_error!(T))
         } else {
             Result::Ok(Self {
                 depth: self.depth - 1,
@@ -133,7 +107,7 @@ where
     T::SemverTypes: SemverTypesMut,
     I: Iterator<Item = char>,
 {
-    type Item = Result<Value<T>>;
+    type Item = Result<Value<T>, T>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match read_impl(&mut self.reader, BackquoteStatus::new()) {
@@ -154,7 +128,10 @@ fn is_token_char(c: char) -> bool {
     }
 }
 
-fn skip_whitespace<I: Iterator<Item = char>>(peekable: &mut Peekable<I>) -> Result<()> {
+fn skip_whitespace<I>(peekable: &mut Peekable<I>)
+where
+    I: Iterator<Item = char>,
+{
     let mut comment = false;
     while let Option::Some(c) = peekable.peek() {
         if comment {
@@ -171,21 +148,20 @@ fn skip_whitespace<I: Iterator<Item = char>>(peekable: &mut Peekable<I>) -> Resu
             break;
         }
     }
-    Result::Ok(())
 }
 
 fn read_delimited<T, I>(
     peekable: &mut Peekable<I>,
     delimiter: char,
     bq: BackquoteStatus,
-) -> Result<Option<Value<T>>>
+) -> Result<Option<Value<T>>, T>
 where
     T: ValueTypesMut + ?Sized,
     T::StringTypes: StringTypesMut,
     T::SemverTypes: SemverTypesMut,
     I: Iterator<Item = char>,
 {
-    skip_whitespace(peekable)?;
+    skip_whitespace(peekable);
     if let Option::Some(c) = peekable.peek() {
         if *c == delimiter {
             peekable.next();
@@ -193,21 +169,15 @@ where
         } else {
             match read_impl(peekable, bq)? {
                 ReadImplResult::Value(v) => Result::Ok(Option::Some(v)),
-                ReadImplResult::EndOfFile => Result::Err(Error::new(
-                    ErrorKind::EndOfFile,
-                    "End of file reached".to_string(),
-                )),
+                ReadImplResult::EndOfFile => Result::Err(e_end_of_file!(T)),
             }
         }
     } else {
-        Result::Err(Error::new(
-            ErrorKind::EndOfFile,
-            "End of file reached".to_string(),
-        ))
+        Result::Err(e_end_of_file!(T))
     }
 }
 
-fn read_list<T, I>(peekable: &mut Peekable<I>, bq: BackquoteStatus) -> Result<ValueList<T>>
+fn read_list<T, I>(peekable: &mut Peekable<I>, bq: BackquoteStatus) -> Result<ValueList<T>, T>
 where
     T: ValueTypesMut + ?Sized,
     T::StringTypes: StringTypesMut,
@@ -225,8 +195,9 @@ where
     ))
 }
 
-fn read_string<I>(peekable: &mut Peekable<I>, end: char) -> Result<String>
+fn read_string<T, I>(peekable: &mut Peekable<I>, end: char) -> Result<String, T>
 where
+    T: ValueTypes + ?Sized,
     I: Iterator<Item = char>,
 {
     let mut result = String::new();
@@ -244,29 +215,30 @@ where
         }
     }
 
-    Result::Err(Error::new(ErrorKind::EndOfFile, "End of file reached"))
+    Result::Err(e_end_of_file!(T))
 }
 
-fn read_language_directive<S, V, I>(
+fn read_language_directive<T, I>(
     peekable: &mut Peekable<I>,
-) -> Result<ValueLanguageDirective<S, V>>
+) -> Result<ValueLanguageDirective<T::StringTypes, T::SemverTypes>, T>
 where
-    S: StringTypesMut + ?Sized,
-    V: SemverTypesMut + ?Sized,
+    T: ValueTypesMut + ?Sized,
+    T::StringTypes: StringTypesMut,
+    T::SemverTypes: SemverTypesMut,
     I: Iterator<Item = char>,
 {
-    skip_whitespace(peekable)?;
+    skip_whitespace(peekable);
 
-    let t = read_token(peekable)?.try_unwrap_token()?;
+    let t = read_token(peekable).try_unwrap_token()?;
     Result::Ok(if t == "kira" {
-        skip_whitespace(peekable)?;
-        ValueLanguageDirective::Kira(parse_semver(&read_token(peekable)?.try_unwrap_token()?)?)
+        skip_whitespace(peekable);
+        ValueLanguageDirective::Kira(parse_semver(&read_token(peekable).try_unwrap_token()?)?)
     } else {
-        ValueLanguageDirective::Other(S::string_ref_from_string(t))
+        ValueLanguageDirective::Other(T::StringTypes::string_ref_from_string(t))
     })
 }
 
-fn read_macro<T, I>(peekable: &mut Peekable<I>) -> Result<Value<T>>
+fn read_macro<T, I>(peekable: &mut Peekable<I>) -> Result<Value<T>, T>
 where
     T: ValueTypesMut + ?Sized,
     T::StringTypes: StringTypesMut,
@@ -277,27 +249,21 @@ where
         if c == 'v' {
             peekable.next();
             Result::Ok(
-                Value::Semver(parse_semver(&read_token(peekable)?.try_unwrap_token()?)?).into(),
+                Value::Semver(parse_semver(&read_token(peekable).try_unwrap_token()?)?).into(),
             )
         } else {
-            let t = read_token(peekable)?.try_unwrap_token()?;
+            let t = read_token(peekable).try_unwrap_token()?;
             match &*t {
                 "lang" => {
                     Result::Ok(Value::LanguageDirective(read_language_directive(peekable)?).into())
                 }
                 "t" => Result::Ok(Value::Bool(ValueBool(true)).into()),
                 "f" => Result::Ok(Value::Bool(ValueBool(false)).into()),
-                _ => Result::Err(Error::new(
-                    ErrorKind::InvalidToken,
-                    format!("Invalid macro: '{}'", t),
-                )),
+                _ => Result::Err(e_parse_error!(T)),
             }
         }
     } else {
-        Result::Err(Error::new(
-            ErrorKind::EndOfFile,
-            "End of file reached".to_string(),
-        ))
+        Result::Err(e_end_of_file!(T))
     }
 }
 
@@ -307,18 +273,18 @@ enum ReadTokenResult {
 }
 
 impl ReadTokenResult {
-    pub fn try_unwrap_token(self) -> Result<String> {
+    pub fn try_unwrap_token<T>(self) -> Result<String, T>
+    where
+        T: ValueTypes + ?Sized,
+    {
         match self {
             Self::ValidToken(t) => Result::Ok(t),
-            Self::InvalidToken(t) => Result::Err(Error::new(
-                ErrorKind::InvalidToken,
-                format!("Invalid token: '{}'", t),
-            )),
+            Self::InvalidToken(_) => Result::Err(e_parse_error!(T)),
         }
     }
 }
 
-fn read_token<I>(peekable: &mut Peekable<I>) -> Result<ReadTokenResult>
+fn read_token<I>(peekable: &mut Peekable<I>) -> ReadTokenResult
 where
     I: Iterator<Item = char>,
 {
@@ -338,11 +304,11 @@ where
         }
     }
 
-    Result::Ok(if valid {
+    if valid {
         ReadTokenResult::ValidToken(token)
     } else {
         ReadTokenResult::InvalidToken(token)
-    })
+    }
 }
 
 enum ReadImplResult<T>
@@ -361,22 +327,22 @@ where
     T::StringTypes: StringTypesMut,
     T::SemverTypes: SemverTypesMut,
 {
-    pub fn try_unwrap_value(self) -> Result<Value<T>> {
+    pub fn try_unwrap_value(self) -> Result<Value<T>, T> {
         match self {
             Self::Value(v) => Result::Ok(v),
-            Self::EndOfFile => Result::Err(Error::new(ErrorKind::EndOfFile, "End of file reached")),
+            Self::EndOfFile => Result::Err(e_end_of_file!(T)),
         }
     }
 }
 
-fn read_impl<T, I>(peekable: &mut Peekable<I>, bq: BackquoteStatus) -> Result<ReadImplResult<T>>
+fn read_impl<T, I>(peekable: &mut Peekable<I>, bq: BackquoteStatus) -> Result<ReadImplResult<T>, T>
 where
     T: ValueTypesMut + ?Sized,
     T::StringTypes: StringTypesMut,
     T::SemverTypes: SemverTypesMut,
     I: Iterator<Item = char>,
 {
-    skip_whitespace(peekable)?;
+    skip_whitespace(peekable);
     if let Option::Some(&c) = peekable.peek() {
         if c == '(' {
             peekable.next();
@@ -407,9 +373,7 @@ where
                         read_impl(peekable, bq.comma()?)?.try_unwrap_value()?,
                     )))
                 })),
-                Option::None => {
-                    Result::Err(Error::new(ErrorKind::EndOfFile, "End of file reached"))
-                }
+                Option::None => Result::Err(e_end_of_file!(T)),
             }
         } else if c == '\'' {
             peekable.next();
@@ -426,7 +390,7 @@ where
                 }),
             )))))
         } else if is_token_char(c) {
-            match read_token(peekable)? {
+            match read_token(peekable) {
                 ReadTokenResult::ValidToken(t1) => match peekable.peek() {
                     Option::Some(':') => {
                         peekable.next();
@@ -434,7 +398,7 @@ where
                             ValueQualifiedSymbol {
                                 package: T::StringTypes::string_ref_from_string(t1.to_lowercase()),
                                 name: T::StringTypes::string_ref_from_string(
-                                    read_token(peekable)?.try_unwrap_token()?.to_lowercase(),
+                                    read_token(peekable).try_unwrap_token()?.to_lowercase(),
                                 ),
                             },
                         )))
@@ -445,111 +409,96 @@ where
                         )),
                     ))),
                 },
-                ReadTokenResult::InvalidToken(t) => Result::Err(Error::new(
-                    ErrorKind::InvalidToken,
-                    format!("Invalid token: '{}'", t),
-                )),
+                ReadTokenResult::InvalidToken(_) => Result::Err(e_parse_error!(T)),
             }
         } else {
             peekable.next();
-            Result::Err(Error::new(
-                ErrorKind::InvalidCharacter,
-                format!("Invalid character: '{}'", c),
-            ))
+            Result::Err(e_parse_error!(T))
         }
     } else {
         Result::Ok(ReadImplResult::EndOfFile)
     }
 }
 
-fn parse_semver<V>(s: &str) -> Result<ValueSemver<V>>
+fn parse_semver<T>(s: &str) -> Result<ValueSemver<T::SemverTypes>, T>
 where
-    V: SemverTypesMut + ?Sized,
+    T: ValueTypesMut + ?Sized,
+    T::StringTypes: StringTypesMut,
+    T::SemverTypes: SemverTypesMut,
 {
     let mut major = Option::None;
-    let mut rest = V::semver_ref_default();
+    let mut rest = T::SemverTypes::semver_ref_default();
 
     for component_str in s.split('.') {
         let mut component = 0u64;
         let mut first = true;
         for c in component_str.chars() {
             if component == 0 && !first {
-                return Result::Err(Error::new(
-                    ErrorKind::InvalidSemverComponent,
-                    format!("Invalid semver component: '{}'", component_str),
-                ));
+                return Result::Err(e_parse_error!(T));
             }
             if let '0'..='9' = c {
                 component *= 10;
                 component += c as u64 - '0' as u64;
             } else {
-                return Result::Err(Error::new(
-                    ErrorKind::InvalidCharacter,
-                    format!("Invalid character: '{}'", c),
-                ));
+                return Result::Err(e_parse_error!(T));
             }
             first = false;
         }
         if first {
-            return Result::Err(Error::new(
-                ErrorKind::InvalidSemverComponent,
-                "Invalid semver component: ''",
-            ));
+            return Result::Err(e_parse_error!(T));
         }
         match &mut major {
             Option::None => major = Option::Some(component),
-            Option::Some(_) => V::semver_ref_extend(&mut rest, std::iter::once(component)),
+            Option::Some(_) => {
+                T::SemverTypes::semver_ref_extend(&mut rest, std::iter::once(component))
+            }
         }
     }
 
     match major {
         Option::Some(major) => Result::Ok(ValueSemver { major, rest }),
-        Option::None => Result::Err(Error::new(
-            ErrorKind::InvalidSemverComponent,
-            "Invalid semver component: ''",
-        )),
+        Option::None => Result::Err(e_parse_error!(T)),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ryuk_lispcore::*;
 
     #[test]
     fn test_parse_semver() {
-        assert_eq!(parse_semver::<SemverTypesVec>("1").unwrap(), v![1]);
+        assert_eq!(parse_semver::<ValueTypesRc>("1").unwrap(), v![1]);
 
-        assert_eq!(parse_semver::<SemverTypesVec>("2.0").unwrap(), v![2, 0]);
+        assert_eq!(parse_semver::<ValueTypesRc>("2.0").unwrap(), v![2, 0]);
 
         assert_eq!(
-            parse_semver::<SemverTypesVec>("3.5.10").unwrap(),
+            parse_semver::<ValueTypesRc>("3.5.10").unwrap(),
             v![3, 5, 10]
         );
 
         assert_eq!(
-            parse_semver::<SemverTypesVec>("3.05").unwrap_err().kind,
-            crate::ErrorKind::InvalidSemverComponent
+            parse_semver::<ValueTypesRc>("3.05").unwrap_err(),
+            e_parse_error!(ValueTypesRc)
         );
 
         assert_eq!(
-            parse_semver::<SemverTypesVec>("").unwrap_err().kind,
-            crate::ErrorKind::InvalidSemverComponent
+            parse_semver::<ValueTypesRc>("").unwrap_err(),
+            e_parse_error!(ValueTypesRc)
         );
 
         assert_eq!(
-            parse_semver::<SemverTypesVec>("5.").unwrap_err().kind,
-            crate::ErrorKind::InvalidSemverComponent
+            parse_semver::<ValueTypesRc>("5.").unwrap_err(),
+            e_parse_error!(ValueTypesRc)
         );
 
         assert_eq!(
-            parse_semver::<SemverTypesVec>(".5").unwrap_err().kind,
-            crate::ErrorKind::InvalidSemverComponent
+            parse_semver::<ValueTypesRc>(".5").unwrap_err(),
+            e_parse_error!(ValueTypesRc)
         );
 
         assert_eq!(
-            parse_semver::<SemverTypesVec>("3.a").unwrap_err().kind,
-            crate::ErrorKind::InvalidCharacter
+            parse_semver::<ValueTypesRc>("3.a").unwrap_err(),
+            e_parse_error!(ValueTypesRc)
         );
     }
 
@@ -572,19 +521,10 @@ mod tests {
         assert_eq!(i.next().unwrap().unwrap(), v_qsym!("pa2", "qsym2"));
         assert_eq!(i.next().unwrap().unwrap(), v_qsym!("pa3", "qsym3"));
         assert_eq!(i.next().unwrap().unwrap(), v_qsym!("pa4", "qsym4"));
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            crate::ErrorKind::InvalidToken
-        );
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
         assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("qsym5"));
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            crate::ErrorKind::InvalidToken
-        );
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            crate::ErrorKind::InvalidCharacter
-        );
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
         assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("qsym6"));
         assert!(i.next().is_none());
     }
@@ -603,18 +543,9 @@ mod tests {
     fn test_read_invalid_macro() {
         let s = "#T #F #t#f  ";
         let mut i = LispParser::<ValueTypesRc, _>::new(s.chars().peekable());
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            crate::ErrorKind::InvalidToken
-        );
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            crate::ErrorKind::InvalidToken
-        );
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            crate::ErrorKind::InvalidToken
-        );
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
         assert!(i.next().is_none());
     }
 
@@ -625,10 +556,7 @@ mod tests {
         assert_eq!(i.next().unwrap().unwrap(), v_str!("a"));
         assert_eq!(i.next().unwrap().unwrap(), v_str!("b \""));
         assert_eq!(i.next().unwrap().unwrap(), v_str!("n\n\\c"));
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            crate::ErrorKind::EndOfFile
-        );
+        assert_eq!(i.next().unwrap().unwrap_err(), e_end_of_file!(ValueTypesRc));
         assert!(i.next().is_none());
     }
 
@@ -640,10 +568,7 @@ mod tests {
             i.next().unwrap().unwrap(),
             v_list!(v_qsym!("std", "quote"), v_uqsym!("a"))
         );
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            crate::ErrorKind::EndOfFile
-        );
+        assert_eq!(i.next().unwrap().unwrap_err(), e_end_of_file!(ValueTypesRc));
         assert!(i.next().is_none());
     }
 
@@ -675,34 +600,25 @@ mod tests {
                 v_comma!(v_uqsym!("h"))
             ))
         );
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            ErrorKind::IllegalSplice
-        );
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
         assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("i"));
         assert_eq!(
             i.next().unwrap().unwrap(),
             v_bq!(v_list!(v_uqsym!("j"), v_splice!(v_uqsym!("k"))))
         );
-        assert_eq!(i.next().unwrap().unwrap_err().kind, ErrorKind::IllegalComma);
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
         assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("l"));
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            ErrorKind::IllegalSplice
-        );
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
         assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("m"));
-        assert_eq!(i.next().unwrap().unwrap_err().kind, ErrorKind::IllegalComma);
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
         assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("n"));
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            ErrorKind::IllegalSplice
-        );
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
         assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("o"));
         assert_eq!(
             i.next().unwrap().unwrap(),
             v_bq!(v_bq!(v_comma!(v_comma!(v_uqsym!("p")))))
         );
-        assert_eq!(i.next().unwrap().unwrap_err().kind, ErrorKind::IllegalComma);
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
         assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("q"));
         assert_eq!(
             i.next().unwrap().unwrap(),
@@ -715,15 +631,9 @@ mod tests {
                 v_splice!(v_uqsym!("t"))
             ))))
         );
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            ErrorKind::IllegalSplice
-        );
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
         assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("u"));
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            ErrorKind::InvalidCharacter
-        );
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
         assert_eq!(
             i.next().unwrap().unwrap(),
             v_bq!(v_bq!(v_list!(v_comma!(v_comma!(v_uqsym!("v"))))))
@@ -740,140 +650,50 @@ mod tests {
             i.next().unwrap().unwrap(),
             v_bq!(v_bq!(v_list!(v_comma!(v_list!(v_comma!(v_uqsym!("y")))))))
         );
-        assert_eq!(i.next().unwrap().unwrap_err().kind, ErrorKind::IllegalComma);
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
         assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("z"));
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            ErrorKind::InvalidCharacter
-        );
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            ErrorKind::IllegalSplice
-        );
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
         assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("aa"));
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            ErrorKind::InvalidCharacter
-        );
-        assert_eq!(i.next().unwrap().unwrap_err().kind, ErrorKind::IllegalComma);
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
         assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("ab"));
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            ErrorKind::InvalidCharacter
-        );
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            ErrorKind::InvalidCharacter
-        );
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            ErrorKind::IllegalSplice
-        );
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
         assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("ad"));
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            ErrorKind::InvalidCharacter
-        );
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            ErrorKind::InvalidCharacter
-        );
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            ErrorKind::IllegalSplice
-        );
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
         assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("af"));
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            ErrorKind::InvalidCharacter
-        );
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            ErrorKind::InvalidCharacter
-        );
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            ErrorKind::InvalidCharacter
-        );
-        assert_eq!(i.next().unwrap().unwrap_err().kind, ErrorKind::IllegalComma);
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
         assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("ai"));
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            ErrorKind::InvalidCharacter
-        );
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            ErrorKind::InvalidCharacter
-        );
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            ErrorKind::InvalidCharacter
-        );
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            ErrorKind::InvalidCharacter
-        );
-        assert_eq!(i.next().unwrap().unwrap_err().kind, ErrorKind::IllegalComma);
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
         assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("ak"));
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            ErrorKind::InvalidCharacter
-        );
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            ErrorKind::InvalidCharacter
-        );
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            ErrorKind::InvalidCharacter
-        );
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            ErrorKind::InvalidCharacter
-        );
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            ErrorKind::IllegalSplice
-        );
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
         assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("am"));
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            ErrorKind::InvalidCharacter
-        );
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            ErrorKind::InvalidCharacter
-        );
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            ErrorKind::InvalidCharacter
-        );
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            ErrorKind::IllegalSplice
-        );
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
         assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("ao"));
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            ErrorKind::InvalidCharacter
-        );
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            ErrorKind::InvalidCharacter
-        );
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            ErrorKind::IllegalSplice
-        );
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
         assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("aq"));
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            ErrorKind::InvalidCharacter
-        );
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            ErrorKind::InvalidCharacter
-        );
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
     }
 
     #[test]
@@ -883,18 +703,9 @@ mod tests {
         assert_eq!(i.next().unwrap().unwrap(), v_v![1, 5]);
         assert_eq!(i.next().unwrap().unwrap(), v_v![3]);
         assert_eq!(i.next().unwrap().unwrap(), v_v![2, 5, 4]);
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            crate::ErrorKind::InvalidSemverComponent
-        );
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            crate::ErrorKind::InvalidCharacter
-        );
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            crate::ErrorKind::InvalidToken
-        );
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
         assert!(i.next().is_none());
     }
 
@@ -906,24 +717,12 @@ mod tests {
         assert_eq!(i.next().unwrap().unwrap(), v_lang_other!("not-kira"));
         assert_eq!(i.next().unwrap().unwrap(), v_lang_other!("Kira"));
         assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("1.0"));
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            crate::ErrorKind::InvalidToken
-        );
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            crate::ErrorKind::InvalidCharacter
-        );
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            crate::ErrorKind::InvalidToken
-        );
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
         assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("kira"));
         assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("1.0"));
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            crate::ErrorKind::InvalidSemverComponent
-        );
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
         assert!(i.next().is_none());
     }
 
@@ -947,33 +746,15 @@ mod tests {
             i.next().unwrap().unwrap(),
             v_list!(v_uqsym!("s7"), v_list!(), v_str!("s8"))
         );
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            crate::ErrorKind::InvalidToken
-        );
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
         assert_eq!(i.next().unwrap().unwrap(), v_bool!(false));
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            crate::ErrorKind::InvalidCharacter
-        );
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            crate::ErrorKind::InvalidToken
-        );
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
         assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("s10"));
         assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("s11"));
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            crate::ErrorKind::InvalidToken
-        );
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            crate::ErrorKind::InvalidToken
-        );
-        assert_eq!(
-            i.next().unwrap().unwrap_err().kind,
-            crate::ErrorKind::EndOfFile
-        );
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_end_of_file!(ValueTypesRc));
         assert!(i.next().is_none());
     }
 
