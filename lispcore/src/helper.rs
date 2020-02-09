@@ -51,6 +51,37 @@ where
     }
 }
 
+pub struct OptionalLiteralMacroParameterConsumer<T>(PhantomData<T>);
+
+impl<T> OptionalLiteralMacroParameterConsumer<T> {
+    pub fn new() -> Self {
+        Self(PhantomData)
+    }
+}
+
+impl<C, D, T> MacroParameterConsumer<C, D> for OptionalLiteralMacroParameterConsumer<T>
+where
+    C: ValueTypes + ?Sized,
+    D: ValueTypesMut + ?Sized,
+    D::StringTypes: StringTypesMut,
+    D::SemverTypes: SemverTypesMut,
+    Value<C>: TryInto<T>,
+{
+    type ParameterType = Option<T>;
+
+    fn consume_parameter(
+        &self,
+        _env: &mut dyn Environment<C, D>,
+        params: &mut ValueList<C>,
+    ) -> Result<Self::ParameterType, D> {
+        params
+            .next()
+            .map(|p| p.try_into())
+            .transpose()
+            .map_err(|_| e_type_error!(D))
+    }
+}
+
 pub struct CompiledMacroParameterConsumer(ValueType);
 
 impl CompiledMacroParameterConsumer {
@@ -177,6 +208,34 @@ mod tests {
             MacroParameterConsumer::<_, ValueTypesRc>::consume_parameter(&con, env, &mut l)
                 .unwrap_err(),
             e_program_error!(ValueTypesRc)
+        );
+        assert_eq!(l, list!());
+    }
+
+    #[test]
+    fn test_optional_literal_macro_parameter_consumer() {
+        let mut env = SimpleEnvironment;
+        let env = &mut env as &mut dyn Environment<ValueTypesStatic, ValueTypesRc>;
+
+        let con = OptionalLiteralMacroParameterConsumer::<ValueString<StringTypesStatic>>::new();
+        let mut l = list!(v_str!("str"), v_bool!(true));
+
+        assert_eq!(
+            MacroParameterConsumer::<_, ValueTypesRc>::consume_parameter(&con, env, &mut l)
+                .unwrap(),
+            Option::Some(str!("str"))
+        );
+        assert_eq!(l, list!(v_bool!(true)));
+        assert_eq!(
+            MacroParameterConsumer::<_, ValueTypesRc>::consume_parameter(&con, env, &mut l)
+                .unwrap_err(),
+            e_type_error!(ValueTypesRc)
+        );
+        assert_eq!(l, list!());
+        assert_eq!(
+            MacroParameterConsumer::<_, ValueTypesRc>::consume_parameter(&con, env, &mut l)
+                .unwrap(),
+            Option::None
         );
         assert_eq!(l, list!());
     }
