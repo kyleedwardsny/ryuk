@@ -113,6 +113,42 @@ where
     }
 }
 
+pub struct OptionalCompiledMacroParameterConsumer(ValueType);
+
+impl OptionalCompiledMacroParameterConsumer {
+    pub fn new(expected_type: ValueType) -> Self {
+        Self(expected_type)
+    }
+}
+
+impl<C, D> MacroParameterConsumer<C, D> for OptionalCompiledMacroParameterConsumer
+where
+    C: ValueTypes + ?Sized + 'static,
+    D: ValueTypesMut + ?Sized + 'static,
+    D::StringTypes: StringTypesMut,
+    D::SemverTypes: SemverTypesMut,
+{
+    type ParameterType = Option<CompilationResult<C, D>>;
+
+    fn consume_parameter(
+        &self,
+        env: &mut dyn Environment<C, D>,
+        params: &mut ValueList<C>,
+    ) -> Result<Self::ParameterType, D> {
+        params
+            .next()
+            .map(|p| {
+                let comp = env.compile(p)?;
+                if self.0.contains(&comp.return_type) {
+                    Result::Ok(comp)
+                } else {
+                    Result::Err(e_type_error!(D))
+                }
+            })
+            .transpose()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -277,6 +313,48 @@ mod tests {
             MacroParameterConsumer::<_, ValueTypesRc>::consume_parameter(&con, env, &mut l)
                 .unwrap_err(),
             e_program_error!(ValueTypesRc)
+        );
+        assert_eq!(l, list!());
+    }
+
+    #[test]
+    fn test_optional_compiled_macro_parameter_consumer() {
+        use std::iter::FromIterator;
+
+        let mut env = SimpleEnvironment;
+        let env = &mut env as &mut dyn Environment<ValueTypesStatic, ValueTypesRc>;
+
+        let con = OptionalCompiledMacroParameterConsumer::new(ValueType::Some(
+            BTreeSet::from_iter(vec![ValueTypeSome::String, ValueTypeSome::Bool]),
+        ));
+        let mut l = list!(v_str!("str"), v_bool!(true), v_list!());
+
+        assert_eq!(
+            MacroParameterConsumer::<_, ValueTypesRc>::consume_parameter(&con, env, &mut l)
+                .unwrap()
+                .unwrap()
+                .return_type,
+            ValueType::Some(BTreeSet::from_iter(std::iter::once(ValueTypeSome::String)))
+        );
+        assert_eq!(l, list!(v_bool!(true), v_list!()));
+        assert_eq!(
+            MacroParameterConsumer::<_, ValueTypesRc>::consume_parameter(&con, env, &mut l)
+                .unwrap()
+                .unwrap()
+                .return_type,
+            ValueType::Some(BTreeSet::from_iter(std::iter::once(ValueTypeSome::Bool)))
+        );
+        assert_eq!(l, list!(v_list!()));
+        assert_eq!(
+            MacroParameterConsumer::<_, ValueTypesRc>::consume_parameter(&con, env, &mut l)
+                .unwrap_err(),
+            e_type_error!(ValueTypesRc)
+        );
+        assert_eq!(l, list!());
+        assert!(
+            MacroParameterConsumer::<_, ValueTypesRc>::consume_parameter(&con, env, &mut l)
+                .unwrap()
+                .is_none()
         );
         assert_eq!(l, list!());
     }
