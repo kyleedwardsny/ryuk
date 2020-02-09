@@ -81,11 +81,11 @@ where
     }
 }
 
-pub struct CompiledMacroParameterConsumer(ValueType);
+pub struct CompiledMacroParameterConsumer(OptionalCompiledMacroParameterConsumer);
 
 impl CompiledMacroParameterConsumer {
     pub fn new(expected_type: ValueType) -> Self {
-        Self(expected_type)
+        Self(OptionalCompiledMacroParameterConsumer::new(expected_type))
     }
 }
 
@@ -103,12 +103,10 @@ where
         env: &mut dyn Environment<C, D>,
         params: &mut ValueList<C>,
     ) -> Result<Self::ParameterType, D> {
-        let comp = env.compile(params.next().ok_or(e_program_error!(D))?)?;
-        if self.0.contains(&comp.return_type) {
-            Result::Ok(comp)
-        } else {
-            Result::Err(e_type_error!(D))
-        }
+        self.0
+            .consume_parameter(env, params)
+            .transpose()
+            .ok_or(e_program_error!(D))?
     }
 }
 
