@@ -357,6 +357,81 @@ impl ValueType {
             },
         }
     }
+
+    pub fn contains(&self, other: &ValueType) -> bool {
+        match self {
+            ValueType::Any => true,
+            ValueType::Some(t1) => match other {
+                ValueType::Any => false,
+                ValueType::Some(t2) => {
+                    for t in t2 {
+                        if !Self::set_contains_some(t1, t) {
+                            return false;
+                        }
+                    }
+                    true
+                }
+            },
+        }
+    }
+
+    fn set_contains_some(types: &BTreeSet<ValueTypeSome>, some: &ValueTypeSome) -> bool {
+        match some {
+            ValueTypeSome::List(t2) => {
+                for t1 in types {
+                    match t1 {
+                        ValueTypeSome::List(t1l) => {
+                            if t1l.contains(t2) {
+                                return true;
+                            }
+                        }
+                        _ => (),
+                    }
+                }
+                false
+            }
+            ValueTypeSome::Backquote(t2) => {
+                for t1 in types {
+                    match t1 {
+                        ValueTypeSome::Backquote(t1b) => {
+                            if t1b.contains(t2) {
+                                return true;
+                            }
+                        }
+                        _ => (),
+                    }
+                }
+                false
+            }
+            ValueTypeSome::Comma(t2) => {
+                for t1 in types {
+                    match t1 {
+                        ValueTypeSome::Comma(t1c) => {
+                            if t1c.contains(t2) {
+                                return true;
+                            }
+                        }
+                        _ => (),
+                    }
+                }
+                false
+            }
+            ValueTypeSome::Splice(t2) => {
+                for t1 in types {
+                    match t1 {
+                        ValueTypeSome::Splice(t1s) => {
+                            if t1s.contains(t2) {
+                                return true;
+                            }
+                        }
+                        _ => (),
+                    }
+                }
+                false
+            }
+            _ => types.contains(some),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -372,6 +447,18 @@ pub enum ValueTypeSome {
     Backquote(ValueType),
     Comma(ValueType),
     Splice(ValueType),
+}
+
+impl ValueTypeSome {
+    pub fn contains(&self, other: &ValueTypeSome) -> bool {
+        match (self, other) {
+            (ValueTypeSome::List(t1), ValueTypeSome::List(t2)) => t1.contains(t2),
+            (ValueTypeSome::Backquote(t1), ValueTypeSome::Backquote(t2)) => t1.contains(t2),
+            (ValueTypeSome::Comma(t1), ValueTypeSome::Comma(t2)) => t1.contains(t2),
+            (ValueTypeSome::Splice(t1), ValueTypeSome::Splice(t2)) => t1.contains(t2),
+            _ => self == other,
+        }
+    }
 }
 
 impl<T> Value<T>
@@ -835,6 +922,61 @@ mod tests {
         );
         some1.append(&mut any1);
         assert_eq!(some1, ValueType::Any);
+    }
+
+    #[test]
+    fn test_contains_value_type() {
+        let some1 = ValueType::Some(BTreeSet::from_iter(vec![
+            ValueTypeSome::List(ValueType::Some(BTreeSet::from_iter(vec![
+                ValueTypeSome::String,
+                ValueTypeSome::Bool,
+            ]))),
+            ValueTypeSome::Backquote(ValueType::Some(BTreeSet::from_iter(std::iter::once(
+                ValueTypeSome::String,
+            )))),
+            ValueTypeSome::Comma(ValueType::Some(BTreeSet::from_iter(std::iter::once(
+                ValueTypeSome::String,
+            )))),
+            ValueTypeSome::Splice(ValueType::Any),
+            ValueTypeSome::String,
+        ]));
+
+        let any1 = ValueType::Any;
+
+        assert!(any1.contains(&some1));
+        assert!(any1.contains(&any1));
+        assert!(!some1.contains(&any1));
+
+        let some2 = ValueType::Some(BTreeSet::from_iter(vec![
+            ValueTypeSome::List(ValueType::Some(BTreeSet::from_iter(std::iter::once(
+                ValueTypeSome::String,
+            )))),
+            ValueTypeSome::List(ValueType::Some(BTreeSet::from_iter(std::iter::once(
+                ValueTypeSome::Bool,
+            )))),
+            ValueTypeSome::Backquote(ValueType::Some(BTreeSet::from_iter(std::iter::once(
+                ValueTypeSome::String,
+            )))),
+            ValueTypeSome::Comma(ValueType::Some(BTreeSet::from_iter(std::iter::once(
+                ValueTypeSome::String,
+            )))),
+            ValueTypeSome::Splice(ValueType::Some(BTreeSet::from_iter(vec![
+                ValueTypeSome::String,
+                ValueTypeSome::Bool,
+            ]))),
+            ValueTypeSome::String,
+        ]));
+        assert!(some1.contains(&some2));
+
+        let some2 = ValueType::Some(BTreeSet::from_iter(vec![
+            ValueTypeSome::List(ValueType::Any),
+            ValueTypeSome::Backquote(ValueType::Any),
+            ValueTypeSome::Comma(ValueType::Any),
+            ValueTypeSome::Splice(ValueType::Any),
+            ValueTypeSome::String,
+        ]));
+        assert!(!some1.contains(&some2));
+        assert!(some2.contains(&some1));
     }
 
     #[test]
