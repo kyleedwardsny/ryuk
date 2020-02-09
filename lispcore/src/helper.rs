@@ -40,14 +40,13 @@ where
 
     fn consume_parameter(
         &self,
-        _env: &mut dyn Environment<C, D>,
+        env: &mut dyn Environment<C, D>,
         params: &mut ValueList<C>,
     ) -> Result<Self::ParameterType, D> {
-        params
-            .next()
+        OptionalLiteralMacroParameterConsumer::<T>::new()
+            .consume_parameter(env, params)
+            .transpose()
             .ok_or(e_program_error!(D))?
-            .try_into()
-            .map_err(|_| e_type_error!(D))
     }
 }
 
