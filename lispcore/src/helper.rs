@@ -43,11 +43,11 @@ where
         _env: &mut dyn Environment<C, D>,
         params: &mut ValueList<C>,
     ) -> Result<Self::ParameterType, D> {
-        if let Option::Some(param) = params.next() {
-            param.try_into().map_err(|_| e_type_error!(D))
-        } else {
-            Result::Err(e_program_error!(D))
-        }
+        params
+            .next()
+            .ok_or(e_program_error!(D))?
+            .try_into()
+            .map_err(|_| e_type_error!(D))
     }
 }
 
