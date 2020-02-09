@@ -977,6 +977,14 @@ mod tests {
         ]));
         assert!(!some1.contains(&some2));
         assert!(some2.contains(&some1));
+
+        assert!(ValueTypeSome::String.contains(&ValueTypeSome::String));
+        assert!(!ValueTypeSome::String.contains(&ValueTypeSome::Bool));
+        assert!(
+            ValueTypeSome::List(ValueType::Any).contains(&ValueTypeSome::List(ValueType::Some(
+                BTreeSet::from_iter(std::iter::once(ValueTypeSome::Bool))
+            )))
+        );
     }
 
     #[test]
