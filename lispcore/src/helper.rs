@@ -4,6 +4,104 @@ use crate::value::*;
 use std::convert::TryInto;
 use std::marker::PhantomData;
 
+pub struct MacroParameterHelper<T>(T);
+
+impl MacroParameterHelper<()> {
+    pub fn new() -> Self {
+        Self(())
+    }
+}
+
+macro_rules! impl_helper_impl {
+    ($env:ident, $params:ident, $($i:tt: $t:ident),*) => {
+        impl<$($t),*> MacroParameterHelper<($($t,)*)> {
+            pub fn param<T>(self, next: T) -> MacroParameterHelper<($($t,)* T,)> {
+                MacroParameterHelper(($((self.0).$i,)* next,))
+            }
+
+            pub fn literal<T>(self) -> MacroParameterHelper<($($t,)* LiteralMacroParameterConsumer<T>,)> {
+                self.param(LiteralMacroParameterConsumer::new())
+            }
+
+            pub fn optional_literal<T>(self) -> MacroParameterHelper<($($t,)* OptionalLiteralMacroParameterConsumer<T>,)> {
+                self.param(OptionalLiteralMacroParameterConsumer::new())
+            }
+
+            pub fn compiled(self, expected_type: ValueType) -> MacroParameterHelper<($($t,)* CompiledMacroParameterConsumer,)> {
+                self.param(CompiledMacroParameterConsumer::new(expected_type))
+            }
+
+            pub fn optional_compiled(self, expected_type: ValueType) -> MacroParameterHelper<($($t,)* OptionalCompiledMacroParameterConsumer,)> {
+                self.param(OptionalCompiledMacroParameterConsumer::new(expected_type))
+            }
+
+            pub fn consume_parameters<CT, DT>(
+                &self,
+                $env: &mut dyn Environment<CT, DT>,
+                $params: &mut ValueList<CT>
+            ) -> Result<($($t::ParameterType,)*), DT>
+            where
+                CT: ValueTypes + ?Sized,
+                DT: ValueTypesMut + ?Sized,
+                DT::StringTypes: StringTypesMut,
+                DT::SemverTypes: SemverTypesMut,
+                $($t: MacroParameterConsumer<CT, DT>),*
+            {
+                let result = ($((self.0).$i.consume_parameter($env, $params)?,)*);
+                $params.next().map_or_else(|| Result::Ok(result), |_| Result::Err(e_program_error!(DT)))
+            }
+        }
+    };
+}
+
+macro_rules! impl_helper {
+    () => {
+        impl_helper_impl!(_env, _params,);
+    };
+    ($($i:tt: $t:ident),*) => {
+        impl_helper_impl!(env, params, $($i: $t),*);
+    };
+}
+
+impl_helper!();
+impl_helper!(0: A);
+impl_helper!(0: A, 1: B);
+impl_helper!(0: A, 1: B, 2: C);
+impl_helper!(0: A, 1: B, 2: C, 3: D);
+impl_helper!(0: A, 1: B, 2: C, 3: D, 4: E);
+impl_helper!(0: A, 1: B, 2: C, 3: D, 4: E, 5: F);
+impl_helper!(0: A, 1: B, 2: C, 3: D, 4: E, 5: F, 6: G);
+impl_helper!(0: A, 1: B, 2: C, 3: D, 4: E, 5: F, 6: G, 7: H);
+impl_helper!(0: A, 1: B, 2: C, 3: D, 4: E, 5: F, 6: G, 7: H, 8: I);
+impl_helper!(0: A, 1: B, 2: C, 3: D, 4: E, 5: F, 6: G, 7: H, 8: I, 9: J);
+impl_helper!(
+    0: A,
+    1: B,
+    2: C,
+    3: D,
+    4: E,
+    5: F,
+    6: G,
+    7: H,
+    8: I,
+    9: J,
+    10: K
+);
+impl_helper!(
+    0: A,
+    1: B,
+    2: C,
+    3: D,
+    4: E,
+    5: F,
+    6: G,
+    7: H,
+    8: I,
+    9: J,
+    10: K,
+    11: L
+);
+
 pub trait MacroParameterConsumer<C, D>
 where
     C: ValueTypes + ?Sized,
@@ -215,6 +313,123 @@ mod tests {
         ) -> Option<Result<ValueType, D>> {
             Option::None
         }
+    }
+
+    #[test]
+    fn test_macro_parameter_helper() {
+        use std::iter::FromIterator;
+
+        let mut env = SimpleEnvironment;
+        let env = &mut env as &mut dyn Environment<ValueTypesStatic, ValueTypesRc>;
+
+        let helper = MacroParameterHelper::new()
+            .literal::<ValueString<StringTypesStatic>>()
+            .compiled(ValueType::Some(BTreeSet::from_iter(vec![
+                ValueTypeSome::Bool,
+                ValueTypeSome::UnqualifiedSymbol,
+            ])))
+            .optional_literal::<ValueBool>()
+            .optional_compiled(ValueType::Some(BTreeSet::from_iter(std::iter::once(
+                ValueTypeSome::String,
+            ))));
+
+        let (s1, b1, b2, s2) = helper
+            .consume_parameters(
+                env,
+                &mut list!(
+                    v_str!("str1"),
+                    v_bool!(true),
+                    v_bool!(false),
+                    v_str!("str2")
+                ),
+            )
+            .unwrap();
+        assert_eq!(s1, str!("str1"));
+        assert_eq!(
+            b1.return_type,
+            ValueType::Some(BTreeSet::from_iter(std::iter::once(ValueTypeSome::Bool)))
+        );
+        assert_eq!(b2.unwrap(), bool!(false));
+        assert_eq!(
+            s2.unwrap().return_type,
+            ValueType::Some(BTreeSet::from_iter(std::iter::once(ValueTypeSome::String)))
+        );
+
+        assert_eq!(
+            helper
+                .consume_parameters(
+                    env,
+                    &mut list!(
+                        v_str!("str1"),
+                        v_bool!(true),
+                        v_bool!(false),
+                        v_str!("str2"),
+                        v_str!("str3")
+                    )
+                )
+                .unwrap_err(),
+            e_program_error!(ValueTypesRc)
+        );
+
+        let (s1, b1, b2, s2) = helper
+            .consume_parameters(
+                env,
+                &mut list!(v_str!("str1"), v_bool!(true), v_bool!(false)),
+            )
+            .unwrap();
+        assert_eq!(s1, str!("str1"));
+        assert_eq!(
+            b1.return_type,
+            ValueType::Some(BTreeSet::from_iter(std::iter::once(ValueTypeSome::Bool)))
+        );
+        assert_eq!(b2.unwrap(), bool!(false));
+        assert!(s2.is_none());
+
+        let (s1, b1, b2, s2) = helper
+            .consume_parameters(env, &mut list!(v_str!("str1"), v_bool!(true)))
+            .unwrap();
+        assert_eq!(s1, str!("str1"));
+        assert_eq!(
+            b1.return_type,
+            ValueType::Some(BTreeSet::from_iter(std::iter::once(ValueTypeSome::Bool)))
+        );
+        assert!(b2.is_none());
+        assert!(s2.is_none());
+
+        assert_eq!(
+            helper
+                .consume_parameters(
+                    env,
+                    &mut list!(v_str!("str1"), v_bool!(true), v_bool!(false), v_list!())
+                )
+                .unwrap_err(),
+            e_type_error!(ValueTypesRc)
+        );
+
+        assert_eq!(
+            helper
+                .consume_parameters(
+                    env,
+                    &mut list!(
+                        v_str!("str1"),
+                        v_bool!(true),
+                        v_str!("str2"),
+                        v_str!("str3")
+                    )
+                )
+                .unwrap_err(),
+            e_type_error!(ValueTypesRc)
+        );
+
+        assert_eq!(
+            helper
+                .consume_parameters(
+                    env,
+                    &mut list!(v_str!("str1"), v_bool!(true), v_str!("str2"))
+                )
+                .unwrap_err(),
+            e_type_error!(ValueTypesRc)
+        );
     }
 
     #[test]
