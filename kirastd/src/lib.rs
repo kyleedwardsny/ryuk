@@ -1,5 +1,6 @@
 use ryuk_lispcore::env::*;
 use ryuk_lispcore::error::*;
+use ryuk_lispcore::helper::*;
 use ryuk_lispcore::value::*;
 use ryuk_lispcore::*;
 use std::collections::BTreeSet;
@@ -64,62 +65,28 @@ where
 {
     use std::iter::FromIterator;
 
-    let mut return_type;
+    let helper = MacroParameterHelper::new()
+        .compiled(ValueType::Some(BTreeSet::from_iter(std::iter::once(
+            ValueTypeSome::Bool,
+        ))))
+        .compiled(ValueType::Any)
+        .optional_compiled(ValueType::Any);
 
-    let test;
-    match params.next() {
-        Option::Some(test_item) => {
-            let test_comp = env.compile(test_item)?;
-            if test_comp.return_type
-                != ValueType::Some(BTreeSet::from_iter(std::iter::once(ValueTypeSome::Bool)))
-            {
-                return Result::Err(e_type_error!(D));
-            }
-            test = test_comp.result;
-        }
-        _ => {
-            return Result::Err(e_program_error!(D));
-        }
-    }
+    let (test, then, els) = helper.consume_parameters(env, &mut params)?;
+    let mut els = els.unwrap_or_else(|| CompilationResult {
+        result: Box::new(LiteralEvaluator::new(Value::<ValueTypesStatic>::List(
+            ValueList(Option::None),
+        ))),
+        return_type: ValueType::Some(BTreeSet::from_iter(std::iter::once(ValueTypeSome::List(
+            ValueType::Some(BTreeSet::new()),
+        )))),
+    });
 
-    let then;
-    match params.next() {
-        Option::Some(then_item) => {
-            let then_comp = env.compile(then_item)?;
-            return_type = then_comp.return_type;
-            then = then_comp.result;
-        }
-        _ => {
-            return Result::Err(e_program_error!(D));
-        }
-    }
-
-    let els;
-    match params.next() {
-        Option::Some(els_item) => {
-            let mut els_comp = env.compile(els_item)?;
-            return_type.append(&mut els_comp.return_type);
-            els = els_comp.result;
-        }
-        Option::None => {
-            return_type.append(&mut ValueType::Some(BTreeSet::from_iter(std::iter::once(
-                ValueTypeSome::List(ValueType::Some(BTreeSet::new())),
-            ))));
-            els = Box::new(LiteralEvaluator::new(Value::<ValueTypesStatic>::List(
-                ValueList(Option::None),
-            )));
-        }
-    }
-
-    match params.next() {
-        Option::Some(_) => {
-            return Result::Err(e_program_error!(D));
-        }
-        _ => (),
-    }
+    let mut return_type = then.return_type;
+    return_type.append(&mut els.return_type);
 
     Result::Ok(CompilationResult {
-        result: Box::new(IfEvaluator::new(test, then, els)),
+        result: Box::new(IfEvaluator::new(test.result, then.result, els.result)),
         return_type,
     })
 }
