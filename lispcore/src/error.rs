@@ -3,62 +3,42 @@ use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 
 #[derive(Debug)]
-pub struct Error<T>
-where
-    T: ValueTypes + ?Sized,
-{
-    pub kind: ValueQualifiedSymbol<T::StringTypes>,
-    pub fields: HashMap<ValueQualifiedSymbol<T::StringTypes>, Value<T>>,
+pub struct Error {
+    pub kind: ValueQualifiedSymbol,
+    pub fields: HashMap<ValueQualifiedSymbol, Value>,
 }
 
-impl<T> Error<T>
-where
-    T: ValueTypes + ?Sized,
-{
-    pub fn new(
-        kind: ValueQualifiedSymbol<T::StringTypes>,
-        fields: HashMap<ValueQualifiedSymbol<T::StringTypes>, Value<T>>,
-    ) -> Self {
+impl Error {
+    pub fn new(kind: ValueQualifiedSymbol, fields: HashMap<ValueQualifiedSymbol, Value>) -> Self {
         Self { kind, fields }
     }
 }
 
-impl<T> std::error::Error for Error<T> where T: ValueTypes + ?Sized {}
+impl std::error::Error for Error {}
 
-impl<T> Display for Error<T>
-where
-    T: ValueTypes + ?Sized,
-{
+impl Display for Error {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         write!(f, "<ERROR {}:{}>", self.kind.package, self.kind.name)
     }
 }
 
-impl<T> PartialEq<Error<T>> for Error<T>
-where
-    T: ValueTypes + ?Sized,
-{
-    fn eq(&self, rhs: &Error<T>) -> bool {
+impl PartialEq<Error> for Error {
+    fn eq(&self, rhs: &Error) -> bool {
         self.kind == rhs.kind && self.fields == rhs.fields
     }
 }
 
-impl<T> Eq for Error<T> where T: ValueTypes + ?Sized {}
+impl Eq for Error {}
 
-pub type Result<T, ET> = std::result::Result<T, Error<ET>>;
+pub type Result<T> = std::result::Result<T, Error>;
 
 #[macro_export]
 macro_rules! e_std_cond {
-    ($t:ident, $name:expr) => {
-        $crate::error::Error::<$t> {
-            kind: $crate::value::ValueQualifiedSymbol::<<$t as $crate::value::ValueTypes>::StringTypes> {
-                package:
-                    <<$t as $crate::value::ValueTypes>::StringTypes as $crate::value::StringTypes>::string_ref_from_static_str(
-                        "std",
-                    ),
-                name: <<$t as $crate::value::ValueTypes>::StringTypes as $crate::value::StringTypes>::string_ref_from_static_str(
-                    $name,
-                ),
+    ($name:expr) => {
+        $crate::error::Error {
+            kind: $crate::value::ValueQualifiedSymbol {
+                package: "std".into(),
+                name: $name.into(),
             },
             fields: ::std::collections::HashMap::new(),
         }
@@ -67,28 +47,28 @@ macro_rules! e_std_cond {
 
 #[macro_export]
 macro_rules! e_program_error {
-    ($t:ident) => {
-        e_std_cond!($t, "program-error")
+    () => {
+        e_std_cond!("program-error")
     };
 }
 
 #[macro_export]
 macro_rules! e_type_error {
-    ($t:ident) => {
-        e_std_cond!($t, "type-error")
+    () => {
+        e_std_cond!("type-error")
     };
 }
 
 #[macro_export]
 macro_rules! e_unbound_variable {
-    ($t:ident) => {
-        e_std_cond!($t, "unbound-variable")
+    () => {
+        e_std_cond!("unbound-variable")
     };
 }
 
 #[macro_export]
 macro_rules! e_undefined_function {
-    ($t:ident) => {
-        e_std_cond!($t, "undefined-function")
+    () => {
+        e_std_cond!("undefined-function")
     };
 }

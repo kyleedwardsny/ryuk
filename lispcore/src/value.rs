@@ -1,137 +1,54 @@
 use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::convert::TryFrom;
-use std::fmt::{Debug, Display};
+use std::fmt::Debug;
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
-pub trait StringTypes: Debug {
-    type StringRef: Clone + Debug + Display + Hash;
-
-    fn string_ref_to_str(s: &Self::StringRef) -> &str;
-
-    fn string_ref_from_static_str(s: &'static str) -> Self::StringRef;
-}
-
-pub trait StringTypesMut: StringTypes {
-    fn string_ref_from_str(s: &str) -> Self::StringRef;
-
-    fn string_ref_from_string(s: String) -> Self::StringRef;
-}
-
-pub trait SemverTypes: Debug {
-    type SemverIter: Iterator<Item = u64>;
-    type SemverRef: Clone + Debug;
-
-    fn semver_ref_to_iter(v: &Self::SemverRef) -> Self::SemverIter;
-}
-
-pub trait SemverTypesMut: SemverTypes {
-    fn semver_ref_extend<T>(v: &mut Self::SemverRef, iter: T)
-    where
-        T: IntoIterator<Item = u64>;
-
-    fn semver_ref_from_iter<T>(iter: T) -> Self::SemverRef
-    where
-        T: IntoIterator<Item = u64>;
-
-    fn semver_ref_default() -> Self::SemverRef;
-}
-
-pub trait ValueTypes: Debug {
-    type ConsRef: Clone + Debug;
-    type ValueRef: Clone + Debug;
-    type StringTypes: StringTypes + ?Sized;
-    type SemverTypes: SemverTypes + ?Sized;
-
-    fn cons_ref_to_cons(c: &Self::ConsRef) -> &Cons<Self>;
-
-    fn value_ref_to_value(v: &Self::ValueRef) -> &Value<Self>;
-}
-
-pub trait ValueTypesMut: ValueTypes
-where
-    Self::StringTypes: StringTypesMut,
-    Self::SemverTypes: SemverTypesMut,
-{
-    fn cons_ref_from_cons(c: Cons<Self>) -> Self::ConsRef;
-
-    fn value_ref_from_value(v: Value<Self>) -> Self::ValueRef;
-}
-
 #[derive(Debug)]
-pub struct ValueList<T>(pub Option<T::ConsRef>)
-where
-    T: ValueTypes + ?Sized;
+pub struct ValueList(pub Option<Rc<Cons>>);
 
-impl<T> ValueList<T>
-where
-    T: ValueTypes + ?Sized,
-{
-    pub fn convert<T2>(&self) -> ValueList<T2>
-    where
-        T2: ValueTypesMut + ?Sized,
-        T2::StringTypes: StringTypesMut,
-        T2::SemverTypes: SemverTypesMut,
-    {
+impl ValueList {
+    pub fn deep_clone(&self) -> ValueList {
         ValueList(match &self.0 {
-            Option::Some(c) => {
-                let cons = c.borrow();
-                Option::Some(T2::cons_ref_from_cons(Cons {
-                    car: T::cons_ref_to_cons(cons).car.convert::<T2>(),
-                    cdr: T::cons_ref_to_cons(cons).cdr.convert::<T2>(),
-                }))
-            }
+            Option::Some(c) => Option::Some(Rc::new(Cons {
+                car: c.car.deep_clone(),
+                cdr: c.cdr.deep_clone(),
+            })),
             Option::None => Option::None,
         })
     }
 
-    fn list_eq<T2>(&self, other: &ValueList<T2>) -> bool
-    where
-        T2: ValueTypes + ?Sized,
-    {
+    fn list_eq(&self, other: &ValueList) -> bool {
         match (&self.0, &other.0) {
-            (Option::Some(c1), Option::Some(c2)) => {
-                T::cons_ref_to_cons(c1) == T2::cons_ref_to_cons(c2)
-            }
+            (Option::Some(c1), Option::Some(c2)) => c1 == c2,
             (Option::None, Option::None) => true,
             _ => false,
         }
     }
 }
 
-impl<T> Clone for ValueList<T>
-where
-    T: ValueTypes + ?Sized,
-{
+impl Clone for ValueList {
     fn clone(&self) -> Self {
         Self(self.0.clone())
     }
 }
 
-impl<T1, T2> PartialEq<ValueList<T2>> for ValueList<T1>
-where
-    T1: ValueTypes + ?Sized,
-    T2: ValueTypes + ?Sized,
-{
-    fn eq(&self, other: &ValueList<T2>) -> bool {
+impl PartialEq<ValueList> for ValueList {
+    fn eq(&self, other: &ValueList) -> bool {
         self.list_eq(other)
     }
 }
 
-impl<T> Iterator for ValueList<T>
-where
-    T: ValueTypes + ?Sized,
-{
-    type Item = Value<T>;
+impl Iterator for ValueList {
+    type Item = Value;
 
     fn next(&mut self) -> Option<Self::Item> {
         match &self.0 {
             Option::None => Option::None,
             Option::Some(c) => {
-                let cons = T::cons_ref_to_cons(c);
-                let car = cons.car.clone();
-                let cdr = cons.cdr.clone();
+                let car = c.car.clone();
+                let cdr = c.cdr.clone();
                 *self = cdr;
                 Option::Some(car)
             }
@@ -140,18 +57,12 @@ where
 }
 
 #[derive(Debug)]
-pub struct Cons<T>
-where
-    T: ValueTypes + ?Sized,
-{
-    pub car: Value<T>,
-    pub cdr: ValueList<T>,
+pub struct Cons {
+    pub car: Value,
+    pub cdr: ValueList,
 }
 
-impl<T> Clone for Cons<T>
-where
-    T: ValueTypes + ?Sized,
-{
+impl Clone for Cons {
     fn clone(&self) -> Self {
         Cons {
             car: self.car.clone(),
@@ -160,81 +71,34 @@ where
     }
 }
 
-impl<T1, T2> PartialEq<Cons<T2>> for Cons<T1>
-where
-    T1: ValueTypes + ?Sized,
-    T2: ValueTypes + ?Sized,
-    Value<T1>: PartialEq<Value<T2>>,
-{
-    fn eq(&self, other: &Cons<T2>) -> bool {
+impl PartialEq<Cons> for Cons {
+    fn eq(&self, other: &Cons) -> bool {
         self.car == other.car && self.cdr.list_eq(&other.cdr)
     }
 }
 
 #[derive(Debug)]
-pub struct ValueUnqualifiedSymbol<S>(pub S::StringRef)
-where
-    S: StringTypes + ?Sized;
+pub struct ValueUnqualifiedSymbol(pub String);
 
-impl<S> ValueUnqualifiedSymbol<S>
-where
-    S: StringTypes + ?Sized,
-{
-    pub fn convert<S2>(&self) -> ValueUnqualifiedSymbol<S2>
-    where
-        S2: StringTypesMut + ?Sized,
-    {
-        ValueUnqualifiedSymbol(S2::string_ref_from_str(S::string_ref_to_str(&self.0)))
-    }
-}
-
-impl<S> Clone for ValueUnqualifiedSymbol<S>
-where
-    S: StringTypes + ?Sized,
-{
+impl Clone for ValueUnqualifiedSymbol {
     fn clone(&self) -> Self {
         Self(self.0.clone())
     }
 }
 
-impl<S1, S2> PartialEq<ValueUnqualifiedSymbol<S2>> for ValueUnqualifiedSymbol<S1>
-where
-    S1: StringTypes + ?Sized,
-    S2: StringTypes + ?Sized,
-{
-    fn eq(&self, rhs: &ValueUnqualifiedSymbol<S2>) -> bool {
-        S1::string_ref_to_str(&self.0) == S2::string_ref_to_str(&rhs.0)
+impl PartialEq<ValueUnqualifiedSymbol> for ValueUnqualifiedSymbol {
+    fn eq(&self, rhs: &ValueUnqualifiedSymbol) -> bool {
+        self.0 == rhs.0
     }
 }
 
 #[derive(Debug)]
-pub struct ValueQualifiedSymbol<S>
-where
-    S: StringTypes + ?Sized,
-{
-    pub package: S::StringRef,
-    pub name: S::StringRef,
+pub struct ValueQualifiedSymbol {
+    pub package: String,
+    pub name: String,
 }
 
-impl<S> ValueQualifiedSymbol<S>
-where
-    S: StringTypes + ?Sized,
-{
-    pub fn convert<S2>(&self) -> ValueQualifiedSymbol<S2>
-    where
-        S2: StringTypesMut + ?Sized,
-    {
-        ValueQualifiedSymbol {
-            package: S2::string_ref_from_str(S::string_ref_to_str(&self.package)),
-            name: S2::string_ref_from_str(S::string_ref_to_str(&self.name)),
-        }
-    }
-}
-
-impl<S> Clone for ValueQualifiedSymbol<S>
-where
-    S: StringTypes + ?Sized,
-{
+impl Clone for ValueQualifiedSymbol {
     fn clone(&self) -> Self {
         Self {
             package: self.package.clone(),
@@ -243,23 +107,15 @@ where
     }
 }
 
-impl<S1, S2> PartialEq<ValueQualifiedSymbol<S2>> for ValueQualifiedSymbol<S1>
-where
-    S1: StringTypes + ?Sized,
-    S2: StringTypes + ?Sized,
-{
-    fn eq(&self, rhs: &ValueQualifiedSymbol<S2>) -> bool {
-        S1::string_ref_to_str(&self.package) == S2::string_ref_to_str(&rhs.package)
-            && S1::string_ref_to_str(&self.name) == S2::string_ref_to_str(&rhs.name)
+impl PartialEq<ValueQualifiedSymbol> for ValueQualifiedSymbol {
+    fn eq(&self, rhs: &ValueQualifiedSymbol) -> bool {
+        self.package == rhs.package && self.name == rhs.name
     }
 }
 
-impl<S> Eq for ValueQualifiedSymbol<S> where S: StringTypes + ?Sized {}
+impl Eq for ValueQualifiedSymbol {}
 
-impl<S> Hash for ValueQualifiedSymbol<S>
-where
-    S: StringTypes + ?Sized,
-{
+impl Hash for ValueQualifiedSymbol {
     fn hash<H>(&self, state: &mut H)
     where
         H: Hasher,
@@ -273,65 +129,28 @@ where
 pub struct ValueBool(pub bool);
 
 #[derive(Debug)]
-pub struct ValueString<S>(pub S::StringRef)
-where
-    S: StringTypes + ?Sized;
+pub struct ValueString(pub String);
 
-impl<S> ValueString<S>
-where
-    S: StringTypes + ?Sized,
-{
-    pub fn convert<S2>(&self) -> ValueString<S2>
-    where
-        S2: StringTypesMut + ?Sized,
-    {
-        ValueString(S2::string_ref_from_str(S::string_ref_to_str(&self.0)))
-    }
-}
-
-impl<S> Clone for ValueString<S>
-where
-    S: StringTypes + ?Sized,
-{
+impl Clone for ValueString {
     fn clone(&self) -> Self {
         Self(self.0.clone())
     }
 }
 
-impl<S1, S2> PartialEq<ValueString<S2>> for ValueString<S1>
-where
-    S1: StringTypes + ?Sized,
-    S2: StringTypes + ?Sized,
-{
-    fn eq(&self, rhs: &ValueString<S2>) -> bool {
-        S1::string_ref_to_str(&self.0) == S2::string_ref_to_str(&rhs.0)
+impl PartialEq<ValueString> for ValueString {
+    fn eq(&self, rhs: &ValueString) -> bool {
+        self.0 == rhs.0
     }
 }
 
 #[derive(Debug)]
-pub struct ValueSemver<T>
-where
-    T: SemverTypes + ?Sized,
-{
+pub struct ValueSemver {
     pub major: u64,
-    pub rest: T::SemverRef,
+    pub rest: Vec<u64>,
 }
 
-impl<T> ValueSemver<T>
-where
-    T: SemverTypes + ?Sized,
-{
-    pub fn convert<T2>(&self) -> ValueSemver<T2>
-    where
-        T2: SemverTypesMut + ?Sized,
-    {
-        ValueSemver {
-            major: self.major,
-            rest: T2::semver_ref_from_iter(T::semver_ref_to_iter(&self.rest)),
-        }
-    }
-
-    pub fn items<'v>(&'v self) -> SemverIter<'v, T> {
+impl ValueSemver {
+    pub fn items<'v>(&'v self) -> SemverIter<'v> {
         SemverIter {
             v: self,
             iter: Option::None,
@@ -339,10 +158,7 @@ where
     }
 }
 
-impl<T> Clone for ValueSemver<T>
-where
-    T: SemverTypes + ?Sized,
-{
+impl Clone for ValueSemver {
     fn clone(&self) -> Self {
         Self {
             major: self.major,
@@ -351,47 +167,33 @@ where
     }
 }
 
-pub struct SemverIter<'v, T>
-where
-    T: SemverTypes + ?Sized,
-{
-    v: &'v ValueSemver<T>,
-    iter: Option<T::SemverIter>,
+pub struct SemverIter<'v> {
+    v: &'v ValueSemver,
+    iter: Option<std::slice::Iter<'v, u64>>,
 }
 
-impl<'v, T> Iterator for SemverIter<'v, T>
-where
-    T: SemverTypes + ?Sized,
-{
+impl<'v> Iterator for SemverIter<'v> {
     type Item = u64;
 
     fn next(&mut self) -> Option<Self::Item> {
         match &mut self.iter {
             Option::None => {
-                self.iter = Option::Some(T::semver_ref_to_iter(&self.v.rest));
+                self.iter = Option::Some((&self.v.rest).into_iter());
                 Option::Some(self.v.major)
             }
-            Option::Some(i) => i.next(),
+            Option::Some(i) => i.next().map(|v| *v),
         }
     }
 }
 
-impl<T1, T2> PartialEq<ValueSemver<T2>> for ValueSemver<T1>
-where
-    T1: SemverTypes + ?Sized,
-    T2: SemverTypes + ?Sized,
-{
-    fn eq(&self, other: &ValueSemver<T2>) -> bool {
+impl PartialEq<ValueSemver> for ValueSemver {
+    fn eq(&self, other: &ValueSemver) -> bool {
         self.partial_cmp(other) == Option::Some(Ordering::Equal)
     }
 }
 
-impl<T1, T2> PartialOrd<ValueSemver<T2>> for ValueSemver<T1>
-where
-    T1: SemverTypes + ?Sized,
-    T2: SemverTypes + ?Sized,
-{
-    fn partial_cmp(&self, other: &ValueSemver<T2>) -> Option<Ordering> {
+impl PartialOrd<ValueSemver> for ValueSemver {
+    fn partial_cmp(&self, other: &ValueSemver) -> Option<Ordering> {
         let mut v1 = self.items();
         let mut v2 = other.items();
         loop {
@@ -411,39 +213,12 @@ where
 }
 
 #[derive(Debug)]
-pub enum ValueLanguageDirective<S, V>
-where
-    S: StringTypes + ?Sized,
-    V: SemverTypes + ?Sized,
-{
-    Kira(ValueSemver<V>),
-    Other(S::StringRef),
+pub enum ValueLanguageDirective {
+    Kira(ValueSemver),
+    Other(String),
 }
 
-impl<S, V> ValueLanguageDirective<S, V>
-where
-    S: StringTypes + ?Sized,
-    V: SemverTypes + ?Sized,
-{
-    pub fn convert<S2, V2>(&self) -> ValueLanguageDirective<S2, V2>
-    where
-        S2: StringTypesMut + ?Sized,
-        V2: SemverTypesMut + ?Sized,
-    {
-        match self {
-            ValueLanguageDirective::Kira(v) => ValueLanguageDirective::Kira(v.convert::<V2>()),
-            ValueLanguageDirective::Other(name) => {
-                ValueLanguageDirective::Other(S2::string_ref_from_str(S::string_ref_to_str(&name)))
-            }
-        }
-    }
-}
-
-impl<S, V> Clone for ValueLanguageDirective<S, V>
-where
-    S: StringTypes + ?Sized,
-    V: SemverTypes + ?Sized,
-{
+impl Clone for ValueLanguageDirective {
     fn clone(&self) -> Self {
         match self {
             ValueLanguageDirective::Kira(v) => ValueLanguageDirective::Kira(v.clone()),
@@ -452,234 +227,127 @@ where
     }
 }
 
-impl<S1, V1, S2, V2> PartialEq<ValueLanguageDirective<S2, V2>> for ValueLanguageDirective<S1, V1>
-where
-    S1: StringTypes + ?Sized,
-    S2: StringTypes + ?Sized,
-    V1: SemverTypes + ?Sized,
-    V2: SemverTypes + ?Sized,
-{
-    fn eq(&self, rhs: &ValueLanguageDirective<S2, V2>) -> bool {
+impl PartialEq<ValueLanguageDirective> for ValueLanguageDirective {
+    fn eq(&self, rhs: &ValueLanguageDirective) -> bool {
         eq_match!(self, rhs, {
             (ValueLanguageDirective::Kira(v1), ValueLanguageDirective::Kira(v2)) => v1 == v2,
-            (ValueLanguageDirective::Other(n1), ValueLanguageDirective::Other(n2)) => S1::string_ref_to_str(&n1) == S2::string_ref_to_str(&n2),
+            (ValueLanguageDirective::Other(n1), ValueLanguageDirective::Other(n2)) => n1 == n2,
         })
     }
 }
 
 #[derive(Debug)]
-pub struct ValueFunction<S>(pub ValueQualifiedSymbol<S>)
-where
-    S: StringTypes + ?Sized;
+pub struct ValueFunction(pub ValueQualifiedSymbol);
 
-impl<S> ValueFunction<S>
-where
-    S: StringTypes + ?Sized,
-{
-    pub fn convert<S2>(&self) -> ValueFunction<S2>
-    where
-        S2: StringTypesMut + ?Sized,
-    {
-        ValueFunction(self.0.convert())
-    }
-}
-
-impl<S1, S2> PartialEq<ValueFunction<S2>> for ValueFunction<S1>
-where
-    S1: StringTypes + ?Sized,
-    S2: StringTypes + ?Sized,
-    ValueQualifiedSymbol<S1>: PartialEq<ValueQualifiedSymbol<S2>>,
-{
-    fn eq(&self, rhs: &ValueFunction<S2>) -> bool {
+impl PartialEq<ValueFunction> for ValueFunction {
+    fn eq(&self, rhs: &ValueFunction) -> bool {
         self.0 == rhs.0
     }
 }
 
-impl<S> Clone for ValueFunction<S>
-where
-    S: StringTypes + ?Sized,
-    ValueQualifiedSymbol<S>: Clone,
-{
+impl Clone for ValueFunction {
     fn clone(&self) -> Self {
         Self(self.0.clone())
     }
 }
 
 #[derive(Debug)]
-pub struct ValueBackquote<T>(pub T::ValueRef)
-where
-    T: ValueTypes + ?Sized;
+pub struct ValueBackquote(pub Box<Value>);
 
-impl<T> ValueBackquote<T>
-where
-    T: ValueTypes + ?Sized,
-{
-    pub fn convert<T2>(&self) -> ValueBackquote<T2>
-    where
-        T2: ValueTypesMut + ?Sized,
-        T2::StringTypes: StringTypesMut,
-        T2::SemverTypes: SemverTypesMut,
-    {
-        ValueBackquote(T2::value_ref_from_value(
-            T::value_ref_to_value(&self.0).convert(),
-        ))
+impl ValueBackquote {
+    pub fn deep_clone(&self) -> ValueBackquote {
+        ValueBackquote(Box::new(self.0.deep_clone()))
     }
 }
 
-impl<T1, T2> PartialEq<ValueBackquote<T2>> for ValueBackquote<T1>
-where
-    T1: ValueTypes + ?Sized,
-    T2: ValueTypes + ?Sized,
-    Value<T1>: PartialEq<Value<T2>>,
-{
-    fn eq(&self, rhs: &ValueBackquote<T2>) -> bool {
-        T1::value_ref_to_value(&self.0) == T2::value_ref_to_value(&rhs.0)
+impl PartialEq<ValueBackquote> for ValueBackquote {
+    fn eq(&self, rhs: &ValueBackquote) -> bool {
+        self.0 == rhs.0
     }
 }
 
-impl<T> Clone for ValueBackquote<T>
-where
-    T: ValueTypes + ?Sized,
-{
+impl Clone for ValueBackquote {
     fn clone(&self) -> Self {
         Self(self.0.clone())
     }
 }
 
 #[derive(Debug)]
-pub struct ValueComma<T>(pub T::ValueRef)
-where
-    T: ValueTypes + ?Sized;
+pub struct ValueComma(pub Box<Value>);
 
-impl<T> ValueComma<T>
-where
-    T: ValueTypes + ?Sized,
-{
-    pub fn convert<T2>(&self) -> ValueComma<T2>
-    where
-        T2: ValueTypesMut + ?Sized,
-        T2::StringTypes: StringTypesMut,
-        T2::SemverTypes: SemverTypesMut,
-    {
-        ValueComma(T2::value_ref_from_value(
-            T::value_ref_to_value(&self.0).convert(),
-        ))
+impl ValueComma {
+    pub fn deep_clone(&self) -> ValueComma {
+        ValueComma(Box::new(self.0.deep_clone()))
     }
 }
 
-impl<T1, T2> PartialEq<ValueComma<T2>> for ValueComma<T1>
-where
-    T1: ValueTypes + ?Sized,
-    T2: ValueTypes + ?Sized,
-    Value<T1>: PartialEq<Value<T2>>,
-{
-    fn eq(&self, rhs: &ValueComma<T2>) -> bool {
-        T1::value_ref_to_value(&self.0) == T2::value_ref_to_value(&rhs.0)
+impl PartialEq<ValueComma> for ValueComma {
+    fn eq(&self, rhs: &ValueComma) -> bool {
+        self.0 == rhs.0
     }
 }
 
-impl<T> Clone for ValueComma<T>
-where
-    T: ValueTypes + ?Sized,
-{
+impl Clone for ValueComma {
     fn clone(&self) -> Self {
         Self(self.0.clone())
     }
 }
 
 #[derive(Debug)]
-pub struct ValueSplice<T>(pub T::ValueRef)
-where
-    T: ValueTypes + ?Sized;
+pub struct ValueSplice(pub Box<Value>);
 
-impl<T> ValueSplice<T>
-where
-    T: ValueTypes + ?Sized,
-{
-    pub fn convert<T2>(&self) -> ValueSplice<T2>
-    where
-        T2: ValueTypesMut + ?Sized,
-        T2::StringTypes: StringTypesMut,
-        T2::SemverTypes: SemverTypesMut,
-    {
-        ValueSplice(T2::value_ref_from_value(
-            T::value_ref_to_value(&self.0).convert(),
-        ))
+impl ValueSplice {
+    pub fn deep_clone(&self) -> ValueSplice {
+        ValueSplice(Box::new(self.0.deep_clone()))
     }
 }
 
-impl<T1, T2> PartialEq<ValueSplice<T2>> for ValueSplice<T1>
-where
-    T1: ValueTypes + ?Sized,
-    T2: ValueTypes + ?Sized,
-    Value<T1>: PartialEq<Value<T2>>,
-{
-    fn eq(&self, rhs: &ValueSplice<T2>) -> bool {
-        T1::value_ref_to_value(&self.0) == T2::value_ref_to_value(&rhs.0)
+impl PartialEq<ValueSplice> for ValueSplice {
+    fn eq(&self, rhs: &ValueSplice) -> bool {
+        self.0 == rhs.0
     }
 }
 
-impl<T> Clone for ValueSplice<T>
-where
-    T: ValueTypes + ?Sized,
-{
+impl Clone for ValueSplice {
     fn clone(&self) -> Self {
         Self(self.0.clone())
     }
 }
 
 #[derive(Debug)]
-pub enum Value<T>
-where
-    T: ValueTypes + ?Sized,
-{
-    List(ValueList<T>),
-    UnqualifiedSymbol(ValueUnqualifiedSymbol<T::StringTypes>),
-    QualifiedSymbol(ValueQualifiedSymbol<T::StringTypes>),
+pub enum Value {
+    List(ValueList),
+    UnqualifiedSymbol(ValueUnqualifiedSymbol),
+    QualifiedSymbol(ValueQualifiedSymbol),
     Bool(ValueBool),
-    String(ValueString<T::StringTypes>),
-    Semver(ValueSemver<T::SemverTypes>),
-    LanguageDirective(ValueLanguageDirective<T::StringTypes, T::SemverTypes>),
-    Function(ValueFunction<T::StringTypes>),
-    Backquote(ValueBackquote<T>),
-    Comma(ValueComma<T>),
-    Splice(ValueSplice<T>),
+    String(ValueString),
+    Semver(ValueSemver),
+    LanguageDirective(ValueLanguageDirective),
+    Function(ValueFunction),
+    Backquote(ValueBackquote),
+    Comma(ValueComma),
+    Splice(ValueSplice),
 }
 
-impl<T> Value<T>
-where
-    T: ValueTypes + ?Sized,
-{
-    pub fn convert<T2>(&self) -> Value<T2>
-    where
-        T2: ValueTypesMut + ?Sized,
-        T2::StringTypes: StringTypesMut,
-        T2::SemverTypes: SemverTypesMut,
-    {
+impl Value {
+    pub fn deep_clone(&self) -> Value {
         match self {
-            Value::List(l) => Value::List(l.convert::<T2>()),
-            Value::UnqualifiedSymbol(s) => Value::UnqualifiedSymbol(s.convert::<T2::StringTypes>()),
-            Value::QualifiedSymbol(s) => Value::QualifiedSymbol(s.convert::<T2::StringTypes>()),
+            Value::List(l) => Value::List(l.deep_clone()),
+            Value::UnqualifiedSymbol(s) => Value::UnqualifiedSymbol(s.clone()),
+            Value::QualifiedSymbol(s) => Value::QualifiedSymbol(s.clone()),
             Value::Bool(b) => Value::Bool(b.clone()),
-            Value::String(s) => Value::String(s.convert::<T2::StringTypes>()),
-            Value::Semver(v) => Value::Semver(v.convert::<T2::SemverTypes>()),
-            Value::LanguageDirective(l) => {
-                Value::LanguageDirective(l.convert::<T2::StringTypes, T2::SemverTypes>())
-            }
-            Value::Function(f) => Value::Function(f.convert::<T2::StringTypes>()),
-            Value::Backquote(b) => Value::Backquote(b.convert::<T2>()),
-            Value::Comma(c) => Value::Comma(c.convert::<T2>()),
-            Value::Splice(s) => Value::Splice(s.convert::<T2>()),
+            Value::String(s) => Value::String(s.clone()),
+            Value::Semver(v) => Value::Semver(v.clone()),
+            Value::LanguageDirective(l) => Value::LanguageDirective(l.clone()),
+            Value::Function(f) => Value::Function(f.clone()),
+            Value::Backquote(b) => Value::Backquote(b.deep_clone()),
+            Value::Comma(c) => Value::Comma(c.deep_clone()),
+            Value::Splice(s) => Value::Splice(s.deep_clone()),
         }
     }
 }
 
-impl<T> Clone for Value<T>
-where
-    T: ValueTypes + ?Sized,
-    ValueUnqualifiedSymbol<T::StringTypes>: Clone,
-    ValueQualifiedSymbol<T::StringTypes>: Clone,
-{
+impl Clone for Value {
     fn clone(&self) -> Self {
         match self {
             Value::List(l) => Value::List((*l).clone()),
@@ -698,11 +366,8 @@ where
 }
 
 macro_rules! try_from_value {
-    ($l:lifetime, $t:ident, $in:ty, $out:ty, $match:pat => $result:expr) => {
-        impl<$l, $t> TryFrom<$in> for $out
-        where
-            $t: ValueTypes + ?Sized,
-        {
+    ($l:lifetime, $in:ty, $out:ty, $match:pat => $result:expr) => {
+        impl<$l> TryFrom<$in> for $out {
             type Error = $in;
 
             fn try_from(v: $in) -> std::result::Result<Self, $in> {
@@ -714,30 +379,27 @@ macro_rules! try_from_value {
         }
     };
 
-    ($t:ident, $out:ty, $match:pat => $result:expr) => {
-        try_from_value!('v, $t, Value<$t>, $out, $match => $result);
-        try_from_value!('v, $t, &'v Value<$t>, &'v $out, $match => $result);
+    ($out:ty, $match:pat => $result:expr) => {
+        try_from_value!('v, Value, $out, $match => $result);
+        try_from_value!('v, &'v Value, &'v $out, $match => $result);
     };
 }
 
-try_from_value!(T, ValueList<T>, Value::List(l) => l);
-try_from_value!(T, ValueUnqualifiedSymbol<T::StringTypes>, Value::UnqualifiedSymbol(s) => s);
-try_from_value!(T, ValueQualifiedSymbol<T::StringTypes>, Value::QualifiedSymbol(s) => s);
-try_from_value!(T, ValueBool, Value::Bool(b) => b);
-try_from_value!(T, ValueString<T::StringTypes>, Value::String(s) => s);
-try_from_value!(T, ValueSemver<T::SemverTypes>, Value::Semver(v) => v);
-try_from_value!(T, ValueLanguageDirective<T::StringTypes, T::SemverTypes>, Value::LanguageDirective(l) => l);
-try_from_value!(T, ValueFunction<T::StringTypes>, Value::Function(f) => f);
-try_from_value!(T, ValueBackquote<T>, Value::Backquote(b) => b);
-try_from_value!(T, ValueComma<T>, Value::Comma(c) => c);
-try_from_value!(T, ValueSplice<T>, Value::Splice(s) => s);
+try_from_value!(ValueList, Value::List(l) => l);
+try_from_value!(ValueUnqualifiedSymbol, Value::UnqualifiedSymbol(s) => s);
+try_from_value!(ValueQualifiedSymbol, Value::QualifiedSymbol(s) => s);
+try_from_value!(ValueBool, Value::Bool(b) => b);
+try_from_value!(ValueString, Value::String(s) => s);
+try_from_value!(ValueSemver, Value::Semver(v) => v);
+try_from_value!(ValueLanguageDirective, Value::LanguageDirective(l) => l);
+try_from_value!(ValueFunction, Value::Function(f) => f);
+try_from_value!(ValueBackquote, Value::Backquote(b) => b);
+try_from_value!(ValueComma, Value::Comma(c) => c);
+try_from_value!(ValueSplice, Value::Splice(s) => s);
 
 macro_rules! from_value_type {
-    ($t:ident, $in:ty, $param:ident -> $result:expr) => {
-        impl<$t> From<$in> for Value<$t>
-        where
-            $t: ValueTypes + ?Sized,
-        {
+    ($in:ty, $param:ident -> $result:expr) => {
+        impl From<$in> for Value {
             fn from($param: $in) -> Self {
                 $result
             }
@@ -745,26 +407,22 @@ macro_rules! from_value_type {
     };
 }
 
-from_value_type!(T, ValueList<T>, l -> Value::List(l));
-from_value_type!(T, ValueUnqualifiedSymbol<T::StringTypes>, s -> Value::UnqualifiedSymbol(s));
-from_value_type!(T, ValueQualifiedSymbol<T::StringTypes>, s -> Value::QualifiedSymbol(s));
-from_value_type!(T, ValueBool, b -> Value::Bool(b));
-from_value_type!(T, ValueString<T::StringTypes>, s -> Value::String(s));
-from_value_type!(T, ValueSemver<T::SemverTypes>, v -> Value::Semver(v));
-from_value_type!(T, ValueLanguageDirective<T::StringTypes, T::SemverTypes>, l -> Value::LanguageDirective(l));
-from_value_type!(T, ValueFunction<T::StringTypes>, f -> Value::Function(f));
-from_value_type!(T, ValueBackquote<T>, b -> Value::Backquote(b));
-from_value_type!(T, ValueComma<T>, c -> Value::Comma(c));
-from_value_type!(T, ValueSplice<T>, s -> Value::Splice(s));
+from_value_type!(ValueList, l -> Value::List(l));
+from_value_type!(ValueUnqualifiedSymbol, s -> Value::UnqualifiedSymbol(s));
+from_value_type!(ValueQualifiedSymbol, s -> Value::QualifiedSymbol(s));
+from_value_type!(ValueBool, b -> Value::Bool(b));
+from_value_type!(ValueString, s -> Value::String(s));
+from_value_type!(ValueSemver, v -> Value::Semver(v));
+from_value_type!(ValueLanguageDirective, l -> Value::LanguageDirective(l));
+from_value_type!(ValueFunction, f -> Value::Function(f));
+from_value_type!(ValueBackquote, b -> Value::Backquote(b));
+from_value_type!(ValueComma, c -> Value::Comma(c));
+from_value_type!(ValueSplice, s -> Value::Splice(s));
 
-impl<T1, T2> PartialEq<Value<T2>> for Value<T1>
-where
-    T1: ValueTypes + ?Sized,
-    T2: ValueTypes + ?Sized,
-{
-    fn eq(&self, rhs: &Value<T2>) -> bool {
+impl PartialEq<Value> for Value {
+    fn eq(&self, rhs: &Value) -> bool {
         eq_match!(self, rhs, {
-            (Value::List(l1), Value::List(l2)) => l1.list_eq(l2),
+            (Value::List(l1), Value::List(l2)) => l1 == l2,
             (Value::UnqualifiedSymbol(s1), Value::UnqualifiedSymbol(s2)) => s1 == s2,
             (Value::QualifiedSymbol(s1), Value::QualifiedSymbol(s2)) => s1 == s2,
             (Value::Bool(b1), Value::Bool(b2)) => b1 == b2,
@@ -779,184 +437,53 @@ where
     }
 }
 
-impl<T> Eq for Value<T> where T: ValueTypes + ?Sized {}
-
-#[derive(Debug)]
-pub struct StringTypesString;
-
-impl StringTypes for StringTypesString {
-    type StringRef = String;
-
-    fn string_ref_to_str(s: &Self::StringRef) -> &str {
-        &*s
-    }
-
-    fn string_ref_from_static_str(s: &'static str) -> Self::StringRef {
-        s.to_string()
-    }
-}
-
-impl StringTypesMut for StringTypesString {
-    fn string_ref_from_str(s: &str) -> Self::StringRef {
-        s.to_string()
-    }
-
-    fn string_ref_from_string(s: String) -> Self::StringRef {
-        s
-    }
-}
-
-#[derive(Debug)]
-pub struct SemverTypesVec;
-
-impl SemverTypes for SemverTypesVec {
-    type SemverIter = std::vec::IntoIter<u64>;
-    type SemverRef = Vec<u64>;
-
-    fn semver_ref_to_iter(v: &Self::SemverRef) -> Self::SemverIter {
-        v.clone().into_iter()
-    }
-}
-
-impl SemverTypesMut for SemverTypesVec {
-    fn semver_ref_extend<T>(v: &mut Self::SemverRef, iter: T)
-    where
-        T: IntoIterator<Item = u64>,
-    {
-        v.extend(iter)
-    }
-
-    fn semver_ref_from_iter<T>(iter: T) -> Self::SemverRef
-    where
-        T: IntoIterator<Item = u64>,
-    {
-        use std::iter::FromIterator;
-
-        Self::SemverRef::from_iter(iter)
-    }
-
-    fn semver_ref_default() -> Self::SemverRef {
-        Self::SemverRef::default()
-    }
-}
-
-#[derive(Debug)]
-pub struct ValueTypesRc;
-
-impl ValueTypes for ValueTypesRc {
-    type ConsRef = Rc<Cons<Self>>;
-    type ValueRef = Box<Value<Self>>;
-    type StringTypes = StringTypesString;
-    type SemverTypes = SemverTypesVec;
-
-    fn cons_ref_to_cons(c: &Self::ConsRef) -> &Cons<Self> {
-        &*c
-    }
-
-    fn value_ref_to_value(v: &Self::ValueRef) -> &Value<Self> {
-        &*v
-    }
-}
-
-impl ValueTypesMut for ValueTypesRc {
-    fn cons_ref_from_cons(c: Cons<Self>) -> Self::ConsRef {
-        c.into()
-    }
-
-    fn value_ref_from_value(v: Value<Self>) -> Self::ValueRef {
-        v.into()
-    }
-}
-
-#[derive(Debug)]
-pub struct StringTypesStatic;
-
-impl StringTypes for StringTypesStatic {
-    type StringRef = &'static str;
-
-    fn string_ref_to_str(s: &Self::StringRef) -> &str {
-        *s
-    }
-
-    fn string_ref_from_static_str(s: &'static str) -> Self::StringRef {
-        s
-    }
-}
-
-#[derive(Debug)]
-pub struct SemverTypesStatic;
-
-impl SemverTypes for SemverTypesStatic {
-    type SemverIter = std::iter::Map<std::slice::Iter<'static, u64>, fn(&'static u64) -> u64>;
-    type SemverRef = &'static [u64];
-
-    fn semver_ref_to_iter(v: &Self::SemverRef) -> Self::SemverIter {
-        (*v).into_iter().map(|comp| *comp)
-    }
-}
-
-#[derive(Debug)]
-pub struct ValueTypesStatic;
-
-impl ValueTypes for ValueTypesStatic {
-    type ConsRef = &'static Cons<Self>;
-    type ValueRef = &'static Value<Self>;
-    type StringTypes = StringTypesStatic;
-    type SemverTypes = SemverTypesStatic;
-
-    fn cons_ref_to_cons(c: &Self::ConsRef) -> &Cons<Self> {
-        *c
-    }
-
-    fn value_ref_to_value(v: &Self::ValueRef) -> &Value<Self> {
-        *v
-    }
-}
+impl Eq for Value {}
 
 #[macro_export]
 macro_rules! cons {
     ($car:expr, $cdr:expr) => {
-        $crate::value::ValueList::<$crate::value::ValueTypesStatic>(::std::option::Option::Some(
-            &$crate::value::Cons {
+        $crate::value::ValueList(::std::option::Option::Some(
+            $crate::value::Cons {
                 car: $car,
                 cdr: $cdr,
-            },
+            }
+            .into(),
         ))
     };
 }
 
 #[macro_export]
 macro_rules! list {
-    () => { $crate::value::ValueList::<$crate::value::ValueTypesStatic>(::std::option::Option::None) };
+    () => { $crate::value::ValueList(::std::option::Option::None) };
     ($e:expr) => { cons!($e, list!()) };
     ($e:expr, $($es:expr),*) => { cons!($e, list!($($es),*)) };
 }
 
 #[macro_export]
 macro_rules! v_list {
-    ($($es:expr),*) => { $crate::value::Value::<$crate::value::ValueTypesStatic>::List(list!($($es),*)) };
+    ($($es:expr),*) => { $crate::value::Value::List(list!($($es),*)) };
 }
 
 #[macro_export]
 macro_rules! uqsym {
     ($name:expr) => {
-        $crate::value::ValueUnqualifiedSymbol::<$crate::value::StringTypesStatic>($name)
+        $crate::value::ValueUnqualifiedSymbol($name.into())
     };
 }
 
 #[macro_export]
 macro_rules! v_uqsym {
     ($name:expr) => {
-        $crate::value::Value::<$crate::value::ValueTypesStatic>::UnqualifiedSymbol(uqsym!($name))
+        $crate::value::Value::UnqualifiedSymbol(uqsym!($name))
     };
 }
 
 #[macro_export]
 macro_rules! qsym {
     ($package:expr, $name:expr) => {
-        $crate::value::ValueQualifiedSymbol::<$crate::value::StringTypesStatic> {
-            package: $package,
-            name: $name,
+        $crate::value::ValueQualifiedSymbol {
+            package: $package.into(),
+            name: $name.into(),
         }
     };
 }
@@ -964,9 +491,7 @@ macro_rules! qsym {
 #[macro_export]
 macro_rules! v_qsym {
     ($package:expr, $name:expr) => {
-        $crate::value::Value::<$crate::value::ValueTypesStatic>::QualifiedSymbol(qsym!(
-            $package, $name
-        ))
+        $crate::value::Value::QualifiedSymbol(qsym!($package, $name))
     };
 }
 
@@ -980,30 +505,30 @@ macro_rules! bool {
 #[macro_export]
 macro_rules! v_bool {
     ($b:expr) => {
-        $crate::value::Value::<$crate::value::ValueTypesStatic>::Bool(bool!($b))
+        $crate::value::Value::Bool(bool!($b))
     };
 }
 
 #[macro_export]
 macro_rules! str {
     ($s:expr) => {
-        $crate::value::ValueString::<$crate::value::StringTypesStatic>($s)
+        $crate::value::ValueString($s.into())
     };
 }
 
 #[macro_export]
 macro_rules! v_str {
     ($s:expr) => {
-        $crate::value::Value::<$crate::value::ValueTypesStatic>::String(str!($s))
+        $crate::value::Value::String(str!($s))
     };
 }
 
 #[macro_export]
 macro_rules! vref {
     ($major:expr, $rest:expr) => {
-        $crate::value::ValueSemver::<$crate::value::SemverTypesStatic> {
+        $crate::value::ValueSemver {
             major: $major as u64,
-            rest: $rest as &[u64],
+            rest: $rest,
         }
     };
 }
@@ -1011,46 +536,43 @@ macro_rules! vref {
 #[macro_export]
 macro_rules! v_vref {
     ($major:expr, $rest:expr) => {
-        $crate::value::Value::<$crate::value::ValueTypesStatic>::Semver(vref!($major, $rest))
+        $crate::value::Value::Semver(vref!($major, $rest))
     };
 }
 
 #[macro_export]
 macro_rules! v {
     [$major:expr] => {
-        vref!($major, &[])
+        vref!($major, vec![])
     };
 
     [$major:expr, $($rest:expr),*] => {
-        vref!($major, &[$($rest as u64),*])
+        vref!($major, vec![$($rest as u64),*])
     };
 }
 
 #[macro_export]
 macro_rules! v_v {
     [$major:expr] => {
-        v_vref!($major, &[])
+        v_vref!($major, vec![])
     };
 
     [$major:expr, $($rest:expr),*] => {
-        v_vref!($major, &[$($rest as u64),*])
+        v_vref!($major, vec![$($rest as u64),*])
     };
 }
 
 #[macro_export]
 macro_rules! v_lang {
     ($lang:expr) => {
-        $crate::value::Value::<$crate::value::ValueTypesStatic>::LanguageDirective($lang)
+        $crate::value::Value::LanguageDirective($lang)
     };
 }
 
 #[macro_export]
 macro_rules! lang_kira_ref {
     ($major:expr, $rest:expr) => {
-        $crate::value::ValueLanguageDirective::<
-            $crate::value::StringTypesStatic,
-            $crate::value::SemverTypesStatic,
-        >::Kira(vref!($major, $rest))
+        $crate::value::ValueLanguageDirective::Kira(vref!($major, $rest))
     };
 }
 
@@ -1064,32 +586,29 @@ macro_rules! v_lang_kira_ref {
 #[macro_export]
 macro_rules! lang_kira {
     [$major:expr] => {
-        lang_kira_ref!($major, &[])
+        lang_kira_ref!($major, vec![])
     };
 
     [$major:expr, $($rest:expr),*] => {
-        lang_kira_ref!($major, &[$($rest as u64),*])
+        lang_kira_ref!($major, vec![$($rest as u64),*])
     };
 }
 
 #[macro_export]
 macro_rules! v_lang_kira {
     [$major:expr] => {
-        v_lang_kira_ref!($major, &[])
+        v_lang_kira_ref!($major, vec![])
     };
 
     [$major:expr, $($rest:expr),*] => {
-        v_lang_kira_ref!($major, &[$($rest as u64),*])
+        v_lang_kira_ref!($major, vec![$($rest as u64),*])
     };
 }
 
 #[macro_export]
 macro_rules! lang_other {
     ($name:expr) => {
-        $crate::value::ValueLanguageDirective::<
-            $crate::value::StringTypesStatic,
-            $crate::value::SemverTypesStatic,
-        >::Other($name)
+        $crate::value::ValueLanguageDirective::Other($name.into())
     };
 }
 
@@ -1103,56 +622,56 @@ macro_rules! v_lang_other {
 #[macro_export]
 macro_rules! func {
     ($name:expr) => {
-        $crate::value::ValueFunction::<$crate::value::StringTypesStatic>($name)
+        $crate::value::ValueFunction($name)
     };
 }
 
 #[macro_export]
 macro_rules! v_func {
     ($name:expr) => {
-        $crate::value::Value::<$crate::value::ValueTypesStatic>::Function(func!($name))
+        $crate::value::Value::Function(func!($name))
     };
 }
 
 #[macro_export]
 macro_rules! bq {
     ($val:expr) => {
-        $crate::value::ValueBackquote::<$crate::value::ValueTypesStatic>(&$val)
+        $crate::value::ValueBackquote($val.into())
     };
 }
 
 #[macro_export]
 macro_rules! v_bq {
     ($val:expr) => {
-        $crate::value::Value::<$crate::value::ValueTypesStatic>::Backquote(bq!($val))
+        $crate::value::Value::Backquote(bq!($val))
     };
 }
 
 #[macro_export]
 macro_rules! comma {
     ($val:expr) => {
-        $crate::value::ValueComma::<$crate::value::ValueTypesStatic>(&$val)
+        $crate::value::ValueComma($val.into())
     };
 }
 
 #[macro_export]
 macro_rules! v_comma {
     ($val:expr) => {
-        $crate::value::Value::<$crate::value::ValueTypesStatic>::Comma(comma!($val))
+        $crate::value::Value::Comma(comma!($val))
     };
 }
 
 #[macro_export]
 macro_rules! splice {
     ($val:expr) => {
-        $crate::value::ValueSplice::<$crate::value::ValueTypesStatic>(&$val)
+        $crate::value::ValueSplice($val.into())
     };
 }
 
 #[macro_export]
 macro_rules! v_splice {
     ($val:expr) => {
-        $crate::value::Value::<$crate::value::ValueTypesStatic>::Splice(splice!($val))
+        $crate::value::Value::Splice(splice!($val))
     };
 }
 
@@ -1163,14 +682,14 @@ mod tests {
     mod macro_tests {
         #[test]
         fn test_uqsym_macro() {
-            const UQSYM: super::ValueUnqualifiedSymbol<super::StringTypesStatic> = uqsym!("uqsym");
-            assert_eq!(UQSYM.0, "uqsym");
+            let uqsym: super::ValueUnqualifiedSymbol = uqsym!("uqsym");
+            assert_eq!(uqsym.0, "uqsym");
         }
 
         #[test]
         fn test_v_uqsym_macro() {
-            const UQSYM: super::Value<super::ValueTypesStatic> = v_uqsym!("uqsym");
-            match UQSYM {
+            let uqsym: super::Value = v_uqsym!("uqsym");
+            match uqsym {
                 super::Value::UnqualifiedSymbol(s) => assert_eq!(s.0, "uqsym"),
                 _ => panic!("Expected a Value::Symbol"),
             }
@@ -1178,16 +697,15 @@ mod tests {
 
         #[test]
         fn test_qsym_macro() {
-            const QSYM: super::ValueQualifiedSymbol<super::StringTypesStatic> =
-                qsym!("package", "qsym");
-            assert_eq!(QSYM.package, "package");
-            assert_eq!(QSYM.name, "qsym");
+            let qsym: super::ValueQualifiedSymbol = qsym!("package", "qsym");
+            assert_eq!(qsym.package, "package");
+            assert_eq!(qsym.name, "qsym");
         }
 
         #[test]
         fn test_v_qsym_macro() {
-            const QSYM: super::Value<super::ValueTypesStatic> = v_qsym!("package", "qsym");
-            match QSYM {
+            let qsym: super::Value = v_qsym!("package", "qsym");
+            match qsym {
                 super::Value::QualifiedSymbol(s) => {
                     assert_eq!(s.package, "package");
                     assert_eq!(s.name, "qsym");
@@ -1198,22 +716,22 @@ mod tests {
 
         #[test]
         fn test_bool_macro() {
-            const BOOL1: super::ValueBool = bool!(true);
-            assert_eq!(BOOL1.0, true);
+            let bool1: super::ValueBool = bool!(true);
+            assert_eq!(bool1.0, true);
 
-            const BOOL2: super::ValueBool = bool!(false);
-            assert_eq!(BOOL2.0, false);
+            let bool2: super::ValueBool = bool!(false);
+            assert_eq!(bool2.0, false);
         }
 
         #[test]
         fn test_v_bool_macro() {
-            const BOOL1: super::Value<super::ValueTypesStatic> = v_bool!(true);
-            match BOOL1 {
+            let bool1: super::Value = v_bool!(true);
+            match bool1 {
                 super::Value::Bool(b) => assert_eq!(b.0, true),
                 _ => panic!("Expected a Value::Bool"),
             }
-            const BOOL2: super::Value<super::ValueTypesStatic> = v_bool!(false);
-            match BOOL2 {
+            let bool2: super::Value = v_bool!(false);
+            match bool2 {
                 super::Value::Bool(b) => assert_eq!(b.0, false),
                 _ => panic!("Expected a Value::Bool"),
             }
@@ -1221,14 +739,14 @@ mod tests {
 
         #[test]
         fn test_str_macro() {
-            const S: super::ValueString<super::StringTypesStatic> = str!("str");
-            assert_eq!(S.0, "str");
+            let s: super::ValueString = str!("str");
+            assert_eq!(s.0, "str");
         }
 
         #[test]
         fn test_v_str_macro() {
-            const S: super::Value<super::ValueTypesStatic> = v_str!("str");
-            match S {
+            let s: super::Value = v_str!("str");
+            match s {
                 super::Value::String(s) => assert_eq!(s.0, "str"),
                 _ => panic!("Expected a Value::String"),
             }
@@ -1236,31 +754,31 @@ mod tests {
 
         #[test]
         fn test_vref_macro() {
-            const V1: super::ValueSemver<super::SemverTypesStatic> = vref!(1u64, &[0u64]);
-            assert_eq!(V1.major, 1);
-            assert_eq!(V1.rest, &[0]);
+            let v1: super::ValueSemver = vref!(1u64, vec![0u64]);
+            assert_eq!(v1.major, 1);
+            assert_eq!(v1.rest, vec![0]);
 
-            const V2: super::ValueSemver<super::SemverTypesStatic> = vref!(4u64, &[]);
-            assert_eq!(V2.major, 4);
-            assert_eq!(V2.rest, &[]);
+            let v2: super::ValueSemver = vref!(4u64, vec![]);
+            assert_eq!(v2.major, 4);
+            assert_eq!(v2.rest, vec![]);
         }
 
         #[test]
         fn test_v_vref_macro() {
-            const V1: super::Value<super::ValueTypesStatic> = v_vref!(1u64, &[0u64]);
-            match V1 {
+            let v1: super::Value = v_vref!(1u64, vec![0u64]);
+            match v1 {
                 super::Value::Semver(v) => {
                     assert_eq!(v.major, 1);
-                    assert_eq!(v.rest, &[0]);
+                    assert_eq!(v.rest, vec![0]);
                 }
                 _ => panic!("Expected a Value::Semver"),
             }
 
-            const V2: super::Value<super::ValueTypesStatic> = v_vref!(4u64, &[]);
-            match V2 {
+            let v2: super::Value = v_vref!(4u64, vec![]);
+            match v2 {
                 super::Value::Semver(v) => {
                     assert_eq!(v.major, 4);
-                    assert_eq!(v.rest, &[]);
+                    assert_eq!(v.rest, vec![]);
                 }
                 _ => panic!("Expected a Value::Semver"),
             }
@@ -1268,31 +786,31 @@ mod tests {
 
         #[test]
         fn test_v_macro() {
-            const V1: super::ValueSemver<super::SemverTypesStatic> = v![2, 1];
-            assert_eq!(V1.major, 2);
-            assert_eq!(V1.rest, &[1]);
+            let v1: super::ValueSemver = v![2, 1];
+            assert_eq!(v1.major, 2);
+            assert_eq!(v1.rest, vec![1]);
 
-            const V2: super::ValueSemver<super::SemverTypesStatic> = v![3];
-            assert_eq!(V2.major, 3);
-            assert_eq!(V2.rest, &[]);
+            let v2: super::ValueSemver = v![3];
+            assert_eq!(v2.major, 3);
+            assert_eq!(v2.rest, vec![]);
         }
 
         #[test]
         fn test_v_v_macro() {
-            const V1: super::Value<super::ValueTypesStatic> = v_v![2, 1];
-            match V1 {
+            let v1: super::Value = v_v![2, 1];
+            match v1 {
                 super::Value::Semver(v) => {
                     assert_eq!(v.major, 2);
-                    assert_eq!(v.rest, &[1]);
+                    assert_eq!(v.rest, vec![1]);
                 }
                 _ => panic!("Expected a Value::Semver"),
             }
 
-            const V2: super::Value<super::ValueTypesStatic> = v_v![3];
-            match V2 {
+            let v2: super::Value = v_v![3];
+            match v2 {
                 super::Value::Semver(v) => {
                     assert_eq!(v.major, 3);
-                    assert_eq!(v.rest, &[]);
+                    assert_eq!(v.rest, vec![]);
                 }
                 _ => panic!("Expected a Value::Semver"),
             }
@@ -1300,26 +818,20 @@ mod tests {
 
         #[test]
         fn test_lang_kira_macro() {
-            const L1: super::ValueLanguageDirective<
-                super::StringTypesStatic,
-                super::SemverTypesStatic,
-            > = lang_kira![1];
-            match L1 {
+            let l1: super::ValueLanguageDirective = lang_kira![1];
+            match l1 {
                 super::ValueLanguageDirective::Kira(v) => {
                     assert_eq!(v.major, 1);
-                    assert_eq!(v.rest, &[]);
+                    assert_eq!(v.rest, vec![]);
                 }
                 _ => panic!("Expected a Value::LanguageDirective with Kira"),
             }
 
-            const L2: super::ValueLanguageDirective<
-                super::StringTypesStatic,
-                super::SemverTypesStatic,
-            > = lang_kira![1, 0];
-            match L2 {
+            let l2: super::ValueLanguageDirective = lang_kira![1, 0];
+            match l2 {
                 super::ValueLanguageDirective::Kira(v) => {
                     assert_eq!(v.major, 1);
-                    assert_eq!(v.rest, &[0]);
+                    assert_eq!(v.rest, vec![0]);
                 }
                 _ => panic!("Expected a Value::LanguageDirective with Kira"),
             }
@@ -1327,20 +839,20 @@ mod tests {
 
         #[test]
         fn test_v_lang_kira_macro() {
-            const L1: super::Value<super::ValueTypesStatic> = v_lang_kira![1];
-            match L1 {
+            let l1: super::Value = v_lang_kira![1];
+            match l1 {
                 super::Value::LanguageDirective(super::ValueLanguageDirective::Kira(v)) => {
                     assert_eq!(v.major, 1);
-                    assert_eq!(v.rest, &[]);
+                    assert_eq!(v.rest, vec![]);
                 }
                 _ => panic!("Expected a Value::LanguageDirective with Kira"),
             }
 
-            const L2: super::Value<super::ValueTypesStatic> = v_lang_kira![1, 0];
-            match L2 {
+            let l2: super::Value = v_lang_kira![1, 0];
+            match l2 {
                 super::Value::LanguageDirective(super::ValueLanguageDirective::Kira(v)) => {
                     assert_eq!(v.major, 1);
-                    assert_eq!(v.rest, &[0]);
+                    assert_eq!(v.rest, vec![0]);
                 }
                 _ => panic!("Expected a Value::LanguageDirective with Kira"),
             }
@@ -1348,11 +860,8 @@ mod tests {
 
         #[test]
         fn test_lang_other_macro() {
-            const L1: super::ValueLanguageDirective<
-                super::StringTypesStatic,
-                super::SemverTypesStatic,
-            > = lang_other!("not-kira");
-            match L1 {
+            let l1: super::ValueLanguageDirective = lang_other!("not-kira");
+            match l1 {
                 super::ValueLanguageDirective::Other(n) => {
                     assert_eq!(n, "not-kira");
                 }
@@ -1362,8 +871,8 @@ mod tests {
 
         #[test]
         fn test_v_lang_other_macro() {
-            const L1: super::Value<super::ValueTypesStatic> = v_lang_other!("not-kira");
-            match L1 {
+            let l1: super::Value = v_lang_other!("not-kira");
+            match l1 {
                 super::Value::LanguageDirective(super::ValueLanguageDirective::Other(n)) => {
                     assert_eq!(n, "not-kira");
                 }
@@ -1373,25 +882,25 @@ mod tests {
 
         #[test]
         fn test_func_macro() {
-            const F: super::ValueFunction<super::StringTypesStatic> = func!(qsym!("p", "f1"));
+            let f: super::ValueFunction = func!(qsym!("p", "f1"));
             assert_eq!(
-                F.0,
-                super::ValueQualifiedSymbol::<super::StringTypesStatic> {
-                    package: "p",
-                    name: "f1"
+                f.0,
+                super::ValueQualifiedSymbol {
+                    package: "p".to_string(),
+                    name: "f1".to_string(),
                 }
             );
         }
 
         #[test]
         fn test_v_func_macro() {
-            const F: super::Value<super::ValueTypesStatic> = v_func!(qsym!("p", "f1"));
-            match F {
+            let f: super::Value = v_func!(qsym!("p", "f1"));
+            match f {
                 super::Value::Function(super::ValueFunction(name)) => assert_eq!(
                     name,
-                    super::ValueQualifiedSymbol::<super::StringTypesStatic> {
-                        package: "p",
-                        name: "f1"
+                    super::ValueQualifiedSymbol {
+                        package: "p".to_string(),
+                        name: "f1".to_string(),
                     }
                 ),
                 _ => panic!("Expected a Value::Function"),
@@ -1400,17 +909,17 @@ mod tests {
 
         #[test]
         fn test_bq_macro() {
-            const BQ1: super::ValueBackquote<super::ValueTypesStatic> = bq!(v_qsym!("p", "qsym"));
-            assert_eq!(*BQ1.0, v_qsym!("p", "qsym"));
+            let bq1: super::ValueBackquote = bq!(v_qsym!("p", "qsym"));
+            assert_eq!(*bq1.0, v_qsym!("p", "qsym"));
 
-            const BQ2: super::ValueBackquote<super::ValueTypesStatic> = bq!(v_str!("str"));
-            assert_eq!(*BQ2.0, v_str!("str"));
+            let bq2: super::ValueBackquote = bq!(v_str!("str"));
+            assert_eq!(*bq2.0, v_str!("str"));
         }
 
         #[test]
         fn test_v_bq_macro() {
-            const BQ: super::Value<super::ValueTypesStatic> = v_bq!(v_bool!(true));
-            match BQ {
+            let bq: super::Value = v_bq!(v_bool!(true));
+            match bq {
                 super::Value::Backquote(super::ValueBackquote(v)) => assert_eq!(*v, v_bool!(true)),
                 _ => panic!("Expected a Value::Backquote"),
             }
@@ -1418,17 +927,17 @@ mod tests {
 
         #[test]
         fn test_comma_macro() {
-            const C1: super::ValueComma<super::ValueTypesStatic> = comma!(v_qsym!("p", "qsym"));
-            assert_eq!(*C1.0, v_qsym!("p", "qsym"));
+            let c1: super::ValueComma = comma!(v_qsym!("p", "qsym"));
+            assert_eq!(*c1.0, v_qsym!("p", "qsym"));
 
-            const C2: super::ValueComma<super::ValueTypesStatic> = comma!(v_str!("str"));
-            assert_eq!(*C2.0, v_str!("str"));
+            let c2: super::ValueComma = comma!(v_str!("str"));
+            assert_eq!(*c2.0, v_str!("str"));
         }
 
         #[test]
         fn test_v_comma_macro() {
-            const C: super::Value<super::ValueTypesStatic> = v_comma!(v_bool!(true));
-            match C {
+            let c: super::Value = v_comma!(v_bool!(true));
+            match c {
                 super::Value::Comma(super::ValueComma(v)) => assert_eq!(*v, v_bool!(true)),
                 _ => panic!("Expected a Value::Comma"),
             }
@@ -1436,17 +945,17 @@ mod tests {
 
         #[test]
         fn test_splice_macro() {
-            const S1: super::ValueSplice<super::ValueTypesStatic> = splice!(v_qsym!("p", "qsym"));
-            assert_eq!(*S1.0, v_qsym!("p", "qsym"));
+            let s1: super::ValueSplice = splice!(v_qsym!("p", "qsym"));
+            assert_eq!(*s1.0, v_qsym!("p", "qsym"));
 
-            const S2: super::ValueSplice<super::ValueTypesStatic> = splice!(v_str!("str"));
-            assert_eq!(*S2.0, v_str!("str"));
+            let s2: super::ValueSplice = splice!(v_str!("str"));
+            assert_eq!(*s2.0, v_str!("str"));
         }
 
         #[test]
         fn test_v_splice_macro() {
-            const S: super::Value<super::ValueTypesStatic> = v_splice!(v_bool!(true));
-            match S {
+            let s: super::Value = v_splice!(v_bool!(true));
+            match s {
                 super::Value::Splice(super::ValueSplice(v)) => assert_eq!(*v, v_bool!(true)),
                 _ => panic!("Expected a Value::Splice"),
             }
@@ -1454,30 +963,23 @@ mod tests {
 
         #[test]
         fn test_list_macro() {
-            const LIST1: super::ValueList<super::ValueTypesStatic> = list!();
-            assert_eq!(
-                LIST1,
-                super::ValueList::<super::ValueTypesStatic>(Option::None)
-            );
+            let list1: super::ValueList = list!();
+            assert_eq!(list1, super::ValueList(Option::None));
 
-            const LIST2: super::ValueList<super::ValueTypesStatic> = list!(v_uqsym!("uqsym1"));
-            match LIST2 {
+            let list2: super::ValueList = list!(v_uqsym!("uqsym1"));
+            match list2 {
                 super::ValueList(Option::Some(l)) => {
                     match &l.car {
                         super::Value::UnqualifiedSymbol(s) => assert_eq!(s.0, "uqsym1"),
                         _ => panic!("Expected a Value::UnqualifiedSymbol"),
                     }
-                    assert_eq!(
-                        l.cdr,
-                        super::ValueList::<super::ValueTypesStatic>(Option::None)
-                    );
+                    assert_eq!(l.cdr, super::ValueList(Option::None));
                 }
                 _ => panic!("Expected a ValueList(Option::Some)"),
             }
 
-            const LIST3: super::ValueList<super::ValueTypesStatic> =
-                list!(v_uqsym!("uqsym1"), v_uqsym!("uqsym2"));
-            match LIST3 {
+            let list3: super::ValueList = list!(v_uqsym!("uqsym1"), v_uqsym!("uqsym2"));
+            match list3 {
                 super::ValueList(Option::Some(l)) => {
                     match &l.car {
                         super::Value::UnqualifiedSymbol(s) => assert_eq!(s.0, "uqsym1"),
@@ -1489,10 +991,7 @@ mod tests {
                                 super::Value::UnqualifiedSymbol(s) => assert_eq!(s.0, "uqsym2"),
                                 _ => panic!("Expected a Value::UnqualifiedSymbol"),
                             }
-                            assert_eq!(
-                                l.cdr,
-                                super::ValueList::<super::ValueTypesStatic>(Option::None)
-                            );
+                            assert_eq!(l.cdr, super::ValueList(Option::None));
                         }
                         _ => panic!("Expected a ValueList(Option::Some)"),
                     }
@@ -1500,9 +999,9 @@ mod tests {
                 _ => panic!("Expected a ValueList(Option::Some)"),
             }
 
-            const LIST4: super::ValueList<super::ValueTypesStatic> =
+            let list4: super::ValueList =
                 list!(v_uqsym!("uqsym1"), v_uqsym!("uqsym2"), v_uqsym!("uqsym3"));
-            match LIST4 {
+            match list4 {
                 super::ValueList(Option::Some(l)) => {
                     match &l.car {
                         super::Value::UnqualifiedSymbol(s) => assert_eq!(s.0, "uqsym1"),
@@ -1522,10 +1021,7 @@ mod tests {
                                         }
                                         _ => panic!("Expected a Value::UnqualifiedSymbol"),
                                     }
-                                    assert_eq!(
-                                        l.cdr,
-                                        super::ValueList::<super::ValueTypesStatic>(Option::None)
-                                    );
+                                    assert_eq!(l.cdr, super::ValueList(Option::None));
                                 }
                                 _ => panic!("Expected a ValueList(Option::Some)"),
                             }
@@ -1539,33 +1035,23 @@ mod tests {
 
         #[test]
         fn test_v_list_macro() {
-            const LIST1: super::Value<super::ValueTypesStatic> = v_list!();
+            let list1: super::Value = v_list!();
+            assert_eq!(list1, super::Value::List(list!()));
+
+            let list2: super::Value = v_list!(v_uqsym!("uqsym1"));
+            assert_eq!(list2, super::Value::List(list!(v_uqsym!("uqsym1"))));
+
+            let list3: super::Value = v_list!(v_uqsym!("uqsym1"), v_uqsym!("uqsym2"));
             assert_eq!(
-                LIST1,
-                super::Value::<super::ValueTypesStatic>::List(list!())
+                list3,
+                super::Value::List(list!(v_uqsym!("uqsym1"), v_uqsym!("uqsym2")))
             );
 
-            const LIST2: super::Value<super::ValueTypesStatic> = v_list!(v_uqsym!("uqsym1"));
-            assert_eq!(
-                LIST2,
-                super::Value::<super::ValueTypesStatic>::List(list!(v_uqsym!("uqsym1")))
-            );
-
-            const LIST3: super::Value<super::ValueTypesStatic> =
-                v_list!(v_uqsym!("uqsym1"), v_uqsym!("uqsym2"));
-            assert_eq!(
-                LIST3,
-                super::Value::<super::ValueTypesStatic>::List(list!(
-                    v_uqsym!("uqsym1"),
-                    v_uqsym!("uqsym2")
-                ))
-            );
-
-            const LIST4: super::Value<super::ValueTypesStatic> =
+            let list4: super::Value =
                 v_list!(v_uqsym!("uqsym1"), v_uqsym!("uqsym2"), v_uqsym!("uqsym3"));
             assert_eq!(
-                LIST4,
-                super::Value::<super::ValueTypesStatic>::List(list!(
+                list4,
+                super::Value::List(list!(
                     v_uqsym!("uqsym1"),
                     v_uqsym!("uqsym2"),
                     v_uqsym!("uqsym3")
@@ -1600,26 +1086,11 @@ mod tests {
         assert_ne!(v_list!(v_uqsym!("uqsym")), v_uqsym!("uqsym"));
 
         assert_eq!(v_uqsym!("uqsym"), v_uqsym!("uqsym"));
-        assert_eq!(
-            v_uqsym!("uqsym"),
-            Value::<ValueTypesRc>::UnqualifiedSymbol(ValueUnqualifiedSymbol("uqsym".to_string()))
-        );
         assert_ne!(v_uqsym!("uqsym1"), v_uqsym!("uqsym2"));
-        assert_ne!(
-            v_uqsym!("uqsym1"),
-            Value::<ValueTypesRc>::UnqualifiedSymbol(ValueUnqualifiedSymbol("uqsym2".to_string()))
-        );
         assert_ne!(v_uqsym!("uqsym"), v_str!("uqsym"));
         assert_ne!(v_uqsym!("uqsym"), v_list!());
 
         assert_eq!(v_qsym!("p", "qsym"), v_qsym!("p", "qsym"));
-        assert_eq!(
-            v_qsym!("p", "qsym"),
-            Value::<ValueTypesRc>::QualifiedSymbol(ValueQualifiedSymbol {
-                package: "p".to_string(),
-                name: "qsym".to_string()
-            })
-        );
         assert_ne!(v_qsym!("p1", "qsym"), v_qsym!("p2", "qsym"));
         assert_ne!(v_qsym!("p", "qsym1"), v_qsym!("p", "qsym2"));
         assert_ne!(v_qsym!("p", "qsym"), v_uqsym!("qsym"));
@@ -1633,15 +1104,7 @@ mod tests {
         assert_ne!(v_bool!(true), v_list!());
 
         assert_eq!(v_str!("str"), v_str!("str"));
-        assert_eq!(
-            v_str!("str"),
-            Value::<ValueTypesRc>::String(ValueString("str".to_string()))
-        );
         assert_ne!(v_str!("str1"), v_str!("str2"));
-        assert_ne!(
-            v_str!("str1"),
-            Value::<ValueTypesRc>::String(ValueString("str2".to_string()))
-        );
         assert_ne!(v_str!("str"), v_uqsym!("str"));
         assert_ne!(v_str!("str"), v_list!());
 
@@ -1686,110 +1149,100 @@ mod tests {
         use std::convert::TryInto;
 
         let v = v_list!();
+        assert_eq!(TryInto::<&ValueList>::try_into(&v).unwrap(), &list!());
         assert_eq!(
-            TryInto::<&ValueList<ValueTypesStatic>>::try_into(&v).unwrap(),
-            &list!()
-        );
-        assert_eq!(
-            TryInto::<&ValueString<StringTypesStatic>>::try_into(&v).unwrap_err(),
+            TryInto::<&ValueString>::try_into(&v).unwrap_err(),
             &v_list!()
         );
 
         let v = v_uqsym!("uqsym");
         assert_eq!(
-            TryInto::<&ValueUnqualifiedSymbol<StringTypesStatic>>::try_into(&v).unwrap(),
+            TryInto::<&ValueUnqualifiedSymbol>::try_into(&v).unwrap(),
             &uqsym!("uqsym")
         );
         assert_eq!(
-            TryInto::<&ValueList<ValueTypesStatic>>::try_into(&v).unwrap_err(),
+            TryInto::<&ValueList>::try_into(&v).unwrap_err(),
             &v_uqsym!("uqsym")
         );
 
         let v = v_qsym!("p", "qsym");
         assert_eq!(
-            TryInto::<&ValueQualifiedSymbol<StringTypesStatic>>::try_into(&v).unwrap(),
+            TryInto::<&ValueQualifiedSymbol>::try_into(&v).unwrap(),
             &qsym!("p", "qsym")
         );
         assert_eq!(
-            TryInto::<&ValueList<ValueTypesStatic>>::try_into(&v).unwrap_err(),
+            TryInto::<&ValueList>::try_into(&v).unwrap_err(),
             &v_qsym!("p", "qsym")
         );
 
         let v = v_bool!(true);
         assert_eq!(TryInto::<&ValueBool>::try_into(&v).unwrap(), &bool!(true));
         assert_eq!(
-            TryInto::<&ValueList<ValueTypesStatic>>::try_into(&v).unwrap_err(),
+            TryInto::<&ValueList>::try_into(&v).unwrap_err(),
             &v_bool!(true)
         );
 
         let v = v_str!("str");
+        assert_eq!(TryInto::<&ValueString>::try_into(&v).unwrap(), &str!("str"));
         assert_eq!(
-            TryInto::<&ValueString<StringTypesStatic>>::try_into(&v).unwrap(),
-            &str!("str")
-        );
-        assert_eq!(
-            TryInto::<&ValueList<ValueTypesStatic>>::try_into(&v).unwrap_err(),
+            TryInto::<&ValueList>::try_into(&v).unwrap_err(),
             &v_str!("str")
         );
 
         let v = v_v![1, 0];
+        assert_eq!(TryInto::<&ValueSemver>::try_into(&v).unwrap(), &v![1, 0]);
         assert_eq!(
-            TryInto::<&ValueSemver<SemverTypesStatic>>::try_into(&v).unwrap(),
-            &v![1, 0]
-        );
-        assert_eq!(
-            TryInto::<&ValueList<ValueTypesStatic>>::try_into(&v).unwrap_err(),
+            TryInto::<&ValueList>::try_into(&v).unwrap_err(),
             &v_v![1, 0]
         );
 
         let v = v_lang_kira![1, 0];
         assert_eq!(
-            TryInto::<&ValueLanguageDirective<StringTypesStatic, SemverTypesStatic>>::try_into(&v)
-                .unwrap(),
+            TryInto::<&ValueLanguageDirective>::try_into(&v).unwrap(),
             &lang_kira![1, 0]
         );
         assert_eq!(
-            TryInto::<&ValueList<ValueTypesStatic>>::try_into(&v).unwrap_err(),
+            TryInto::<&ValueList>::try_into(&v).unwrap_err(),
             &v_lang_kira![1, 0]
         );
 
         let v = v_func!(qsym!("p", "f1"));
         assert_eq!(
-            TryInto::<&ValueFunction<StringTypesStatic>>::try_into(&v).unwrap(),
+            TryInto::<&ValueFunction>::try_into(&v).unwrap(),
             &func!(qsym!("p", "f1"))
         );
         assert_eq!(
-            TryInto::<&ValueList<ValueTypesStatic>>::try_into(&v).unwrap_err(),
+            TryInto::<&ValueList>::try_into(&v).unwrap_err(),
             &v_func!(qsym!("p", "f1"))
         );
 
         let v = v_bq!(v_bool!(true));
         assert_eq!(
-            TryInto::<&ValueBackquote<ValueTypesStatic>>::try_into(&v).unwrap(),
+            TryInto::<&ValueBackquote>::try_into(&v).unwrap(),
             &bq!(v_bool!(true))
         );
         assert_eq!(
-            TryInto::<&ValueList<ValueTypesStatic>>::try_into(&v).unwrap_err(),
+            TryInto::<&ValueList>::try_into(&v).unwrap_err(),
             &v_bq!(v_bool!(true))
         );
 
         let v = v_comma!(v_bool!(true));
         assert_eq!(
-            TryInto::<&ValueComma<ValueTypesStatic>>::try_into(&v).unwrap(),
+            TryInto::<&ValueComma>::try_into(&v).unwrap(),
             &comma!(v_bool!(true))
         );
         assert_eq!(
-            TryInto::<&ValueList<ValueTypesStatic>>::try_into(&v).unwrap_err(),
+            TryInto::<&ValueList>::try_into(&v).unwrap_err(),
             &v_comma!(v_bool!(true))
         );
 
         let v = v_splice!(v_bool!(true));
         assert_eq!(
-            TryInto::<&ValueSplice<ValueTypesStatic>>::try_into(&v).unwrap(),
+            TryInto::<&ValueSplice>::try_into(&v).unwrap(),
             &splice!(v_bool!(true))
         );
         assert_eq!(
-            TryInto::<&ValueList<ValueTypesStatic>>::try_into(&v).unwrap_err(),
+            TryInto::<&ValueList>::try_into(&v).unwrap_err(),
             &v_splice!(v_bool!(true))
         );
     }
@@ -1799,32 +1252,26 @@ mod tests {
         use std::convert::TryInto;
 
         let v = v_list!();
-        assert_eq!(
-            TryInto::<ValueList<ValueTypesStatic>>::try_into(v.clone()).unwrap(),
-            list!()
-        );
-        assert_eq!(
-            TryInto::<ValueString<StringTypesStatic>>::try_into(v).unwrap_err(),
-            v_list!()
-        );
+        assert_eq!(TryInto::<ValueList>::try_into(v.clone()).unwrap(), list!());
+        assert_eq!(TryInto::<ValueString>::try_into(v).unwrap_err(), v_list!());
 
         let v = v_uqsym!("uqsym");
         assert_eq!(
-            TryInto::<ValueUnqualifiedSymbol<StringTypesStatic>>::try_into(v.clone()).unwrap(),
+            TryInto::<ValueUnqualifiedSymbol>::try_into(v.clone()).unwrap(),
             uqsym!("uqsym")
         );
         assert_eq!(
-            TryInto::<ValueList<ValueTypesStatic>>::try_into(v).unwrap_err(),
+            TryInto::<ValueList>::try_into(v).unwrap_err(),
             v_uqsym!("uqsym")
         );
 
         let v = v_qsym!("p", "qsym");
         assert_eq!(
-            TryInto::<ValueQualifiedSymbol<StringTypesStatic>>::try_into(v.clone()).unwrap(),
+            TryInto::<ValueQualifiedSymbol>::try_into(v.clone()).unwrap(),
             qsym!("p", "qsym")
         );
         assert_eq!(
-            TryInto::<ValueList<ValueTypesStatic>>::try_into(v).unwrap_err(),
+            TryInto::<ValueList>::try_into(v).unwrap_err(),
             v_qsym!("p", "qsym")
         );
 
@@ -1834,117 +1281,111 @@ mod tests {
             bool!(true)
         );
         assert_eq!(
-            TryInto::<ValueList<ValueTypesStatic>>::try_into(v).unwrap_err(),
+            TryInto::<ValueList>::try_into(v).unwrap_err(),
             v_bool!(true)
         );
 
         let v = v_str!("str");
         assert_eq!(
-            TryInto::<ValueString<StringTypesStatic>>::try_into(v.clone()).unwrap(),
+            TryInto::<ValueString>::try_into(v.clone()).unwrap(),
             str!("str")
         );
         assert_eq!(
-            TryInto::<ValueList<ValueTypesStatic>>::try_into(v).unwrap_err(),
+            TryInto::<ValueList>::try_into(v).unwrap_err(),
             v_str!("str")
         );
 
         let v = v_v![1, 0];
         assert_eq!(
-            TryInto::<ValueSemver<SemverTypesStatic>>::try_into(v.clone()).unwrap(),
+            TryInto::<ValueSemver>::try_into(v.clone()).unwrap(),
             v![1, 0]
         );
-        assert_eq!(
-            TryInto::<ValueList<ValueTypesStatic>>::try_into(v).unwrap_err(),
-            v_v![1, 0]
-        );
+        assert_eq!(TryInto::<ValueList>::try_into(v).unwrap_err(), v_v![1, 0]);
 
         let v = v_lang_kira![1, 0];
         assert_eq!(
-            TryInto::<ValueLanguageDirective<StringTypesStatic, SemverTypesStatic>>::try_into(
-                v.clone()
-            )
-            .unwrap(),
+            TryInto::<ValueLanguageDirective>::try_into(v.clone()).unwrap(),
             lang_kira![1, 0]
         );
         assert_eq!(
-            TryInto::<ValueList<ValueTypesStatic>>::try_into(v).unwrap_err(),
+            TryInto::<ValueList>::try_into(v).unwrap_err(),
             v_lang_kira![1, 0]
         );
 
         let v = v_func!(qsym!("p", "f1"));
         assert_eq!(
-            TryInto::<ValueFunction<StringTypesStatic>>::try_into(v.clone()).unwrap(),
+            TryInto::<ValueFunction>::try_into(v.clone()).unwrap(),
             func!(qsym!("p", "f1"))
         );
         assert_eq!(
-            TryInto::<ValueList<ValueTypesStatic>>::try_into(v).unwrap_err(),
+            TryInto::<ValueList>::try_into(v).unwrap_err(),
             v_func!(qsym!("p", "f1"))
         );
 
         let v = v_bq!(v_bool!(true));
         assert_eq!(
-            TryInto::<ValueBackquote<ValueTypesStatic>>::try_into(v.clone()).unwrap(),
+            TryInto::<ValueBackquote>::try_into(v.clone()).unwrap(),
             bq!(v_bool!(true))
         );
         assert_eq!(
-            TryInto::<ValueList<ValueTypesStatic>>::try_into(v).unwrap_err(),
+            TryInto::<ValueList>::try_into(v).unwrap_err(),
             v_bq!(v_bool!(true))
         );
 
         let v = v_comma!(v_bool!(true));
         assert_eq!(
-            TryInto::<ValueComma<ValueTypesStatic>>::try_into(v.clone()).unwrap(),
+            TryInto::<ValueComma>::try_into(v.clone()).unwrap(),
             comma!(v_bool!(true))
         );
         assert_eq!(
-            TryInto::<ValueList<ValueTypesStatic>>::try_into(v).unwrap_err(),
+            TryInto::<ValueList>::try_into(v).unwrap_err(),
             v_comma!(v_bool!(true))
         );
 
         let v = v_splice!(v_bool!(true));
         assert_eq!(
-            TryInto::<ValueSplice<ValueTypesStatic>>::try_into(v.clone()).unwrap(),
+            TryInto::<ValueSplice>::try_into(v.clone()).unwrap(),
             splice!(v_bool!(true))
         );
         assert_eq!(
-            TryInto::<ValueList<ValueTypesStatic>>::try_into(v).unwrap_err(),
+            TryInto::<ValueList>::try_into(v).unwrap_err(),
             v_splice!(v_bool!(true))
         );
     }
 
     #[test]
     fn test_into_value() {
-        let v: Value<ValueTypesStatic> = list!().into();
+        let v: Value = list!().into();
         assert_eq!(v, v_list!());
 
-        let v: Value<ValueTypesStatic> = uqsym!("uqsym").into();
+        let v: Value = uqsym!("uqsym").into();
         assert_eq!(v, v_uqsym!("uqsym"));
 
-        let v: Value<ValueTypesStatic> = qsym!("p", "qsym").into();
+        let v: Value = qsym!("p", "qsym").into();
         assert_eq!(v, v_qsym!("p", "qsym"));
 
-        let v: Value<ValueTypesStatic> = bool!(true).into();
+        let v: Value = bool!(true).into();
         assert_eq!(v, v_bool!(true));
 
-        let v: Value<ValueTypesStatic> = str!("str").into();
+        let v: Value = str!("str").into();
         assert_eq!(v, v_str!("str"));
 
-        let v: Value<ValueTypesStatic> = v![1, 0].into();
+        let v: Value = v![1, 0].into();
         assert_eq!(v, v_v![1, 0]);
 
-        let v: Value<ValueTypesStatic> = lang_kira![1, 0].into();
+        let v: Value = lang_kira![1, 0].into();
         assert_eq!(v, v_lang_kira![1, 0]);
 
-        let v: Value<ValueTypesStatic> = func!(qsym!("p", "f1")).into();
+        let v: Value = func!(qsym!("p", "f1")).into();
         assert_eq!(v, v_func!(qsym!("p", "f1")));
 
-        let v: Value<ValueTypesStatic> = bq!(v_bool!(true)).into();
+        let v: Value = bq!(v_bool!(true)).into();
         assert_eq!(v, v_bq!(v_bool!(true)));
 
-        let v: Value<ValueTypesStatic> = comma!(v_bool!(true)).into();
+        let v: Value = comma!(v_bool!(true)).into();
         assert_eq!(v, v_comma!(v_bool!(true)));
 
-        let v: Value<ValueTypesStatic> = splice!(v_bool!(true)).into();
+        let v: Value = splice!(v_bool!(true)).into();
         assert_eq!(v, v_splice!(v_bool!(true)));
     }
 

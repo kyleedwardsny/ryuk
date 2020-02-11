@@ -6,38 +6,32 @@ use std::collections::BTreeSet;
 use std::fmt::Debug;
 use std::iter::FromIterator;
 
-pub trait Environment<C, D>
-where
-    C: ValueTypes + ?Sized + 'static,
-    D: ValueTypesMut + ?Sized + 'static,
-    D::StringTypes: StringTypesMut,
-    D::SemverTypes: SemverTypesMut,
-{
-    fn as_dyn_mut(&mut self) -> &mut (dyn Environment<C, D> + 'static);
+pub trait Environment {
+    fn as_dyn_mut(&mut self) -> &mut (dyn Environment + 'static);
 
     fn resolve_symbol_get_variable(
         &self,
-        name: &ValueUnqualifiedSymbol<C::StringTypes>,
-    ) -> Option<ValueQualifiedSymbol<C::StringTypes>>;
+        name: &ValueUnqualifiedSymbol,
+    ) -> Option<ValueQualifiedSymbol>;
 
-    fn compile_variable(&self, name: &ValueQualifiedSymbol<C::StringTypes>) -> Option<ValueType>;
+    fn compile_variable(&self, name: &ValueQualifiedSymbol) -> Option<ValueType>;
 
     fn resolve_symbol_get_macro(
         &self,
-        name: &ValueUnqualifiedSymbol<C::StringTypes>,
-    ) -> Option<ValueQualifiedSymbol<C::StringTypes>>;
+        name: &ValueUnqualifiedSymbol,
+    ) -> Option<ValueQualifiedSymbol>;
 
     fn compile_function(
         &self,
-        name: &ValueQualifiedSymbol<C::StringTypes>,
+        name: &ValueQualifiedSymbol,
         params: &mut dyn Iterator<Item = &ValueType>,
-    ) -> Option<Result<ValueType, D>>;
+    ) -> Option<Result<ValueType>>;
 
     fn compile_function_from_macro(
         &mut self,
-        name: &ValueQualifiedSymbol<C::StringTypes>,
-        params: ValueList<C>,
-    ) -> Option<Result<TryCompilationResult<C, D>, D>> {
+        name: &ValueQualifiedSymbol,
+        params: ValueList,
+    ) -> Option<Result<TryCompilationResult>> {
         let mut compiled_params = Vec::new();
         for item in params.map(|v| self.compile(v)) {
             match item {
@@ -63,45 +57,43 @@ where
         )
     }
 
-    fn evaluate_variable(&self, name: &ValueQualifiedSymbol<C::StringTypes>)
-        -> Result<Value<D>, D>;
+    fn evaluate_variable(&self, name: &ValueQualifiedSymbol) -> Result<Value>;
 
     fn evaluate_function(
         &mut self,
-        name: &ValueQualifiedSymbol<C::StringTypes>,
-        params: Vec<Value<D>>,
-    ) -> Result<Value<D>, D>;
+        name: &ValueQualifiedSymbol,
+        params: Vec<Value>,
+    ) -> Result<Value>;
 
     fn compile_macro(
         &mut self,
-        name: &ValueQualifiedSymbol<C::StringTypes>,
-        params: ValueList<C>,
-    ) -> Option<Result<TryCompilationResult<C, D>, D>>;
+        name: &ValueQualifiedSymbol,
+        params: ValueList,
+    ) -> Option<Result<TryCompilationResult>>;
 
-    fn compile(&mut self, v: Value<C>) -> Result<CompilationResult<C, D>, D> {
-        let mut result = TryCompilationResult::<C, D>::Uncompiled(v);
+    fn compile(&mut self, v: Value) -> Result<CompilationResult> {
+        let mut result = TryCompilationResult::Uncompiled(v);
 
         loop {
             match result {
                 TryCompilationResult::Uncompiled(v) => {
                     result = match v {
                         Value::List(ValueList(Option::Some(l))) => {
-                            let list = C::cons_ref_to_cons(&l);
-                            let name = match &list.car {
+                            let name = match &l.car {
                                 Value::UnqualifiedSymbol(name) => {
                                     match self.resolve_symbol_get_macro(name) {
                                         Option::Some(name) => name,
                                         Option::None => {
-                                            return Result::Err(e_undefined_function!(D))
+                                            return Result::Err(e_undefined_function!())
                                         }
                                     }
                                 }
                                 Value::QualifiedSymbol(name) => (*name).clone(),
-                                _ => return Result::Err(e_type_error!(D)),
+                                _ => return Result::Err(e_type_error!()),
                             };
-                            match self.compile_macro(&name, list.cdr.clone()) {
+                            match self.compile_macro(&name, l.cdr.clone()) {
                                 Option::Some(r) => r?,
-                                Option::None => return Result::Err(e_undefined_function!(D)),
+                                Option::None => return Result::Err(e_undefined_function!()),
                             }
                         }
                         Value::UnqualifiedSymbol(name) => {
@@ -113,9 +105,9 @@ where
                                             return_type,
                                         })
                                     }
-                                    Option::None => return Result::Err(e_unbound_variable!(D)),
+                                    Option::None => return Result::Err(e_unbound_variable!()),
                                 },
-                                Option::None => return Result::Err(e_unbound_variable!(D)),
+                                Option::None => return Result::Err(e_unbound_variable!()),
                             }
                         }
                         Value::QualifiedSymbol(name) => match self.compile_variable(&name) {
@@ -125,13 +117,12 @@ where
                                     return_type,
                                 })
                             }
-                            Option::None => return Result::Err(e_unbound_variable!(D)),
+                            Option::None => return Result::Err(e_unbound_variable!()),
                         },
                         Value::Backquote(ValueBackquote(v)) => {
-                            let v = C::value_ref_to_value(&v).clone();
                             TryCompilationResult::Compiled(compile_backquote(
                                 self.as_dyn_mut(),
-                                v,
+                                (*v).clone(),
                                 BackquoteStatus::new(),
                             )?)
                         }
@@ -203,17 +194,11 @@ impl BackquoteStatus {
     }
 }
 
-fn backquote_comma_splice_push<C, D>(
-    result: CompilationResult<C, D>,
+fn backquote_comma_splice_push(
+    result: CompilationResult,
     bq: BackquoteStatus,
     bcs: BackquoteCommaSplice,
-) -> CompilationResult<C, D>
-where
-    C: ValueTypes + ?Sized + 'static,
-    D: ValueTypesMut + ?Sized + 'static,
-    D::StringTypes: StringTypesMut,
-    D::SemverTypes: SemverTypesMut,
-{
+) -> CompilationResult {
     if bq.depth > 0 {
         CompilationResult {
             result: Box::new(BackquoteCommaSplicePushEvaluator::new(bcs, result.result)),
@@ -228,44 +213,35 @@ where
     }
 }
 
-fn compile_backquote<C, D>(
-    env: &mut dyn Environment<C, D>,
-    v: Value<C>,
+fn compile_backquote(
+    env: &mut dyn Environment,
+    v: Value,
     bq: BackquoteStatus,
-) -> Result<CompilationResult<C, D>, D>
-where
-    C: ValueTypes + ?Sized + 'static,
-    D: ValueTypesMut + ?Sized + 'static,
-    D::StringTypes: StringTypesMut,
-    D::SemverTypes: SemverTypesMut,
-{
+) -> Result<CompilationResult> {
     if bq.depth == 0 {
         env.compile(v)
     } else {
         Result::Ok(match v {
             Value::Backquote(ValueBackquote(v)) => {
-                let v = C::value_ref_to_value(&v).clone();
                 let bq = bq.backquote();
                 backquote_comma_splice_push(
-                    compile_backquote(env, v, bq)?,
+                    compile_backquote(env, (*v).clone(), bq)?,
                     bq,
                     BackquoteCommaSplice::Backquote,
                 )
             }
             Value::Comma(ValueComma(v)) => {
-                let v = C::value_ref_to_value(&v).clone();
                 let bq = bq.comma();
                 backquote_comma_splice_push(
-                    compile_backquote(env, v, bq)?,
+                    compile_backquote(env, (*v).clone(), bq)?,
                     bq,
                     BackquoteCommaSplice::Comma,
                 )
             }
             Value::Splice(ValueSplice(v)) => {
-                let v = C::value_ref_to_value(&v).clone();
                 let bq = bq.splice();
                 backquote_comma_splice_push(
-                    compile_backquote(env, v, bq)?,
+                    compile_backquote(env, (*v).clone(), bq)?,
                     bq,
                     BackquoteCommaSplice::Splice,
                 )
@@ -277,10 +253,9 @@ where
                 for item in l {
                     match item {
                         Value::Backquote(ValueBackquote(v)) => {
-                            let v = C::value_ref_to_value(&v).clone();
                             let bq = bq.backquote();
                             let mut result = backquote_comma_splice_push(
-                                compile_backquote(env, v, bq)?,
+                                compile_backquote(env, (*v).clone(), bq)?,
                                 bq,
                                 BackquoteCommaSplice::Backquote,
                             );
@@ -288,10 +263,9 @@ where
                             list_type.append(&mut result.return_type);
                         }
                         Value::Comma(ValueComma(v)) => {
-                            let v = C::value_ref_to_value(&v).clone();
                             let bq = bq.comma();
                             let mut result = backquote_comma_splice_push(
-                                compile_backquote(env, v, bq)?,
+                                compile_backquote(env, (*v).clone(), bq)?,
                                 bq,
                                 BackquoteCommaSplice::Backquote,
                             );
@@ -299,10 +273,9 @@ where
                             list_type.append(&mut result.return_type);
                         }
                         Value::Splice(ValueSplice(v)) => {
-                            let v = C::value_ref_to_value(&v).clone();
                             let bq = bq.splice();
                             let result = backquote_comma_splice_push(
-                                compile_backquote(env, v, bq)?,
+                                compile_backquote(env, (*v).clone(), bq)?,
                                 bq,
                                 BackquoteCommaSplice::Splice,
                             );
@@ -311,11 +284,11 @@ where
                                     for t in types {
                                         match t {
                                             ValueTypeSome::List(mut v) => list_type.append(&mut v),
-                                            _ => return Result::Err(e_type_error!(D)),
+                                            _ => return Result::Err(e_type_error!()),
                                         }
                                     }
                                 }
-                                ValueType::Any => return Result::Err(e_type_error!(D)),
+                                ValueType::Any => return Result::Err(e_type_error!()),
                             }
                             params.push(ListItem::List(result.result));
                         }
@@ -461,10 +434,7 @@ impl ValueTypeSome {
     }
 }
 
-impl<T> Value<T>
-where
-    T: ValueTypes + ?Sized,
-{
+impl Value {
     pub fn value_type(&self) -> ValueTypeSome {
         match self {
             Value::List(l) => ValueTypeSome::List(ValueType::Some(BTreeSet::from_iter(
@@ -478,151 +448,87 @@ where
             Value::LanguageDirective(_) => ValueTypeSome::LanguageDirective,
             Value::Function(_) => ValueTypeSome::Function,
             Value::Backquote(b) => ValueTypeSome::Backquote(ValueType::Some(BTreeSet::from_iter(
-                std::iter::once(T::value_ref_to_value(&b.0).value_type()),
+                std::iter::once(b.0.value_type()),
             ))),
             Value::Comma(c) => ValueTypeSome::Comma(ValueType::Some(BTreeSet::from_iter(
-                std::iter::once(T::value_ref_to_value(&c.0).value_type()),
+                std::iter::once(c.0.value_type()),
             ))),
             Value::Splice(s) => ValueTypeSome::Splice(ValueType::Some(BTreeSet::from_iter(
-                std::iter::once(T::value_ref_to_value(&s.0).value_type()),
+                std::iter::once(s.0.value_type()),
             ))),
         }
     }
 }
 
-pub trait Evaluator<C, D>: Debug
-where
-    C: ValueTypes + ?Sized + 'static,
-    D: ValueTypesMut + ?Sized + 'static,
-    D::StringTypes: StringTypesMut,
-    D::SemverTypes: SemverTypesMut,
-{
-    fn evaluate(&mut self, env: &mut dyn Environment<C, D>) -> Result<Value<D>, D>;
+pub trait Evaluator: Debug {
+    fn evaluate(&mut self, env: &mut dyn Environment) -> Result<Value>;
 }
 
 #[derive(Debug)]
-pub struct LiteralEvaluator<L>(Value<L>)
-where
-    L: ValueTypes + ?Sized;
+pub struct LiteralEvaluator(Value);
 
-impl<L> LiteralEvaluator<L>
-where
-    L: ValueTypes + ?Sized,
-{
-    pub fn new(value: Value<L>) -> Self {
+impl LiteralEvaluator {
+    pub fn new(value: Value) -> Self {
         Self(value)
     }
 }
 
-impl<L, C, D> Evaluator<C, D> for LiteralEvaluator<L>
-where
-    L: ValueTypes + ?Sized + 'static,
-    C: ValueTypes + ?Sized + 'static,
-    D: ValueTypesMut + ?Sized + 'static,
-    D::StringTypes: StringTypesMut,
-    D::SemverTypes: SemverTypesMut,
-{
-    fn evaluate(&mut self, _env: &mut dyn Environment<C, D>) -> Result<Value<D>, D> {
-        Result::Ok(self.0.convert())
+impl Evaluator for LiteralEvaluator {
+    fn evaluate(&mut self, _env: &mut dyn Environment) -> Result<Value> {
+        Result::Ok(self.0.deep_clone())
     }
 }
 
 #[derive(Debug)]
-pub struct VariableEvaluator<S>(ValueQualifiedSymbol<S>)
-where
-    S: StringTypes + ?Sized + 'static;
+pub struct VariableEvaluator(ValueQualifiedSymbol);
 
-impl<S> VariableEvaluator<S>
-where
-    S: StringTypes + ?Sized,
-{
-    pub fn new(name: ValueQualifiedSymbol<S>) -> Self {
+impl VariableEvaluator {
+    pub fn new(name: ValueQualifiedSymbol) -> Self {
         Self(name)
     }
 }
 
-impl<C, D> Evaluator<C, D> for VariableEvaluator<C::StringTypes>
-where
-    C: ValueTypes + ?Sized + 'static,
-    D: ValueTypesMut + ?Sized + 'static,
-    D::StringTypes: StringTypesMut,
-    D::SemverTypes: SemverTypesMut,
-{
-    fn evaluate(&mut self, env: &mut dyn Environment<C, D>) -> Result<Value<D>, D> {
+impl Evaluator for VariableEvaluator {
+    fn evaluate(&mut self, env: &mut dyn Environment) -> Result<Value> {
         env.evaluate_variable(&self.0)
     }
 }
 
 #[derive(Debug)]
-pub struct FunctionCallEvaluator<C, D>
-where
-    C: ValueTypes + ?Sized + 'static,
-    D: ValueTypesMut + ?Sized + 'static,
-    D::StringTypes: StringTypesMut,
-    D::SemverTypes: SemverTypesMut,
-{
-    name: ValueFunction<C::StringTypes>,
-    params: Vec<Box<dyn Evaluator<C, D>>>,
+pub struct FunctionCallEvaluator {
+    name: ValueFunction,
+    params: Vec<Box<dyn Evaluator>>,
 }
 
-impl<C, D> FunctionCallEvaluator<C, D>
-where
-    C: ValueTypes + ?Sized + 'static,
-    D: ValueTypesMut + ?Sized + 'static,
-    D::StringTypes: StringTypesMut,
-    D::SemverTypes: SemverTypesMut,
-{
-    pub fn new(name: ValueFunction<C::StringTypes>, params: Vec<Box<dyn Evaluator<C, D>>>) -> Self {
+impl FunctionCallEvaluator {
+    pub fn new(name: ValueFunction, params: Vec<Box<dyn Evaluator>>) -> Self {
         Self { name, params }
     }
 }
 
-impl<C, D> Evaluator<C, D> for FunctionCallEvaluator<C, D>
-where
-    C: ValueTypes + ?Sized + 'static,
-    D: ValueTypesMut + ?Sized + 'static,
-    D::StringTypes: StringTypesMut,
-    D::SemverTypes: SemverTypesMut,
-{
-    fn evaluate(&mut self, env: &mut dyn Environment<C, D>) -> Result<Value<D>, D> {
+impl Evaluator for FunctionCallEvaluator {
+    fn evaluate(&mut self, env: &mut dyn Environment) -> Result<Value> {
         use std::borrow::BorrowMut;
 
         let params = (&mut self.params)
             .into_iter()
-            .map(|p| BorrowMut::<dyn Evaluator<C, D>>::borrow_mut(p).evaluate(env))
-            .collect::<Result<Vec<Value<D>>, D>>()?;
+            .map(|p| BorrowMut::<dyn Evaluator>::borrow_mut(p).evaluate(env))
+            .collect::<Result<Vec<Value>>>()?;
         env.evaluate_function(&self.name.0, params)
     }
 }
 
 #[derive(Debug)]
-pub struct ConcatenateListsEvaluator<C, D>(Vec<ListItem<Box<dyn Evaluator<C, D>>>>)
-where
-    C: ValueTypes + ?Sized,
-    D: ValueTypesMut + ?Sized,
-    D::StringTypes: StringTypesMut,
-    D::SemverTypes: SemverTypesMut;
+pub struct ConcatenateListsEvaluator(Vec<ListItem<Box<dyn Evaluator>>>);
 
-impl<C, D> ConcatenateListsEvaluator<C, D>
-where
-    C: ValueTypes + ?Sized,
-    D: ValueTypesMut + ?Sized,
-    D::StringTypes: StringTypesMut,
-    D::SemverTypes: SemverTypesMut,
-{
-    pub fn new(items: Vec<ListItem<Box<dyn Evaluator<C, D>>>>) -> Self {
+impl ConcatenateListsEvaluator {
+    pub fn new(items: Vec<ListItem<Box<dyn Evaluator>>>) -> Self {
         Self(items)
     }
 }
 
-impl<C, D> Evaluator<C, D> for ConcatenateListsEvaluator<C, D>
-where
-    C: ValueTypes + ?Sized + 'static,
-    D: ValueTypesMut + ?Sized + 'static,
-    D::StringTypes: StringTypesMut,
-    D::SemverTypes: SemverTypesMut,
-{
-    fn evaluate(&mut self, env: &mut dyn Environment<C, D>) -> Result<Value<D>, D> {
+impl Evaluator for ConcatenateListsEvaluator {
+    fn evaluate(&mut self, env: &mut dyn Environment) -> Result<Value> {
         let mut items = Vec::new();
         for item in &mut self.0 {
             items.push(item.as_mut().map(|comp| comp.evaluate(env)).transpose()?);
@@ -639,38 +545,20 @@ pub enum BackquoteCommaSplice {
 }
 
 #[derive(Debug)]
-pub struct BackquoteCommaSplicePushEvaluator<C, D>
-where
-    C: ValueTypes + ?Sized,
-    D: ValueTypesMut + ?Sized,
-    D::StringTypes: StringTypesMut,
-    D::SemverTypes: SemverTypesMut,
-{
+pub struct BackquoteCommaSplicePushEvaluator {
     push: BackquoteCommaSplice,
-    wrapped: Box<dyn Evaluator<C, D>>,
+    wrapped: Box<dyn Evaluator>,
 }
 
-impl<C, D> BackquoteCommaSplicePushEvaluator<C, D>
-where
-    C: ValueTypes + ?Sized,
-    D: ValueTypesMut + ?Sized,
-    D::StringTypes: StringTypesMut,
-    D::SemverTypes: SemverTypesMut,
-{
-    pub fn new(push: BackquoteCommaSplice, wrapped: Box<dyn Evaluator<C, D>>) -> Self {
+impl BackquoteCommaSplicePushEvaluator {
+    pub fn new(push: BackquoteCommaSplice, wrapped: Box<dyn Evaluator>) -> Self {
         Self { push, wrapped }
     }
 }
 
-impl<C, D> Evaluator<C, D> for BackquoteCommaSplicePushEvaluator<C, D>
-where
-    C: ValueTypes + ?Sized + 'static,
-    D: ValueTypesMut + ?Sized + 'static,
-    D::StringTypes: StringTypesMut,
-    D::SemverTypes: SemverTypesMut,
-{
-    fn evaluate(&mut self, env: &mut dyn Environment<C, D>) -> Result<Value<D>, D> {
-        let result = D::value_ref_from_value(self.wrapped.evaluate(env)?);
+impl Evaluator for BackquoteCommaSplicePushEvaluator {
+    fn evaluate(&mut self, env: &mut dyn Environment) -> Result<Value> {
+        let result = self.wrapped.evaluate(env)?.into();
         Result::Ok(match self.push {
             BackquoteCommaSplice::Backquote => Value::Backquote(ValueBackquote(result)),
             BackquoteCommaSplice::Comma => Value::Comma(ValueComma(result)),
@@ -680,26 +568,14 @@ where
 }
 
 #[derive(Debug)]
-pub struct CompilationResult<C, D>
-where
-    C: ValueTypes + ?Sized,
-    D: ValueTypesMut + ?Sized,
-    D::StringTypes: StringTypesMut,
-    D::SemverTypes: SemverTypesMut,
-{
-    pub result: Box<dyn Evaluator<C, D> + 'static>,
+pub struct CompilationResult {
+    pub result: Box<dyn Evaluator + 'static>,
     pub return_type: ValueType,
 }
 
-pub enum TryCompilationResult<C, D>
-where
-    C: ValueTypes + ?Sized,
-    D: ValueTypesMut + ?Sized,
-    D::StringTypes: StringTypesMut,
-    D::SemverTypes: SemverTypesMut,
-{
-    Compiled(CompilationResult<C, D>),
-    Uncompiled(Value<C>),
+pub enum TryCompilationResult {
+    Compiled(CompilationResult),
+    Uncompiled(Value),
 }
 
 #[cfg(test)]
@@ -710,29 +586,17 @@ mod tests {
     use std::rc::Rc;
 
     #[derive(Debug)]
-    struct SideEffectEvaluator<C, D>
-    where
-        C: ValueTypes + ?Sized,
-        D: ValueTypesMut + ?Sized,
-        D::StringTypes: StringTypesMut,
-        D::SemverTypes: SemverTypesMut,
-    {
+    struct SideEffectEvaluator {
         eval_side_effects: Rc<RefCell<HashSet<String>>>,
         name: String,
-        value: Box<dyn Evaluator<C, D>>,
+        value: Box<dyn Evaluator>,
     }
 
-    impl<C, D> SideEffectEvaluator<C, D>
-    where
-        C: ValueTypes + ?Sized,
-        D: ValueTypesMut + ?Sized,
-        D::StringTypes: StringTypesMut,
-        D::SemverTypes: SemverTypesMut,
-    {
+    impl SideEffectEvaluator {
         pub fn new(
             eval_side_effects: Rc<RefCell<HashSet<String>>>,
             name: String,
-            value: Box<dyn Evaluator<C, D>>,
+            value: Box<dyn Evaluator>,
         ) -> Self {
             Self {
                 eval_side_effects,
@@ -742,14 +606,8 @@ mod tests {
         }
     }
 
-    impl<C, D> Evaluator<C, D> for SideEffectEvaluator<C, D>
-    where
-        C: ValueTypes + ?Sized + 'static,
-        D: ValueTypesMut + ?Sized + 'static,
-        D::StringTypes: StringTypesMut,
-        D::SemverTypes: SemverTypesMut,
-    {
-        fn evaluate(&mut self, env: &mut dyn Environment<C, D>) -> Result<Value<D>, D> {
+    impl Evaluator for SideEffectEvaluator {
+        fn evaluate(&mut self, env: &mut dyn Environment) -> Result<Value> {
             self.eval_side_effects
                 .borrow_mut()
                 .insert(self.name.clone());
@@ -770,37 +628,27 @@ mod tests {
             }
         }
 
-        fn compile_side_effect<C, D>(
-            &mut self,
-            mut params: ValueList<C>,
-        ) -> Result<CompilationResult<C, D>, D>
-        where
-            C: ValueTypes + ?Sized + 'static,
-            D: ValueTypesMut + ?Sized + 'static,
-            D::StringTypes: StringTypesMut,
-            D::SemverTypes: SemverTypesMut,
-        {
+        fn compile_side_effect(&mut self, mut params: ValueList) -> Result<CompilationResult> {
             use std::convert::TryInto;
 
-            let side_effect: ValueString<C::StringTypes> = match params.next() {
+            let side_effect: ValueString = match params.next() {
                 Option::Some(s) => s,
-                Option::None => return Result::Err(e_program_error!(D)),
+                Option::None => return Result::Err(e_program_error!()),
             }
             .try_into()
             .unwrap();
-            let side_effect_name = C::StringTypes::string_ref_to_str(&side_effect.0);
 
             let value = self.compile(match params.next() {
                 Option::Some(v) => v,
-                Option::None => return Result::Err(e_program_error!(D)),
+                Option::None => return Result::Err(e_program_error!()),
             })?;
 
             let retval = match params.next() {
-                Option::Some(_) => return Result::Err(e_program_error!(D)),
+                Option::Some(_) => return Result::Err(e_program_error!()),
                 Option::None => CompilationResult {
                     result: Box::new(SideEffectEvaluator::new(
                         self.eval_side_effects.clone(),
-                        side_effect_name.to_string(),
+                        side_effect.0.to_string(),
                         value.result,
                     )),
                     return_type: value.return_type,
@@ -809,44 +657,35 @@ mod tests {
 
             self.comp_side_effects
                 .borrow_mut()
-                .insert(side_effect_name.to_string());
+                .insert(side_effect.0.to_string());
 
             Result::Ok(retval)
         }
     }
 
-    impl<C, D> Environment<C, D> for SideEffectEnvironment
-    where
-        C: ValueTypes + ?Sized + 'static,
-        D: ValueTypesMut + ?Sized + 'static,
-        D::StringTypes: StringTypesMut,
-        D::SemverTypes: SemverTypesMut,
-    {
-        fn as_dyn_mut(&mut self) -> &mut (dyn Environment<C, D> + 'static) {
+    impl Environment for SideEffectEnvironment {
+        fn as_dyn_mut(&mut self) -> &mut (dyn Environment + 'static) {
             self
         }
 
         fn resolve_symbol_get_variable(
             &self,
-            _name: &ValueUnqualifiedSymbol<C::StringTypes>,
-        ) -> Option<ValueQualifiedSymbol<C::StringTypes>> {
+            _name: &ValueUnqualifiedSymbol,
+        ) -> Option<ValueQualifiedSymbol> {
             Option::None
         }
 
-        fn compile_variable(
-            &self,
-            _name: &ValueQualifiedSymbol<C::StringTypes>,
-        ) -> Option<ValueType> {
+        fn compile_variable(&self, _name: &ValueQualifiedSymbol) -> Option<ValueType> {
             Option::None
         }
 
         fn resolve_symbol_get_macro(
             &self,
-            name: &ValueUnqualifiedSymbol<C::StringTypes>,
-        ) -> Option<ValueQualifiedSymbol<C::StringTypes>> {
-            match C::StringTypes::string_ref_to_str(&name.0) {
-                "side-effect" => Option::Some(ValueQualifiedSymbol::<C::StringTypes> {
-                    package: C::StringTypes::string_ref_from_static_str("test"),
+            name: &ValueUnqualifiedSymbol,
+        ) -> Option<ValueQualifiedSymbol> {
+            match &*name.0 {
+                "side-effect" => Option::Some(ValueQualifiedSymbol {
+                    package: "test".into(),
                     name: name.0.clone(),
                 }),
                 _ => Option::None,
@@ -855,36 +694,30 @@ mod tests {
 
         fn compile_function(
             &self,
-            _name: &ValueQualifiedSymbol<C::StringTypes>,
+            _name: &ValueQualifiedSymbol,
             _params: &mut dyn Iterator<Item = &ValueType>,
-        ) -> Option<Result<ValueType, D>> {
+        ) -> Option<Result<ValueType>> {
             Option::None
         }
 
-        fn evaluate_variable(
-            &self,
-            _name: &ValueQualifiedSymbol<C::StringTypes>,
-        ) -> Result<Value<D>, D> {
-            Result::Err(e_unbound_variable!(D))
+        fn evaluate_variable(&self, _name: &ValueQualifiedSymbol) -> Result<Value> {
+            Result::Err(e_unbound_variable!())
         }
 
         fn evaluate_function(
             &mut self,
-            _name: &ValueQualifiedSymbol<C::StringTypes>,
-            _params: Vec<Value<D>>,
-        ) -> Result<Value<D>, D> {
-            Result::Err(e_undefined_function!(D))
+            _name: &ValueQualifiedSymbol,
+            _params: Vec<Value>,
+        ) -> Result<Value> {
+            Result::Err(e_undefined_function!())
         }
 
         fn compile_macro(
             &mut self,
-            name: &ValueQualifiedSymbol<C::StringTypes>,
-            params: ValueList<C>,
-        ) -> Option<Result<TryCompilationResult<C, D>, D>> {
-            match (
-                C::StringTypes::string_ref_to_str(&name.package),
-                C::StringTypes::string_ref_to_str(&name.name),
-            ) {
+            name: &ValueQualifiedSymbol,
+            params: ValueList,
+        ) -> Option<Result<TryCompilationResult>> {
+            match (&*name.package, &*name.name) {
                 ("test", "side-effect") => Option::Some(match self.compile_side_effect(params) {
                     Result::Ok(r) => Result::Ok(TryCompilationResult::Compiled(r)),
                     Result::Err(e) => Result::Err(e),
@@ -1047,13 +880,7 @@ mod tests {
 
     struct SimpleEnvironment;
 
-    fn simplemacro1<C, D>() -> Result<TryCompilationResult<C, D>, D>
-    where
-        C: ValueTypes + ?Sized + 'static,
-        D: ValueTypesMut + ?Sized + 'static,
-        D::StringTypes: StringTypesMut,
-        D::SemverTypes: SemverTypesMut,
-    {
+    fn simplemacro1() -> Result<TryCompilationResult> {
         Result::Ok(TryCompilationResult::Compiled(CompilationResult {
             result: Box::new(LiteralEvaluator::new(v_str!("Hello world!"))),
             return_type: ValueType::Some(BTreeSet::from_iter(std::iter::once(
@@ -1062,98 +889,59 @@ mod tests {
         }))
     }
 
-    fn simplemacro2<C, D>() -> Result<TryCompilationResult<C, D>, D>
-    where
-        C: ValueTypes + ?Sized + 'static,
-        D: ValueTypesMut + ?Sized + 'static,
-        D::StringTypes: StringTypesMut,
-        D::SemverTypes: SemverTypesMut,
-    {
+    fn simplemacro2() -> Result<TryCompilationResult> {
         Result::Ok(TryCompilationResult::Compiled(CompilationResult {
             result: Box::new(LiteralEvaluator::new(v_bool!(true))),
             return_type: ValueType::Some(BTreeSet::from_iter(std::iter::once(ValueTypeSome::Bool))),
         }))
     }
 
-    fn compile_simplefunc1<D>(params: &mut dyn Iterator<Item = &ValueType>) -> Result<ValueType, D>
-    where
-        D: ValueTypes + ?Sized,
-    {
+    fn compile_simplefunc1(params: &mut dyn Iterator<Item = &ValueType>) -> Result<ValueType> {
         let result = match params.next() {
             Option::Some(p) => (*p).clone(),
-            Option::None => return Result::Err(e_program_error!(D)),
+            Option::None => return Result::Err(e_program_error!()),
         };
 
         match params.next() {
             Option::None => Result::Ok(result),
-            Option::Some(_) => Result::Err(e_program_error!(D)),
+            Option::Some(_) => Result::Err(e_program_error!()),
         }
     }
 
-    fn simplefunc1<C, D>(
-        _env: &mut dyn Environment<C, D>,
-        params: Vec<Value<D>>,
-    ) -> Result<Value<D>, D>
-    where
-        C: ValueTypes + ?Sized,
-        D: ValueTypesMut + ?Sized,
-        D::StringTypes: StringTypesMut,
-        D::SemverTypes: SemverTypesMut,
-    {
+    fn simplefunc1(_env: &mut dyn Environment, params: Vec<Value>) -> Result<Value> {
         let mut params = params.into_iter();
         let result = match params.next() {
             Option::Some(p) => p,
-            Option::None => return Result::Err(e_program_error!(D)),
+            Option::None => return Result::Err(e_program_error!()),
         };
 
         match params.next() {
             Option::None => Result::Ok(result),
-            Option::Some(_) => Result::Err(e_program_error!(D)),
+            Option::Some(_) => Result::Err(e_program_error!()),
         }
     }
 
-    fn simplefunc2<C, D>(
-        _env: &mut dyn Environment<C, D>,
-        _params: Vec<Value<D>>,
-    ) -> Result<Value<D>, D>
-    where
-        C: ValueTypes + ?Sized,
-        D: ValueTypesMut + ?Sized,
-        D::StringTypes: StringTypesMut,
-        D::SemverTypes: SemverTypesMut,
-    {
-        Result::Ok(v_qsym!("pvar", "var3").convert())
+    fn simplefunc2(_env: &mut dyn Environment, _params: Vec<Value>) -> Result<Value> {
+        Result::Ok(v_qsym!("pvar", "var3"))
     }
 
-    impl<C, D> Environment<C, D> for SimpleEnvironment
-    where
-        C: ValueTypes + ?Sized + 'static,
-        D: ValueTypesMut + ?Sized + 'static,
-        D::StringTypes: StringTypesMut,
-        D::SemverTypes: SemverTypesMut,
-    {
-        fn as_dyn_mut(&mut self) -> &mut (dyn Environment<C, D> + 'static) {
-            self as &mut (dyn Environment<C, D> + 'static)
+    impl Environment for SimpleEnvironment {
+        fn as_dyn_mut(&mut self) -> &mut (dyn Environment + 'static) {
+            self as &mut (dyn Environment + 'static)
         }
 
         fn resolve_symbol_get_variable(
             &self,
-            name: &ValueUnqualifiedSymbol<C::StringTypes>,
-        ) -> Option<ValueQualifiedSymbol<C::StringTypes>> {
+            name: &ValueUnqualifiedSymbol,
+        ) -> Option<ValueQualifiedSymbol> {
             Option::Some(ValueQualifiedSymbol {
-                package: C::StringTypes::string_ref_from_static_str("pvar"),
+                package: "pvar".into(),
                 name: name.0.clone(),
             })
         }
 
-        fn compile_variable(
-            &self,
-            name: &ValueQualifiedSymbol<C::StringTypes>,
-        ) -> Option<ValueType> {
-            match (
-                C::StringTypes::string_ref_to_str(&name.package),
-                C::StringTypes::string_ref_to_str(&name.name),
-            ) {
+        fn compile_variable(&self, name: &ValueQualifiedSymbol) -> Option<ValueType> {
+            match (&*name.package, &*name.name) {
                 ("pvar", "var1") => Option::Some(ValueType::Some(BTreeSet::from_iter(
                     std::iter::once(ValueTypeSome::String),
                 ))),
@@ -1175,57 +963,45 @@ mod tests {
             }
         }
 
-        fn evaluate_variable(
-            &self,
-            name: &ValueQualifiedSymbol<C::StringTypes>,
-        ) -> Result<Value<D>, D> {
-            match (
-                C::StringTypes::string_ref_to_str(&name.package),
-                C::StringTypes::string_ref_to_str(&name.name),
-            ) {
-                ("pvar", "var1") => Result::Ok(v_str!("str").convert()),
-                ("pvar", "var2") => Result::Ok(v_bool!(true).convert()),
-                ("pvar", "var3") => Result::Ok(v_qsym!("pvar", "var4").convert()),
-                ("pvar", "var4") => Result::Ok(v_uqsym!("var5").convert()),
-                ("pvar", "var5") => Result::Ok(v_list!(v_qsym!("p", "simplefunc2")).convert()),
-                _ => Result::Err(e_unbound_variable!(D)),
+        fn evaluate_variable(&self, name: &ValueQualifiedSymbol) -> Result<Value> {
+            match (&*name.package, &*name.name) {
+                ("pvar", "var1") => Result::Ok(v_str!("str")),
+                ("pvar", "var2") => Result::Ok(v_bool!(true)),
+                ("pvar", "var3") => Result::Ok(v_qsym!("pvar", "var4")),
+                ("pvar", "var4") => Result::Ok(v_uqsym!("var5")),
+                ("pvar", "var5") => Result::Ok(v_list!(v_qsym!("p", "simplefunc2"))),
+                _ => Result::Err(e_unbound_variable!()),
             }
         }
 
         fn evaluate_function(
             &mut self,
-            name: &ValueQualifiedSymbol<C::StringTypes>,
-            params: Vec<Value<D>>,
-        ) -> Result<Value<D>, D> {
-            match (
-                C::StringTypes::string_ref_to_str(&name.package),
-                C::StringTypes::string_ref_to_str(&name.name),
-            ) {
-                ("p", "simplefunc1") => simplefunc1::<C, D>(self, params),
-                ("p", "simplefunc2") => simplefunc2::<C, D>(self, params),
-                _ => Result::Err(e_undefined_function!(D)),
+            name: &ValueQualifiedSymbol,
+            params: Vec<Value>,
+        ) -> Result<Value> {
+            match (&*name.package, &*name.name) {
+                ("p", "simplefunc1") => simplefunc1(self, params),
+                ("p", "simplefunc2") => simplefunc2(self, params),
+                _ => Result::Err(e_undefined_function!()),
             }
         }
 
         fn resolve_symbol_get_macro(
             &self,
-            name: &ValueUnqualifiedSymbol<C::StringTypes>,
-        ) -> Option<ValueQualifiedSymbol<C::StringTypes>> {
+            name: &ValueUnqualifiedSymbol,
+        ) -> Option<ValueQualifiedSymbol> {
             Option::Some(ValueQualifiedSymbol {
-                package: C::StringTypes::string_ref_from_static_str("p"),
+                package: "p".into(),
                 name: name.0.clone(),
             })
         }
 
         fn compile_macro(
             &mut self,
-            name: &ValueQualifiedSymbol<C::StringTypes>,
-            params: ValueList<C>,
-        ) -> Option<Result<TryCompilationResult<C, D>, D>> {
-            match (
-                C::StringTypes::string_ref_to_str(&name.package),
-                C::StringTypes::string_ref_to_str(&name.name),
-            ) {
+            name: &ValueQualifiedSymbol,
+            params: ValueList,
+        ) -> Option<Result<TryCompilationResult>> {
+            match (&*name.package, &*name.name) {
                 ("p", "simplemacro1") => Option::Some(simplemacro1()),
                 ("p", "simplemacro2") => Option::Some(simplemacro2()),
                 ("p", "simplefunc1") => self.compile_function_from_macro(name, params),
@@ -1235,13 +1011,10 @@ mod tests {
 
         fn compile_function(
             &self,
-            name: &ValueQualifiedSymbol<C::StringTypes>,
+            name: &ValueQualifiedSymbol,
             params: &mut dyn Iterator<Item = &ValueType>,
-        ) -> Option<Result<ValueType, D>> {
-            match (
-                C::StringTypes::string_ref_to_str(&name.package),
-                C::StringTypes::string_ref_to_str(&name.name),
-            ) {
+        ) -> Option<Result<ValueType>> {
+            match (&*name.package, &*name.name) {
                 ("p", "simplefunc1") => Option::Some(compile_simplefunc1(params)),
                 _ => Option::None,
             }
@@ -1249,9 +1022,9 @@ mod tests {
     }
 
     fn test_compile_and_evaluate(
-        env: &mut dyn Environment<ValueTypesStatic, ValueTypesRc>,
-        code: Value<ValueTypesStatic>,
-        result: Value<ValueTypesStatic>,
+        env: &mut dyn Environment,
+        code: Value,
+        result: Value,
         return_type: ValueType,
     ) {
         let mut comp = env.compile(code).unwrap();
@@ -1262,7 +1035,7 @@ mod tests {
     #[test]
     fn test_evaluate_literal() {
         let mut env = SimpleEnvironment;
-        let env = &mut env as &mut dyn Environment<ValueTypesStatic, ValueTypesRc>;
+        let env = &mut env as &mut dyn Environment;
 
         let mut comp = LiteralEvaluator::new(v_str!("Hello world!"));
         assert_eq!(comp.evaluate(env).unwrap(), v_str!("Hello world!"));
@@ -1274,7 +1047,7 @@ mod tests {
     #[test]
     fn test_evaluate_variable() {
         let mut env = SimpleEnvironment;
-        let env = &mut env as &mut dyn Environment<ValueTypesStatic, ValueTypesRc>;
+        let env = &mut env as &mut dyn Environment;
 
         let mut comp = VariableEvaluator::new(qsym!("pvar", "var1"));
         assert_eq!(comp.evaluate(env).unwrap(), v_str!("str"));
@@ -1283,16 +1056,13 @@ mod tests {
         assert_eq!(comp.evaluate(env).unwrap(), v_bool!(true));
 
         let mut comp = VariableEvaluator::new(qsym!("pvar", "undef"));
-        assert_eq!(
-            comp.evaluate(env).unwrap_err(),
-            e_unbound_variable!(ValueTypesRc)
-        );
+        assert_eq!(comp.evaluate(env).unwrap_err(), e_unbound_variable!());
     }
 
     #[test]
     fn test_evaluate_function() {
         let mut env = SimpleEnvironment;
-        let env = &mut env as &mut dyn Environment<ValueTypesStatic, ValueTypesRc>;
+        let env = &mut env as &mut dyn Environment;
 
         let mut comp = FunctionCallEvaluator::new(
             func!(qsym!("p", "simplefunc1")),
@@ -1310,7 +1080,7 @@ mod tests {
     #[test]
     fn test_evaluate_concatenate_lists() {
         let mut env = SimpleEnvironment;
-        let env = &mut env as &mut dyn Environment<ValueTypesStatic, ValueTypesRc>;
+        let env = &mut env as &mut dyn Environment;
 
         let mut comp = ConcatenateListsEvaluator::new(vec![
             ListItem::List(Box::new(LiteralEvaluator::new(v_list!(v_str!("str"))))),
@@ -1324,13 +1094,13 @@ mod tests {
         let mut comp = ConcatenateListsEvaluator::new(vec![ListItem::List(Box::new(
             LiteralEvaluator::new(v_bool!(true)),
         ))]);
-        assert_eq!(comp.evaluate(env).unwrap_err(), e_type_error!(ValueTypesRc));
+        assert_eq!(comp.evaluate(env).unwrap_err(), e_type_error!());
     }
 
     #[test]
     fn test_evaluate_backquote_comma_splice_push() {
         let mut env = SimpleEnvironment;
-        let env = &mut env as &mut dyn Environment<ValueTypesStatic, ValueTypesRc>;
+        let env = &mut env as &mut dyn Environment;
 
         let mut comp = BackquoteCommaSplicePushEvaluator::new(
             BackquoteCommaSplice::Backquote,
@@ -1354,7 +1124,7 @@ mod tests {
     #[test]
     fn test_compile_and_evaluate_literal() {
         let mut env = SimpleEnvironment;
-        let env = &mut env as &mut dyn Environment<ValueTypesStatic, ValueTypesRc>;
+        let env = &mut env as &mut dyn Environment;
 
         test_compile_and_evaluate(
             env,
@@ -1387,7 +1157,7 @@ mod tests {
     #[test]
     fn test_compile_and_evaluate_variable() {
         let mut env = SimpleEnvironment;
-        let env = &mut env as &mut dyn Environment<ValueTypesStatic, ValueTypesRc>;
+        let env = &mut env as &mut dyn Environment;
 
         test_compile_and_evaluate(
             env,
@@ -1403,7 +1173,7 @@ mod tests {
         );
         assert_eq!(
             env.compile(v_uqsym!("undef")).unwrap_err(),
-            e_unbound_variable!(ValueTypesRc)
+            e_unbound_variable!()
         );
 
         test_compile_and_evaluate(
@@ -1420,14 +1190,14 @@ mod tests {
         );
         assert_eq!(
             env.compile(v_qsym!("pvar", "undef")).unwrap_err(),
-            e_unbound_variable!(ValueTypesRc)
+            e_unbound_variable!()
         );
     }
 
     #[test]
     fn test_compile_and_evaluate_macro() {
         let mut env = SimpleEnvironment;
-        let env = &mut env as &mut dyn Environment<ValueTypesStatic, ValueTypesRc>;
+        let env = &mut env as &mut dyn Environment;
 
         test_compile_and_evaluate(
             env,
@@ -1443,7 +1213,7 @@ mod tests {
         );
         assert_eq!(
             env.compile(v_list!(v_uqsym!("simplemacro3"))).unwrap_err(),
-            e_undefined_function!(ValueTypesRc)
+            e_undefined_function!()
         );
 
         test_compile_and_evaluate(
@@ -1461,14 +1231,14 @@ mod tests {
         assert_eq!(
             env.compile(v_list!(v_qsym!("p", "simplemacro3")))
                 .unwrap_err(),
-            e_undefined_function!(ValueTypesRc)
+            e_undefined_function!()
         );
     }
 
     #[test]
     fn test_compile_and_evaluate_function() {
         let mut env = SimpleEnvironment;
-        let env = &mut env as &mut dyn Environment<ValueTypesStatic, ValueTypesRc>;
+        let env = &mut env as &mut dyn Environment;
 
         test_compile_and_evaluate(
             env,
@@ -1484,7 +1254,7 @@ mod tests {
         );
         assert_eq!(
             env.compile(v_list!(v_uqsym!("simplefunc1"))).unwrap_err(),
-            e_program_error!(ValueTypesRc)
+            e_program_error!()
         );
 
         test_compile_and_evaluate(
@@ -1502,14 +1272,14 @@ mod tests {
         assert_eq!(
             env.compile(v_list!(v_qsym!("p", "simplefunc1")))
                 .unwrap_err(),
-            e_program_error!(ValueTypesRc)
+            e_program_error!()
         );
     }
 
     #[test]
     fn test_compile_and_evaluate_backquote() {
         let mut env = SimpleEnvironment;
-        let env = &mut env as &mut dyn Environment<ValueTypesStatic, ValueTypesRc>;
+        let env = &mut env as &mut dyn Environment;
 
         test_compile_and_evaluate(
             env,
@@ -1552,7 +1322,7 @@ mod tests {
         assert_eq!(
             env.compile(v_bq!(v_list!(v_splice!(v_qsym!("pvar", "var4")))))
                 .unwrap_err(),
-            e_type_error!(ValueTypesRc)
+            e_type_error!()
         );
         test_compile_and_evaluate(
             env,
@@ -1606,7 +1376,7 @@ mod tests {
     #[should_panic]
     fn test_compile_and_evaluate_backquote_bad_splice_backquote() {
         let mut env = SimpleEnvironment;
-        let env = &mut env as &mut dyn Environment<ValueTypesStatic, ValueTypesRc>;
+        let env = &mut env as &mut dyn Environment;
 
         test_compile_and_evaluate(
             env,
@@ -1620,7 +1390,7 @@ mod tests {
     #[should_panic]
     fn test_compile_and_evaluate_backquote_bad_splice_comma() {
         let mut env = SimpleEnvironment;
-        let env = &mut env as &mut dyn Environment<ValueTypesStatic, ValueTypesRc>;
+        let env = &mut env as &mut dyn Environment;
 
         test_compile_and_evaluate(
             env,
@@ -1634,7 +1404,7 @@ mod tests {
     #[should_panic]
     fn test_compile_and_evaluate_backquote_bad_splice_backquote_nested() {
         let mut env = SimpleEnvironment;
-        let env = &mut env as &mut dyn Environment<ValueTypesStatic, ValueTypesRc>;
+        let env = &mut env as &mut dyn Environment;
 
         test_compile_and_evaluate(
             env,
@@ -1650,7 +1420,7 @@ mod tests {
         assert_eq!(*env.comp_side_effects.borrow(), HashSet::new());
         assert_eq!(*env.eval_side_effects.borrow(), HashSet::new());
 
-        let mut comp: CompilationResult<_, ValueTypesRc> = env
+        let mut comp: CompilationResult = env
             .compile(v_list!(v_uqsym!("side-effect"), v_str!("a"), v_bool!(true)))
             .unwrap();
         assert_eq!(
@@ -1673,7 +1443,7 @@ mod tests {
             HashSet::from_iter(std::iter::once("a".to_string()))
         );
 
-        let mut comp: CompilationResult<_, ValueTypesRc> = env
+        let mut comp: CompilationResult = env
             .compile(v_list!(
                 v_qsym!("test", "side-effect"),
                 v_str!("b"),
