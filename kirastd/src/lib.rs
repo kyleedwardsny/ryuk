@@ -2,7 +2,6 @@ use ryuk_lispcore::env::*;
 use ryuk_lispcore::error::*;
 use ryuk_lispcore::helper::*;
 use ryuk_lispcore::value::*;
-use ryuk_lispcore::*;
 use std::collections::BTreeSet;
 
 #[derive(Debug)]
@@ -92,7 +91,7 @@ where
 }
 
 pub fn compile_quote<C, D>(
-    _env: &mut dyn Environment<C, D>,
+    env: &mut dyn Environment<C, D>,
     mut params: ValueList<C>,
 ) -> Result<CompilationResult<C, D>, D>
 where
@@ -103,24 +102,13 @@ where
 {
     use std::iter::FromIterator;
 
-    let result;
-    match params.next() {
-        Option::Some(val) => result = val,
-        _ => {
-            return Result::Err(e_program_error!(D));
-        }
-    }
+    let helper = MacroParameterHelper::new().literal::<Value<C>>();
 
-    match params.next() {
-        Option::Some(_) => {
-            return Result::Err(e_program_error!(D));
-        }
-        _ => (),
-    }
+    let (literal,) = helper.consume_parameters(env, &mut params)?;
+    let return_type = ValueType::Some(BTreeSet::from_iter(std::iter::once(literal.value_type())));
 
-    let return_type = ValueType::Some(BTreeSet::from_iter(std::iter::once(result.value_type())));
     Result::Ok(CompilationResult {
-        result: Box::new(LiteralEvaluator::new(result)),
+        result: Box::new(LiteralEvaluator::new(literal)),
         return_type,
     })
 }
@@ -128,6 +116,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ryuk_lispcore::*;
 
     struct SimpleEnvironment;
 
