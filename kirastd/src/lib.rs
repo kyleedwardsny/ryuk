@@ -5,42 +5,24 @@ use ryuk_lispcore::value::*;
 use std::collections::BTreeSet;
 
 #[derive(Debug)]
-struct IfEvaluator<C, D>
-where
-    C: ValueTypes + ?Sized,
-    D: ValueTypesMut + ?Sized,
-    D::StringTypes: StringTypesMut,
-    D::SemverTypes: SemverTypesMut,
-{
-    test: Box<dyn Evaluator<C, D>>,
-    then: Box<dyn Evaluator<C, D>>,
-    els: Box<dyn Evaluator<C, D>>,
+struct IfEvaluator {
+    test: Box<dyn Evaluator>,
+    then: Box<dyn Evaluator>,
+    els: Box<dyn Evaluator>,
 }
 
-impl<C, D> IfEvaluator<C, D>
-where
-    C: ValueTypes + ?Sized,
-    D: ValueTypesMut + ?Sized,
-    D::StringTypes: StringTypesMut,
-    D::SemverTypes: SemverTypesMut,
-{
+impl IfEvaluator {
     pub fn new(
-        test: Box<dyn Evaluator<C, D>>,
-        then: Box<dyn Evaluator<C, D>>,
-        els: Box<dyn Evaluator<C, D>>,
+        test: Box<dyn Evaluator>,
+        then: Box<dyn Evaluator>,
+        els: Box<dyn Evaluator>,
     ) -> Self {
         Self { test, then, els }
     }
 }
 
-impl<C, D> Evaluator<C, D> for IfEvaluator<C, D>
-where
-    C: ValueTypes + ?Sized + 'static,
-    D: ValueTypesMut + ?Sized + 'static,
-    D::StringTypes: StringTypesMut,
-    D::SemverTypes: SemverTypesMut,
-{
-    fn evaluate(&mut self, env: &mut dyn Environment<C, D>) -> Result<Value<D>, D> {
+impl Evaluator for IfEvaluator {
+    fn evaluate(&mut self, env: &mut dyn Environment) -> Result<Value> {
         use std::convert::TryInto;
 
         let b: ValueBool = self.test.evaluate(env)?.try_into().unwrap();
@@ -52,16 +34,7 @@ where
     }
 }
 
-pub fn compile_if<C, D>(
-    env: &mut dyn Environment<C, D>,
-    mut params: ValueList<C>,
-) -> Result<CompilationResult<C, D>, D>
-where
-    C: ValueTypes + ?Sized + 'static,
-    D: ValueTypesMut + ?Sized + 'static,
-    D::StringTypes: StringTypesMut,
-    D::SemverTypes: SemverTypesMut,
-{
+pub fn compile_if(env: &mut dyn Environment, mut params: ValueList) -> Result<CompilationResult> {
     use std::iter::FromIterator;
 
     let helper = MacroParameterHelper::new()
@@ -73,9 +46,7 @@ where
 
     let (test, then, els) = helper.consume_parameters(env, &mut params)?;
     let mut els = els.unwrap_or_else(|| CompilationResult {
-        result: Box::new(LiteralEvaluator::new(Value::<ValueTypesStatic>::List(
-            ValueList(Option::None),
-        ))),
+        result: Box::new(LiteralEvaluator::new(Value::List(ValueList(Option::None)))),
         return_type: ValueType::Some(BTreeSet::from_iter(std::iter::once(ValueTypeSome::List(
             ValueType::Some(BTreeSet::new()),
         )))),
@@ -90,19 +61,13 @@ where
     })
 }
 
-pub fn compile_quote<C, D>(
-    env: &mut dyn Environment<C, D>,
-    mut params: ValueList<C>,
-) -> Result<CompilationResult<C, D>, D>
-where
-    C: ValueTypes + ?Sized + 'static,
-    D: ValueTypesMut + ?Sized + 'static,
-    D::StringTypes: StringTypesMut,
-    D::SemverTypes: SemverTypesMut,
-{
+pub fn compile_quote(
+    env: &mut dyn Environment,
+    mut params: ValueList,
+) -> Result<CompilationResult> {
     use std::iter::FromIterator;
 
-    let helper = MacroParameterHelper::new().literal::<Value<C>>();
+    let helper = MacroParameterHelper::new().literal::<Value>();
 
     let (literal,) = helper.consume_parameters(env, &mut params)?;
     let return_type = ValueType::Some(BTreeSet::from_iter(std::iter::once(literal.value_type())));
@@ -120,62 +85,47 @@ mod tests {
 
     struct SimpleEnvironment;
 
-    impl<C, D> Environment<C, D> for SimpleEnvironment
-    where
-        C: ValueTypes + ?Sized + 'static,
-        D: ValueTypesMut + ?Sized + 'static,
-        D::StringTypes: StringTypesMut,
-        D::SemverTypes: SemverTypesMut,
-    {
-        fn as_dyn_mut(&mut self) -> &mut (dyn Environment<C, D> + 'static) {
-            self as &mut (dyn Environment<C, D> + 'static)
+    impl Environment for SimpleEnvironment {
+        fn as_dyn_mut(&mut self) -> &mut (dyn Environment + 'static) {
+            self as &mut (dyn Environment + 'static)
         }
 
         fn resolve_symbol_get_variable(
             &self,
-            _name: &ValueUnqualifiedSymbol<C::StringTypes>,
-        ) -> Option<ValueQualifiedSymbol<C::StringTypes>> {
+            _name: &ValueUnqualifiedSymbol,
+        ) -> Option<ValueQualifiedSymbol> {
             Option::None
         }
 
-        fn compile_variable(
-            &self,
-            _name: &ValueQualifiedSymbol<C::StringTypes>,
-        ) -> Option<ValueType> {
+        fn compile_variable(&self, _name: &ValueQualifiedSymbol) -> Option<ValueType> {
             Option::None
         }
 
-        fn evaluate_variable(
-            &self,
-            _name: &ValueQualifiedSymbol<C::StringTypes>,
-        ) -> Result<Value<D>, D> {
-            Result::Err(e_unbound_variable!(D))
+        fn evaluate_variable(&self, _name: &ValueQualifiedSymbol) -> Result<Value> {
+            Result::Err(e_unbound_variable!())
         }
 
         fn evaluate_function(
             &mut self,
-            _name: &ValueQualifiedSymbol<C::StringTypes>,
-            _params: Vec<Value<D>>,
-        ) -> Result<Value<D>, D> {
-            Result::Err(e_undefined_function!(D))
+            _name: &ValueQualifiedSymbol,
+            _params: Vec<Value>,
+        ) -> Result<Value> {
+            Result::Err(e_undefined_function!())
         }
 
         fn resolve_symbol_get_macro(
             &self,
-            _name: &ValueUnqualifiedSymbol<C::StringTypes>,
-        ) -> Option<ValueQualifiedSymbol<C::StringTypes>> {
+            _name: &ValueUnqualifiedSymbol,
+        ) -> Option<ValueQualifiedSymbol> {
             Option::None
         }
 
         fn compile_macro(
             &mut self,
-            name: &ValueQualifiedSymbol<C::StringTypes>,
-            params: ValueList<C>,
-        ) -> Option<Result<TryCompilationResult<C, D>, D>> {
-            match (
-                C::StringTypes::string_ref_to_str(&name.package),
-                C::StringTypes::string_ref_to_str(&name.name),
-            ) {
+            name: &ValueQualifiedSymbol,
+            params: ValueList,
+        ) -> Option<Result<TryCompilationResult>> {
+            match (&*name.package, &*name.name) {
                 ("std", "if") => Option::Some(match compile_if(self, params) {
                     Result::Ok(r) => Result::Ok(TryCompilationResult::Compiled(r)),
                     Result::Err(e) => Result::Err(e),
@@ -186,9 +136,9 @@ mod tests {
 
         fn compile_function(
             &self,
-            _name: &ValueQualifiedSymbol<C::StringTypes>,
+            _name: &ValueQualifiedSymbol,
             _params: &mut dyn Iterator<Item = &ValueType>,
-        ) -> Option<Result<ValueType, D>> {
+        ) -> Option<Result<ValueType>> {
             Option::None
         }
     }
@@ -196,7 +146,7 @@ mod tests {
     #[test]
     fn test_evaluate_if() {
         let mut env = SimpleEnvironment;
-        let env = &mut env as &mut dyn Environment<ValueTypesStatic, ValueTypesRc>;
+        let env = &mut env as &mut dyn Environment;
 
         let mut comp = IfEvaluator::new(
             Box::new(LiteralEvaluator::new(v_bool!(true))),
@@ -231,7 +181,7 @@ mod tests {
     #[should_panic]
     fn test_evaluate_if_bad_test() {
         let mut env = SimpleEnvironment;
-        let env = &mut env as &mut dyn Environment<ValueTypesStatic, ValueTypesRc>;
+        let env = &mut env as &mut dyn Environment;
 
         let mut comp = IfEvaluator::new(
             Box::new(LiteralEvaluator::new(v_str!("true"))),
@@ -246,7 +196,7 @@ mod tests {
         use std::iter::FromIterator;
 
         let mut env = SimpleEnvironment;
-        let env = &mut env as &mut dyn Environment<ValueTypesStatic, ValueTypesRc>;
+        let env = &mut env as &mut dyn Environment;
 
         let mut comp = compile_if(env, list!(v_bool!(true), v_str!("yes"), v_str!("no"))).unwrap();
         assert_eq!(comp.result.evaluate(env).unwrap(), v_str!("yes"));
@@ -282,24 +232,21 @@ mod tests {
             ]))
         );
 
-        assert_eq!(
-            compile_if(env, list!()).unwrap_err(),
-            e_program_error!(ValueTypesRc)
-        );
+        assert_eq!(compile_if(env, list!()).unwrap_err(), e_program_error!());
 
         assert_eq!(
             compile_if(env, list!(v_bool!(true))).unwrap_err(),
-            e_program_error!(ValueTypesRc)
+            e_program_error!()
         );
 
         assert_eq!(
             compile_if(env, list!(v_bool!(true), v_list!(), v_list!(), v_list!())).unwrap_err(),
-            e_program_error!(ValueTypesRc)
+            e_program_error!()
         );
 
         assert_eq!(
             compile_if(env, list!(v_str!("str"))).unwrap_err(),
-            e_type_error!(ValueTypesRc)
+            e_type_error!()
         );
     }
 
@@ -308,7 +255,7 @@ mod tests {
         use std::iter::FromIterator;
 
         let mut env = SimpleEnvironment;
-        let env = &mut env as &mut dyn Environment<ValueTypesStatic, ValueTypesRc>;
+        let env = &mut env as &mut dyn Environment;
 
         let mut comp = compile_quote(env, list!(v_str!("str"))).unwrap();
         assert_eq!(comp.result.evaluate(env).unwrap(), v_str!("str"));
@@ -342,14 +289,11 @@ mod tests {
             ))))
         );
 
-        assert_eq!(
-            compile_quote(env, list!()).unwrap_err(),
-            e_program_error!(ValueTypesRc)
-        );
+        assert_eq!(compile_quote(env, list!()).unwrap_err(), e_program_error!());
 
         assert_eq!(
             compile_quote(env, list!(v_list!(), v_list!())).unwrap_err(),
-            e_program_error!(ValueTypesRc)
+            e_program_error!()
         );
     }
 }
