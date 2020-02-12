@@ -3,43 +3,32 @@ use ryuk_lispcore::list::ListItem;
 use ryuk_lispcore::value::*;
 use ryuk_lispcore::*;
 use std::iter::Peekable;
-use std::marker::PhantomData;
 
 macro_rules! e_parse_error {
-    ($t:ident) => {
-        e_std_cond!($t, "parse-error")
+    () => {
+        e_std_cond!("parse-error")
     };
 }
 
 macro_rules! e_end_of_file {
-    ($t:ident) => {
-        e_std_cond!($t, "end-of-file")
+    () => {
+        e_std_cond!("end-of-file")
     };
 }
 
-pub struct LispParser<T, I>
+pub struct LispParser<I>
 where
-    T: ValueTypesMut + ?Sized,
-    T::StringTypes: StringTypesMut,
-    T::SemverTypes: SemverTypesMut,
     I: Iterator<Item = char>,
 {
     reader: Peekable<I>,
-    phantom_types: PhantomData<T>,
 }
 
-impl<T, I> LispParser<T, I>
+impl<I> LispParser<I>
 where
-    T: ValueTypesMut + ?Sized,
-    T::StringTypes: StringTypesMut,
-    T::SemverTypes: SemverTypesMut,
     I: Iterator<Item = char>,
 {
     pub fn new(reader: Peekable<I>) -> Self {
-        Self {
-            reader,
-            phantom_types: PhantomData,
-        }
+        Self { reader }
     }
 }
 
@@ -71,12 +60,9 @@ impl BackquoteStatus {
         }
     }
 
-    pub fn comma<T>(&self) -> Result<Self, T>
-    where
-        T: ValueTypes + ?Sized,
-    {
+    pub fn comma(&self) -> Result<Self> {
         if self.depth == 0 {
-            Result::Err(e_parse_error!(T))
+            Result::Err(e_parse_error!())
         } else {
             Result::Ok(Self {
                 depth: self.depth - 1,
@@ -85,12 +71,9 @@ impl BackquoteStatus {
         }
     }
 
-    pub fn splice<T>(&self) -> Result<Self, T>
-    where
-        T: ValueTypes + ?Sized,
-    {
+    pub fn splice(&self) -> Result<Self> {
         if self.depth == 0 || self.status != ListItem::Item(()) {
-            Result::Err(e_parse_error!(T))
+            Result::Err(e_parse_error!())
         } else {
             Result::Ok(Self {
                 depth: self.depth - 1,
@@ -100,14 +83,11 @@ impl BackquoteStatus {
     }
 }
 
-impl<T, I> Iterator for LispParser<T, I>
+impl<I> Iterator for LispParser<I>
 where
-    T: ValueTypesMut + ?Sized,
-    T::StringTypes: StringTypesMut,
-    T::SemverTypes: SemverTypesMut,
     I: Iterator<Item = char>,
 {
-    type Item = Result<Value<T>, T>;
+    type Item = Result<Value>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match read_impl(&mut self.reader, BackquoteStatus::new()) {
@@ -150,15 +130,12 @@ where
     }
 }
 
-fn read_delimited<T, I>(
+fn read_delimited<I>(
     peekable: &mut Peekable<I>,
     delimiter: char,
     bq: BackquoteStatus,
-) -> Result<Option<Value<T>>, T>
+) -> Result<Option<Value>>
 where
-    T: ValueTypesMut + ?Sized,
-    T::StringTypes: StringTypesMut,
-    T::SemverTypes: SemverTypesMut,
     I: Iterator<Item = char>,
 {
     skip_whitespace(peekable);
@@ -169,35 +146,34 @@ where
         } else {
             match read_impl(peekable, bq)? {
                 ReadImplResult::Value(v) => Result::Ok(Option::Some(v)),
-                ReadImplResult::EndOfFile => Result::Err(e_end_of_file!(T)),
+                ReadImplResult::EndOfFile => Result::Err(e_end_of_file!()),
             }
         }
     } else {
-        Result::Err(e_end_of_file!(T))
+        Result::Err(e_end_of_file!())
     }
 }
 
-fn read_list<T, I>(peekable: &mut Peekable<I>, bq: BackquoteStatus) -> Result<ValueList<T>, T>
+fn read_list<I>(peekable: &mut Peekable<I>, bq: BackquoteStatus) -> Result<ValueList>
 where
-    T: ValueTypesMut + ?Sized,
-    T::StringTypes: StringTypesMut,
-    T::SemverTypes: SemverTypesMut,
     I: Iterator<Item = char>,
 {
     Result::Ok(ValueList(
         match read_delimited(peekable, ')', bq.list_item())? {
-            Option::Some(v) => Option::Some(T::cons_ref_from_cons(Cons {
-                car: v,
-                cdr: read_list(peekable, bq)?,
-            })),
+            Option::Some(v) => Option::Some(
+                Cons {
+                    car: v,
+                    cdr: read_list(peekable, bq)?,
+                }
+                .into(),
+            ),
             Option::None => Option::None,
         },
     ))
 }
 
-fn read_string<T, I>(peekable: &mut Peekable<I>, end: char) -> Result<String, T>
+fn read_string<I>(peekable: &mut Peekable<I>, end: char) -> Result<String>
 where
-    T: ValueTypes + ?Sized,
     I: Iterator<Item = char>,
 {
     let mut result = String::new();
@@ -215,16 +191,11 @@ where
         }
     }
 
-    Result::Err(e_end_of_file!(T))
+    Result::Err(e_end_of_file!())
 }
 
-fn read_language_directive<T, I>(
-    peekable: &mut Peekable<I>,
-) -> Result<ValueLanguageDirective<T::StringTypes, T::SemverTypes>, T>
+fn read_language_directive<I>(peekable: &mut Peekable<I>) -> Result<ValueLanguageDirective>
 where
-    T: ValueTypesMut + ?Sized,
-    T::StringTypes: StringTypesMut,
-    T::SemverTypes: SemverTypesMut,
     I: Iterator<Item = char>,
 {
     skip_whitespace(peekable);
@@ -234,15 +205,12 @@ where
         skip_whitespace(peekable);
         ValueLanguageDirective::Kira(parse_semver(&read_token(peekable).try_unwrap_token()?)?)
     } else {
-        ValueLanguageDirective::Other(T::StringTypes::string_ref_from_string(t))
+        ValueLanguageDirective::Other(t)
     })
 }
 
-fn read_macro<T, I>(peekable: &mut Peekable<I>) -> Result<Value<T>, T>
+fn read_macro<I>(peekable: &mut Peekable<I>) -> Result<Value>
 where
-    T: ValueTypesMut + ?Sized,
-    T::StringTypes: StringTypesMut,
-    T::SemverTypes: SemverTypesMut,
     I: Iterator<Item = char>,
 {
     if let Option::Some(&c) = peekable.peek() {
@@ -259,11 +227,11 @@ where
                 }
                 "t" => Result::Ok(Value::Bool(ValueBool(true)).into()),
                 "f" => Result::Ok(Value::Bool(ValueBool(false)).into()),
-                _ => Result::Err(e_parse_error!(T)),
+                _ => Result::Err(e_parse_error!()),
             }
         }
     } else {
-        Result::Err(e_end_of_file!(T))
+        Result::Err(e_end_of_file!())
     }
 }
 
@@ -273,13 +241,10 @@ enum ReadTokenResult {
 }
 
 impl ReadTokenResult {
-    pub fn try_unwrap_token<T>(self) -> Result<String, T>
-    where
-        T: ValueTypes + ?Sized,
-    {
+    pub fn try_unwrap_token(self) -> Result<String> {
         match self {
             Self::ValidToken(t) => Result::Ok(t),
-            Self::InvalidToken(_) => Result::Err(e_parse_error!(T)),
+            Self::InvalidToken(_) => Result::Err(e_parse_error!()),
         }
     }
 }
@@ -311,35 +276,22 @@ where
     }
 }
 
-enum ReadImplResult<T>
-where
-    T: ValueTypesMut + ?Sized,
-    T::StringTypes: StringTypesMut,
-    T::SemverTypes: SemverTypesMut,
-{
-    Value(Value<T>),
+enum ReadImplResult {
+    Value(Value),
     EndOfFile,
 }
 
-impl<T> ReadImplResult<T>
-where
-    T: ValueTypesMut + ?Sized,
-    T::StringTypes: StringTypesMut,
-    T::SemverTypes: SemverTypesMut,
-{
-    pub fn try_unwrap_value(self) -> Result<Value<T>, T> {
+impl ReadImplResult {
+    pub fn try_unwrap_value(self) -> Result<Value> {
         match self {
             Self::Value(v) => Result::Ok(v),
-            Self::EndOfFile => Result::Err(e_end_of_file!(T)),
+            Self::EndOfFile => Result::Err(e_end_of_file!()),
         }
     }
 }
 
-fn read_impl<T, I>(peekable: &mut Peekable<I>, bq: BackquoteStatus) -> Result<ReadImplResult<T>, T>
+fn read_impl<I>(peekable: &mut Peekable<I>, bq: BackquoteStatus) -> Result<ReadImplResult>
 where
-    T: ValueTypesMut + ?Sized,
-    T::StringTypes: StringTypesMut,
-    T::SemverTypes: SemverTypesMut,
     I: Iterator<Item = char>,
 {
     skip_whitespace(peekable);
@@ -353,41 +305,49 @@ where
         } else if c == '"' {
             peekable.next();
             Result::Ok(ReadImplResult::Value(Value::String(ValueString(
-                T::StringTypes::string_ref_from_string(read_string(peekable, '"')?),
+                read_string(peekable, '"')?,
             ))))
         } else if c == '`' {
             peekable.next();
             Result::Ok(ReadImplResult::Value(Value::Backquote(ValueBackquote(
-                T::value_ref_from_value(read_impl(peekable, bq.backquote())?.try_unwrap_value()?),
+                read_impl(peekable, bq.backquote())?
+                    .try_unwrap_value()?
+                    .into(),
             ))))
         } else if c == ',' {
             peekable.next();
             match peekable.peek() {
                 Option::Some(&c2) => Result::Ok(ReadImplResult::Value(if c2 == '@' {
                     peekable.next();
-                    Value::Splice(ValueSplice(T::value_ref_from_value(
-                        read_impl(peekable, bq.splice()?)?.try_unwrap_value()?,
-                    )))
+                    Value::Splice(ValueSplice(
+                        read_impl(peekable, bq.splice()?)?
+                            .try_unwrap_value()?
+                            .into(),
+                    ))
                 } else {
-                    Value::Comma(ValueComma(T::value_ref_from_value(
-                        read_impl(peekable, bq.comma()?)?.try_unwrap_value()?,
-                    )))
+                    Value::Comma(ValueComma(
+                        read_impl(peekable, bq.comma()?)?.try_unwrap_value()?.into(),
+                    ))
                 })),
-                Option::None => Result::Err(e_end_of_file!(T)),
+                Option::None => Result::Err(e_end_of_file!()),
             }
         } else if c == '\'' {
             peekable.next();
             Result::Ok(ReadImplResult::Value(Value::List(ValueList(Option::Some(
-                T::cons_ref_from_cons(Cons {
+                Cons {
                     car: Value::QualifiedSymbol(ValueQualifiedSymbol {
-                        package: T::StringTypes::string_ref_from_static_str("std"),
-                        name: T::StringTypes::string_ref_from_static_str("quote"),
+                        package: "std".into(),
+                        name: "quote".into(),
                     }),
-                    cdr: ValueList(Option::Some(T::cons_ref_from_cons(Cons {
-                        car: read_impl(peekable, bq)?.try_unwrap_value()?,
-                        cdr: ValueList(Option::None),
-                    }))),
-                }),
+                    cdr: ValueList(Option::Some(
+                        Cons {
+                            car: read_impl(peekable, bq)?.try_unwrap_value()?,
+                            cdr: ValueList(Option::None),
+                        }
+                        .into(),
+                    )),
+                }
+                .into(),
             )))))
         } else if is_token_char(c) {
             match read_token(peekable) {
@@ -396,68 +356,57 @@ where
                         peekable.next();
                         Result::Ok(ReadImplResult::Value(Value::QualifiedSymbol(
                             ValueQualifiedSymbol {
-                                package: T::StringTypes::string_ref_from_string(t1.to_lowercase()),
-                                name: T::StringTypes::string_ref_from_string(
-                                    read_token(peekable).try_unwrap_token()?.to_lowercase(),
-                                ),
+                                package: t1.to_lowercase(),
+                                name: read_token(peekable).try_unwrap_token()?.to_lowercase(),
                             },
                         )))
                     }
                     _ => Result::Ok(ReadImplResult::Value(Value::UnqualifiedSymbol(
-                        ValueUnqualifiedSymbol(T::StringTypes::string_ref_from_string(
-                            t1.to_lowercase(),
-                        )),
+                        ValueUnqualifiedSymbol(t1.to_lowercase()),
                     ))),
                 },
-                ReadTokenResult::InvalidToken(_) => Result::Err(e_parse_error!(T)),
+                ReadTokenResult::InvalidToken(_) => Result::Err(e_parse_error!()),
             }
         } else {
             peekable.next();
-            Result::Err(e_parse_error!(T))
+            Result::Err(e_parse_error!())
         }
     } else {
         Result::Ok(ReadImplResult::EndOfFile)
     }
 }
 
-fn parse_semver<T>(s: &str) -> Result<ValueSemver<T::SemverTypes>, T>
-where
-    T: ValueTypesMut + ?Sized,
-    T::StringTypes: StringTypesMut,
-    T::SemverTypes: SemverTypesMut,
-{
+fn parse_semver(s: &str) -> Result<ValueSemver> {
     let mut major = Option::None;
-    let mut rest = T::SemverTypes::semver_ref_default();
+    let mut rest = Vec::new();
 
     for component_str in s.split('.') {
         let mut component = 0u64;
         let mut first = true;
         for c in component_str.chars() {
             if component == 0 && !first {
-                return Result::Err(e_parse_error!(T));
+                return Result::Err(e_parse_error!());
             }
             if let '0'..='9' = c {
                 component *= 10;
                 component += c as u64 - '0' as u64;
             } else {
-                return Result::Err(e_parse_error!(T));
+                return Result::Err(e_parse_error!());
             }
             first = false;
         }
         if first {
-            return Result::Err(e_parse_error!(T));
+            return Result::Err(e_parse_error!());
         }
         match &mut major {
             Option::None => major = Option::Some(component),
-            Option::Some(_) => {
-                T::SemverTypes::semver_ref_extend(&mut rest, std::iter::once(component))
-            }
+            Option::Some(_) => rest.push(component),
         }
     }
 
     match major {
         Option::Some(major) => Result::Ok(ValueSemver { major, rest }),
-        Option::None => Result::Err(e_parse_error!(T)),
+        Option::None => Result::Err(e_parse_error!()),
     }
 }
 
@@ -467,45 +416,27 @@ mod tests {
 
     #[test]
     fn test_parse_semver() {
-        assert_eq!(parse_semver::<ValueTypesRc>("1").unwrap(), v![1]);
+        assert_eq!(parse_semver("1").unwrap(), v![1]);
 
-        assert_eq!(parse_semver::<ValueTypesRc>("2.0").unwrap(), v![2, 0]);
+        assert_eq!(parse_semver("2.0").unwrap(), v![2, 0]);
 
-        assert_eq!(
-            parse_semver::<ValueTypesRc>("3.5.10").unwrap(),
-            v![3, 5, 10]
-        );
+        assert_eq!(parse_semver("3.5.10").unwrap(), v![3, 5, 10]);
 
-        assert_eq!(
-            parse_semver::<ValueTypesRc>("3.05").unwrap_err(),
-            e_parse_error!(ValueTypesRc)
-        );
+        assert_eq!(parse_semver("3.05").unwrap_err(), e_parse_error!());
 
-        assert_eq!(
-            parse_semver::<ValueTypesRc>("").unwrap_err(),
-            e_parse_error!(ValueTypesRc)
-        );
+        assert_eq!(parse_semver("").unwrap_err(), e_parse_error!());
 
-        assert_eq!(
-            parse_semver::<ValueTypesRc>("5.").unwrap_err(),
-            e_parse_error!(ValueTypesRc)
-        );
+        assert_eq!(parse_semver("5.").unwrap_err(), e_parse_error!());
 
-        assert_eq!(
-            parse_semver::<ValueTypesRc>(".5").unwrap_err(),
-            e_parse_error!(ValueTypesRc)
-        );
+        assert_eq!(parse_semver(".5").unwrap_err(), e_parse_error!());
 
-        assert_eq!(
-            parse_semver::<ValueTypesRc>("3.a").unwrap_err(),
-            e_parse_error!(ValueTypesRc)
-        );
+        assert_eq!(parse_semver("3.a").unwrap_err(), e_parse_error!());
     }
 
     #[test]
     fn test_read_unqualified_symbol() {
         let s = "uqsym1 UQSYM2\nUqSym3  \n   uqsym4";
-        let mut i = LispParser::<ValueTypesRc, _>::new(s.chars().peekable());
+        let mut i = LispParser::new(s.chars().peekable());
         assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("uqsym1"));
         assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("uqsym2"));
         assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("uqsym3"));
@@ -516,15 +447,15 @@ mod tests {
     #[test]
     fn test_read_qualified_symbol() {
         let s = "pa1:qsym1 PA2:QSYM2\nPa3:QSym3  \n   pa4:qsym4 pa5: qsym5 pa6::qsym6";
-        let mut i = LispParser::<ValueTypesRc, _>::new(s.chars().peekable());
+        let mut i = LispParser::new(s.chars().peekable());
         assert_eq!(i.next().unwrap().unwrap(), v_qsym!("pa1", "qsym1"));
         assert_eq!(i.next().unwrap().unwrap(), v_qsym!("pa2", "qsym2"));
         assert_eq!(i.next().unwrap().unwrap(), v_qsym!("pa3", "qsym3"));
         assert_eq!(i.next().unwrap().unwrap(), v_qsym!("pa4", "qsym4"));
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
         assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("qsym5"));
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
         assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("qsym6"));
         assert!(i.next().is_none());
     }
@@ -532,7 +463,7 @@ mod tests {
     #[test]
     fn test_read_bool() {
         let s = "#t #f\n#t  ";
-        let mut i = LispParser::<ValueTypesRc, _>::new(s.chars().peekable());
+        let mut i = LispParser::new(s.chars().peekable());
         assert_eq!(i.next().unwrap().unwrap(), v_bool!(true));
         assert_eq!(i.next().unwrap().unwrap(), v_bool!(false));
         assert_eq!(i.next().unwrap().unwrap(), v_bool!(true));
@@ -542,33 +473,33 @@ mod tests {
     #[test]
     fn test_read_invalid_macro() {
         let s = "#T #F #t#f  ";
-        let mut i = LispParser::<ValueTypesRc, _>::new(s.chars().peekable());
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        let mut i = LispParser::new(s.chars().peekable());
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
         assert!(i.next().is_none());
     }
 
     #[test]
     fn test_read_string() {
         let s = "\"a\"  \"b \\\"\" \"\\n\n\\\\c\"  \"d";
-        let mut i = LispParser::<ValueTypesRc, _>::new(s.chars().peekable());
+        let mut i = LispParser::new(s.chars().peekable());
         assert_eq!(i.next().unwrap().unwrap(), v_str!("a"));
         assert_eq!(i.next().unwrap().unwrap(), v_str!("b \""));
         assert_eq!(i.next().unwrap().unwrap(), v_str!("n\n\\c"));
-        assert_eq!(i.next().unwrap().unwrap_err(), e_end_of_file!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_end_of_file!());
         assert!(i.next().is_none());
     }
 
     #[test]
     fn test_read_quote() {
         let s = "'a '";
-        let mut i = LispParser::<ValueTypesRc, _>::new(s.chars().peekable());
+        let mut i = LispParser::new(s.chars().peekable());
         assert_eq!(
             i.next().unwrap().unwrap(),
             v_list!(v_qsym!("std", "quote"), v_uqsym!("a"))
         );
-        assert_eq!(i.next().unwrap().unwrap_err(), e_end_of_file!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_end_of_file!());
         assert!(i.next().is_none());
     }
 
@@ -580,7 +511,7 @@ mod tests {
             "(,@aa) `(,(,ab)) `(,(ac ,@ad)) `(,(ae (,@af))) ``(,(,(ah (,ai)))) ",
             "``(,(aj ,((,ak)))) `(`(,(al ,,@am))) `(`(an ,,@ao)) `(`(ap ,@,@aq))"
         );
-        let mut i = LispParser::<ValueTypesRc, _>::new(s.chars().peekable());
+        let mut i = LispParser::new(s.chars().peekable());
         assert_eq!(i.next().unwrap().unwrap(), v_bq!(v_uqsym!("a")));
         assert_eq!(i.next().unwrap().unwrap(), v_bq!(v_comma!(v_uqsym!("b"))));
         assert_eq!(i.next().unwrap().unwrap(), v_bq!(v_list!(v_uqsym!("c"))));
@@ -600,25 +531,25 @@ mod tests {
                 v_comma!(v_uqsym!("h"))
             ))
         );
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
         assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("i"));
         assert_eq!(
             i.next().unwrap().unwrap(),
             v_bq!(v_list!(v_uqsym!("j"), v_splice!(v_uqsym!("k"))))
         );
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
         assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("l"));
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
         assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("m"));
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
         assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("n"));
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
         assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("o"));
         assert_eq!(
             i.next().unwrap().unwrap(),
             v_bq!(v_bq!(v_comma!(v_comma!(v_uqsym!("p")))))
         );
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
         assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("q"));
         assert_eq!(
             i.next().unwrap().unwrap(),
@@ -631,9 +562,9 @@ mod tests {
                 v_splice!(v_uqsym!("t"))
             ))))
         );
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
         assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("u"));
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
         assert_eq!(
             i.next().unwrap().unwrap(),
             v_bq!(v_bq!(v_list!(v_comma!(v_comma!(v_uqsym!("v"))))))
@@ -650,86 +581,86 @@ mod tests {
             i.next().unwrap().unwrap(),
             v_bq!(v_bq!(v_list!(v_comma!(v_list!(v_comma!(v_uqsym!("y")))))))
         );
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
         assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("z"));
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
         assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("aa"));
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
         assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("ab"));
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
         assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("ad"));
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
         assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("af"));
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
         assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("ai"));
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
         assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("ak"));
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
         assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("am"));
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
         assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("ao"));
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
         assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("aq"));
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
     }
 
     #[test]
     fn test_read_v() {
         let s = "#v1.5  #v3\n#v2.5.4   #v3.05 #va.2 #V1.5";
-        let mut i = LispParser::<ValueTypesRc, _>::new(s.chars().peekable());
+        let mut i = LispParser::new(s.chars().peekable());
         assert_eq!(i.next().unwrap().unwrap(), v_v![1, 5]);
         assert_eq!(i.next().unwrap().unwrap(), v_v![3]);
         assert_eq!(i.next().unwrap().unwrap(), v_v![2, 5, 4]);
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
         assert!(i.next().is_none());
     }
 
     #[test]
     fn test_read_lang() {
         let s = "#lang kira 1.0 #lang\nnot-kira #lang Kira 1.0  \n  #lang ( #lang kira 1.a #Lang kira 1.0\n#lang kira 1.01";
-        let mut i = LispParser::<ValueTypesRc, _>::new(s.chars().peekable());
+        let mut i = LispParser::new(s.chars().peekable());
         assert_eq!(i.next().unwrap().unwrap(), v_lang_kira![1, 0]);
         assert_eq!(i.next().unwrap().unwrap(), v_lang_other!("not-kira"));
         assert_eq!(i.next().unwrap().unwrap(), v_lang_other!("Kira"));
         assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("1.0"));
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
         assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("kira"));
         assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("1.0"));
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
         assert!(i.next().is_none());
     }
 
     #[test]
     fn test_read_list() {
         let s = "(s1 s2 p3:s3)(p4:s4\n ' p5:s5 s6 ) ( s7 () \"s8\") (#t . #f) ( s9 . s10 s11 ( . (a a:. (a";
-        let mut i = LispParser::<ValueTypesRc, _>::new(s.chars().peekable());
+        let mut i = LispParser::new(s.chars().peekable());
         assert_eq!(
             i.next().unwrap().unwrap(),
             v_list!(v_uqsym!("s1"), v_uqsym!("s2"), v_qsym!("p3", "s3"))
@@ -746,22 +677,22 @@ mod tests {
             i.next().unwrap().unwrap(),
             v_list!(v_uqsym!("s7"), v_list!(), v_str!("s8"))
         );
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
         assert_eq!(i.next().unwrap().unwrap(), v_bool!(false));
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
         assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("s10"));
         assert_eq!(i.next().unwrap().unwrap(), v_uqsym!("s11"));
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
-        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!(ValueTypesRc));
-        assert_eq!(i.next().unwrap().unwrap_err(), e_end_of_file!(ValueTypesRc));
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
+        assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
+        assert_eq!(i.next().unwrap().unwrap_err(), e_end_of_file!());
         assert!(i.next().is_none());
     }
 
     #[test]
     fn test_comment() {
         let s = " #t;Hello\n  #f ; world! #t\n \"a;b\"";
-        let mut i = LispParser::<ValueTypesRc, _>::new(s.chars().peekable());
+        let mut i = LispParser::new(s.chars().peekable());
         assert_eq!(i.next().unwrap().unwrap(), v_bool!(true));
         assert_eq!(i.next().unwrap().unwrap(), v_bool!(false));
         assert_eq!(i.next().unwrap().unwrap(), v_str!("a;b"));
@@ -772,7 +703,7 @@ mod tests {
     fn test_iterator() {
         let s = "() () ()";
         let mut num = 0;
-        for v in LispParser::<ValueTypesRc, _>::new(s.chars().peekable()) {
+        for v in LispParser::new(s.chars().peekable()) {
             num += 1;
             assert_eq!(v.unwrap(), v_list!());
         }
