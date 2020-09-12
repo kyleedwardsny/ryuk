@@ -321,6 +321,15 @@ impl ValueType {
         Self::Some(BTreeSet::new())
     }
 
+    pub fn insert(&mut self, t: ValueTypeSome) {
+        match self {
+            ValueType::Any => (),
+            ValueType::Some(types) => {
+                types.insert(t);
+            }
+        }
+    }
+
     pub fn append(&mut self, other: &mut ValueType) {
         match self {
             ValueType::Any => (),
@@ -759,6 +768,30 @@ mod tests {
                 ValueTypeSome::String,
                 ValueTypeSome::Bool
             ]))
+        );
+    }
+
+    #[test]
+    fn test_insert_value_type() {
+        let mut some = ValueType::from_iter(vec![ValueTypeSome::Bool, ValueTypeSome::String]);
+        let mut any = ValueType::Any;
+
+        any.insert(ValueTypeSome::Bool);
+        assert_eq!(any, ValueType::Any);
+
+        some.insert(ValueTypeSome::Bool);
+        assert_eq!(
+            some,
+            ValueType::from_iter(vec![ValueTypeSome::Bool, ValueTypeSome::String])
+        );
+        some.insert(ValueTypeSome::UnqualifiedSymbol);
+        assert_eq!(
+            some,
+            ValueType::from_iter(vec![
+                ValueTypeSome::Bool,
+                ValueTypeSome::String,
+                ValueTypeSome::UnqualifiedSymbol
+            ])
         );
     }
 
