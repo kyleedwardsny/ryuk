@@ -415,7 +415,6 @@ pub enum ValueTypeSome {
     Bool,
     String,
     Semver,
-    LanguageDirective,
     Function,
     Backquote(ValueType),
     Comma(ValueType),
@@ -445,7 +444,6 @@ impl Value {
             Value::Bool(_) => ValueTypeSome::Bool,
             Value::String(_) => ValueTypeSome::String,
             Value::Semver(_) => ValueTypeSome::Semver,
-            Value::LanguageDirective(_) => ValueTypeSome::LanguageDirective,
             Value::Function(_) => ValueTypeSome::Function,
             Value::Backquote(b) => ValueTypeSome::Backquote(ValueType::Some(BTreeSet::from_iter(
                 std::iter::once(b.0.value_type()),
@@ -850,10 +848,6 @@ mod tests {
         assert_eq!(v_bool!(true).value_type(), ValueTypeSome::Bool);
         assert_eq!(v_str!("str").value_type(), ValueTypeSome::String);
         assert_eq!(v_v![1, 0].value_type(), ValueTypeSome::Semver);
-        assert_eq!(
-            v_lang_kira![1, 0].value_type(),
-            ValueTypeSome::LanguageDirective
-        );
         assert_eq!(
             v_func!(qsym!("p", "f1")).value_type(),
             ValueTypeSome::Function

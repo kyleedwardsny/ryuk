@@ -213,30 +213,6 @@ impl PartialOrd<ValueSemver> for ValueSemver {
 }
 
 #[derive(Debug)]
-pub enum ValueLanguageDirective {
-    Kira(ValueSemver),
-    Other(String),
-}
-
-impl Clone for ValueLanguageDirective {
-    fn clone(&self) -> Self {
-        match self {
-            ValueLanguageDirective::Kira(v) => ValueLanguageDirective::Kira(v.clone()),
-            ValueLanguageDirective::Other(name) => ValueLanguageDirective::Other(name.clone()),
-        }
-    }
-}
-
-impl PartialEq<ValueLanguageDirective> for ValueLanguageDirective {
-    fn eq(&self, rhs: &ValueLanguageDirective) -> bool {
-        eq_match!(self, rhs, {
-            (ValueLanguageDirective::Kira(v1), ValueLanguageDirective::Kira(v2)) => v1 == v2,
-            (ValueLanguageDirective::Other(n1), ValueLanguageDirective::Other(n2)) => n1 == n2,
-        })
-    }
-}
-
-#[derive(Debug)]
 pub struct ValueFunction(pub ValueQualifiedSymbol);
 
 impl PartialEq<ValueFunction> for ValueFunction {
@@ -322,7 +298,6 @@ pub enum Value {
     Bool(ValueBool),
     String(ValueString),
     Semver(ValueSemver),
-    LanguageDirective(ValueLanguageDirective),
     Function(ValueFunction),
     Backquote(ValueBackquote),
     Comma(ValueComma),
@@ -338,7 +313,6 @@ impl Value {
             Value::Bool(b) => Value::Bool(b.clone()),
             Value::String(s) => Value::String(s.clone()),
             Value::Semver(v) => Value::Semver(v.clone()),
-            Value::LanguageDirective(l) => Value::LanguageDirective(l.clone()),
             Value::Function(f) => Value::Function(f.clone()),
             Value::Backquote(b) => Value::Backquote(b.deep_clone()),
             Value::Comma(c) => Value::Comma(c.deep_clone()),
@@ -356,7 +330,6 @@ impl Clone for Value {
             Value::Bool(b) => Value::Bool((*b).clone()),
             Value::String(s) => Value::String((*s).clone()),
             Value::Semver(v) => Value::Semver((*v).clone()),
-            Value::LanguageDirective(l) => Value::LanguageDirective((*l).clone()),
             Value::Function(f) => Value::Function((*f).clone()),
             Value::Backquote(b) => Value::Backquote((*b).clone()),
             Value::Comma(c) => Value::Comma((*c).clone()),
@@ -391,7 +364,6 @@ try_from_value!(ValueQualifiedSymbol, Value::QualifiedSymbol(s) => s);
 try_from_value!(ValueBool, Value::Bool(b) => b);
 try_from_value!(ValueString, Value::String(s) => s);
 try_from_value!(ValueSemver, Value::Semver(v) => v);
-try_from_value!(ValueLanguageDirective, Value::LanguageDirective(l) => l);
 try_from_value!(ValueFunction, Value::Function(f) => f);
 try_from_value!(ValueBackquote, Value::Backquote(b) => b);
 try_from_value!(ValueComma, Value::Comma(c) => c);
@@ -413,7 +385,6 @@ from_value_type!(ValueQualifiedSymbol, s -> Value::QualifiedSymbol(s));
 from_value_type!(ValueBool, b -> Value::Bool(b));
 from_value_type!(ValueString, s -> Value::String(s));
 from_value_type!(ValueSemver, v -> Value::Semver(v));
-from_value_type!(ValueLanguageDirective, l -> Value::LanguageDirective(l));
 from_value_type!(ValueFunction, f -> Value::Function(f));
 from_value_type!(ValueBackquote, b -> Value::Backquote(b));
 from_value_type!(ValueComma, c -> Value::Comma(c));
@@ -428,7 +399,6 @@ impl PartialEq<Value> for Value {
             (Value::Bool(b1), Value::Bool(b2)) => b1 == b2,
             (Value::String(s1), Value::String(s2)) => s1 == s2,
             (Value::Semver(v1), Value::Semver(v2)) => v1 == v2,
-            (Value::LanguageDirective(l1), Value::LanguageDirective(l2)) => l1 == l2,
             (Value::Function(f1), Value::Function(f2)) => f1 == f2,
             (Value::Backquote(b1), Value::Backquote(b2)) => b1 == b2,
             (Value::Comma(c1), Value::Comma(c2)) => c1 == c2,
@@ -559,63 +529,6 @@ macro_rules! v_v {
 
     [$major:expr, $($rest:expr),*] => {
         v_vref!($major, vec![$($rest as u64),*])
-    };
-}
-
-#[macro_export]
-macro_rules! v_lang {
-    ($lang:expr) => {
-        $crate::value::Value::LanguageDirective($lang)
-    };
-}
-
-#[macro_export]
-macro_rules! lang_kira_ref {
-    ($major:expr, $rest:expr) => {
-        $crate::value::ValueLanguageDirective::Kira(vref!($major, $rest))
-    };
-}
-
-#[macro_export]
-macro_rules! v_lang_kira_ref {
-    ($major:expr, $rest:expr) => {
-        v_lang!(lang_kira_ref!($major, $rest))
-    };
-}
-
-#[macro_export]
-macro_rules! lang_kira {
-    [$major:expr] => {
-        lang_kira_ref!($major, vec![])
-    };
-
-    [$major:expr, $($rest:expr),*] => {
-        lang_kira_ref!($major, vec![$($rest as u64),*])
-    };
-}
-
-#[macro_export]
-macro_rules! v_lang_kira {
-    [$major:expr] => {
-        v_lang_kira_ref!($major, vec![])
-    };
-
-    [$major:expr, $($rest:expr),*] => {
-        v_lang_kira_ref!($major, vec![$($rest as u64),*])
-    };
-}
-
-#[macro_export]
-macro_rules! lang_other {
-    ($name:expr) => {
-        $crate::value::ValueLanguageDirective::Other($name.into())
-    };
-}
-
-#[macro_export]
-macro_rules! v_lang_other {
-    ($name:expr) => {
-        v_lang!(lang_other!($name))
     };
 }
 
@@ -813,70 +726,6 @@ mod tests {
                     assert_eq!(v.rest, vec![]);
                 }
                 _ => panic!("Expected a Value::Semver"),
-            }
-        }
-
-        #[test]
-        fn test_lang_kira_macro() {
-            let l1: super::ValueLanguageDirective = lang_kira![1];
-            match l1 {
-                super::ValueLanguageDirective::Kira(v) => {
-                    assert_eq!(v.major, 1);
-                    assert_eq!(v.rest, vec![]);
-                }
-                _ => panic!("Expected a Value::LanguageDirective with Kira"),
-            }
-
-            let l2: super::ValueLanguageDirective = lang_kira![1, 0];
-            match l2 {
-                super::ValueLanguageDirective::Kira(v) => {
-                    assert_eq!(v.major, 1);
-                    assert_eq!(v.rest, vec![0]);
-                }
-                _ => panic!("Expected a Value::LanguageDirective with Kira"),
-            }
-        }
-
-        #[test]
-        fn test_v_lang_kira_macro() {
-            let l1: super::Value = v_lang_kira![1];
-            match l1 {
-                super::Value::LanguageDirective(super::ValueLanguageDirective::Kira(v)) => {
-                    assert_eq!(v.major, 1);
-                    assert_eq!(v.rest, vec![]);
-                }
-                _ => panic!("Expected a Value::LanguageDirective with Kira"),
-            }
-
-            let l2: super::Value = v_lang_kira![1, 0];
-            match l2 {
-                super::Value::LanguageDirective(super::ValueLanguageDirective::Kira(v)) => {
-                    assert_eq!(v.major, 1);
-                    assert_eq!(v.rest, vec![0]);
-                }
-                _ => panic!("Expected a Value::LanguageDirective with Kira"),
-            }
-        }
-
-        #[test]
-        fn test_lang_other_macro() {
-            let l1: super::ValueLanguageDirective = lang_other!("not-kira");
-            match l1 {
-                super::ValueLanguageDirective::Other(n) => {
-                    assert_eq!(n, "not-kira");
-                }
-                _ => panic!("Expected a Value::LanguageDirective with other"),
-            }
-        }
-
-        #[test]
-        fn test_v_lang_other_macro() {
-            let l1: super::Value = v_lang_other!("not-kira");
-            match l1 {
-                super::Value::LanguageDirective(super::ValueLanguageDirective::Other(n)) => {
-                    assert_eq!(n, "not-kira");
-                }
-                _ => panic!("Expected a Value::LanguageDirective with other"),
             }
         }
 
@@ -1112,12 +961,6 @@ mod tests {
         assert_ne!(v_v![1, 0], v_v![1, 1]);
         assert_ne!(v_v![1, 0], v_list!());
 
-        assert_eq!(v_lang_kira![1, 0], v_lang_kira![1, 0]);
-        assert_ne!(v_lang_kira![1, 0], v_lang_kira![1, 1]);
-        assert_ne!(v_lang_kira![1, 0], v_lang_other!("not-kira"));
-        assert_ne!(v_lang_kira![1, 0], v_v![1, 0]);
-        assert_ne!(v_lang_kira![1, 0], v_list!());
-
         assert_eq!(v_func!(qsym!("p", "f1")), v_func!(qsym!("p", "f1")));
         assert_ne!(v_func!(qsym!("p", "f1")), v_func!(qsym!("p", "f2")));
         assert_ne!(v_func!(qsym!("p", "f1")), v_qsym!("p", "f1"));
@@ -1194,16 +1037,6 @@ mod tests {
         assert_eq!(
             TryInto::<&ValueList>::try_into(&v).unwrap_err(),
             &v_v![1, 0]
-        );
-
-        let v = v_lang_kira![1, 0];
-        assert_eq!(
-            TryInto::<&ValueLanguageDirective>::try_into(&v).unwrap(),
-            &lang_kira![1, 0]
-        );
-        assert_eq!(
-            TryInto::<&ValueList>::try_into(&v).unwrap_err(),
-            &v_lang_kira![1, 0]
         );
 
         let v = v_func!(qsym!("p", "f1"));
@@ -1302,16 +1135,6 @@ mod tests {
         );
         assert_eq!(TryInto::<ValueList>::try_into(v).unwrap_err(), v_v![1, 0]);
 
-        let v = v_lang_kira![1, 0];
-        assert_eq!(
-            TryInto::<ValueLanguageDirective>::try_into(v.clone()).unwrap(),
-            lang_kira![1, 0]
-        );
-        assert_eq!(
-            TryInto::<ValueList>::try_into(v).unwrap_err(),
-            v_lang_kira![1, 0]
-        );
-
         let v = v_func!(qsym!("p", "f1"));
         assert_eq!(
             TryInto::<ValueFunction>::try_into(v.clone()).unwrap(),
@@ -1372,9 +1195,6 @@ mod tests {
 
         let v: Value = v![1, 0].into();
         assert_eq!(v, v_v![1, 0]);
-
-        let v: Value = lang_kira![1, 0].into();
-        assert_eq!(v, v_lang_kira![1, 0]);
 
         let v: Value = func!(qsym!("p", "f1")).into();
         assert_eq!(v, v_func!(qsym!("p", "f1")));

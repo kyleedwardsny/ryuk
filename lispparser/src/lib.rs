@@ -6,6 +6,17 @@ use std::convert::TryFrom;
 use std::convert::TryInto;
 use std::iter::Peekable;
 
+macro_rules! eq_match {
+    ($lhs: expr, $rhs:expr, { $(($lpat:pat, $rpat:pat) => $result:expr,)* }) => {
+        match $lhs {
+            $($lpat => match $rhs {
+                $rpat => $result,
+                _ => false,
+            }),*
+        }
+    };
+}
+
 macro_rules! e_parse_error {
     () => {
         e_std_cond!("parse-error")
@@ -24,10 +35,59 @@ macro_rules! e_unexpected_lang {
     };
 }
 
+macro_rules! e_missing_lang {
+    () => {
+        e_std_cond!("missing-lang")
+    };
+}
+
 #[derive(Debug)]
 pub enum LanguageDirective {
     Kira(ValueSemver),
     Other(String),
+}
+
+impl Clone for LanguageDirective {
+    fn clone(&self) -> Self {
+        match self {
+            LanguageDirective::Kira(v) => LanguageDirective::Kira(v.clone()),
+            LanguageDirective::Other(name) => LanguageDirective::Other(name.clone()),
+        }
+    }
+}
+
+impl PartialEq<LanguageDirective> for LanguageDirective {
+    fn eq(&self, rhs: &LanguageDirective) -> bool {
+        eq_match!(self, rhs, {
+            (LanguageDirective::Kira(v1), LanguageDirective::Kira(v2)) => v1 == v2,
+            (LanguageDirective::Other(n1), LanguageDirective::Other(n2)) => n1 == n2,
+        })
+    }
+}
+
+#[macro_export]
+macro_rules! lang_kira_ref {
+    ($major:expr, $rest:expr) => {
+        $crate::LanguageDirective::Kira(vref!($major, $rest))
+    };
+}
+
+#[macro_export]
+macro_rules! lang_kira {
+    [$major:expr] => {
+        lang_kira_ref!($major, vec![])
+    };
+
+    [$major:expr, $($rest:expr),*] => {
+        lang_kira_ref!($major, vec![$($rest as u64),*])
+    };
+}
+
+#[macro_export]
+macro_rules! lang_other {
+    ($name:expr) => {
+        $crate::LanguageDirective::Other($name.into())
+    };
 }
 
 #[derive(Debug)]
@@ -51,6 +111,16 @@ impl TryFrom<Atom> for Box<Value> {
     fn try_from(value: Atom) -> Result<Box<Value>> {
         let v: Value = value.try_into()?;
         Result::Ok(v.into())
+    }
+}
+
+impl TryFrom<Atom> for LanguageDirective {
+    type Error = Error;
+    fn try_from(value: Atom) -> Result<LanguageDirective> {
+        match value {
+            Atom::Value(_) => Result::Err(e_missing_lang!()),
+            Atom::LanguageDirective(l) => Result::Ok(l),
+        }
     }
 }
 
@@ -227,7 +297,7 @@ where
     Result::Err(e_end_of_file!())
 }
 
-fn read_language_directive<I>(peekable: &mut Peekable<I>) -> Result<ValueLanguageDirective>
+fn read_language_directive<I>(peekable: &mut Peekable<I>) -> Result<LanguageDirective>
 where
     I: Iterator<Item = char>,
 {
@@ -236,30 +306,30 @@ where
     let t = read_token(peekable).try_unwrap_token()?;
     Result::Ok(if t == "kira" {
         skip_whitespace(peekable);
-        ValueLanguageDirective::Kira(parse_semver(&read_token(peekable).try_unwrap_token()?)?)
+        LanguageDirective::Kira(parse_semver(&read_token(peekable).try_unwrap_token()?)?)
     } else {
-        ValueLanguageDirective::Other(t)
+        LanguageDirective::Other(t)
     })
 }
 
-fn read_macro<I>(peekable: &mut Peekable<I>) -> Result<Value>
+fn read_macro<I>(peekable: &mut Peekable<I>) -> Result<Atom>
 where
     I: Iterator<Item = char>,
 {
     if let Option::Some(&c) = peekable.peek() {
         if c == 'v' {
             peekable.next();
-            Result::Ok(
+            Result::Ok(Atom::Value(
                 Value::Semver(parse_semver(&read_token(peekable).try_unwrap_token()?)?).into(),
-            )
+            ))
         } else {
             let t = read_token(peekable).try_unwrap_token()?;
             match &*t {
                 "lang" => {
-                    Result::Ok(Value::LanguageDirective(read_language_directive(peekable)?).into())
+                    Result::Ok(Atom::LanguageDirective(read_language_directive(peekable)?).into())
                 }
-                "t" => Result::Ok(Value::Bool(ValueBool(true)).into()),
-                "f" => Result::Ok(Value::Bool(ValueBool(false)).into()),
+                "t" => Result::Ok(Atom::Value(Value::Bool(ValueBool(true)).into())),
+                "f" => Result::Ok(Atom::Value(Value::Bool(ValueBool(false)).into())),
                 _ => Result::Err(e_parse_error!()),
             }
         }
@@ -322,7 +392,7 @@ where
             )?))))
         } else if c == '#' {
             peekable.next();
-            Result::Ok(Option::Some(Atom::Value(read_macro(peekable)?)))
+            Result::Ok(Option::Some(read_macro(peekable)?))
         } else if c == '"' {
             peekable.next();
             Result::Ok(Option::Some(Atom::Value(Value::String(ValueString(
@@ -445,6 +515,53 @@ mod tests {
         ($a:expr) => {
             TryInto::<Value>::try_into($a).unwrap()
         };
+    }
+
+    macro_rules! a2l {
+        ($a:expr) => {
+            TryInto::<LanguageDirective>::try_into($a).unwrap()
+        };
+    }
+
+    #[test]
+    fn test_lang_kira_macro() {
+        let l1: super::LanguageDirective = lang_kira![1];
+        match l1 {
+            super::LanguageDirective::Kira(v) => {
+                assert_eq!(v.major, 1);
+                assert_eq!(v.rest, vec![]);
+            }
+            _ => panic!("Expected a Value::LanguageDirective with Kira"),
+        }
+
+        let l2: super::LanguageDirective = lang_kira![1, 0];
+        match l2 {
+            super::LanguageDirective::Kira(v) => {
+                assert_eq!(v.major, 1);
+                assert_eq!(v.rest, vec![0]);
+            }
+            _ => panic!("Expected a Value::LanguageDirective with Kira"),
+        }
+    }
+
+    #[test]
+    fn test_lang_other_macro() {
+        let l1: super::LanguageDirective = lang_other!("not-kira");
+        match l1 {
+            super::LanguageDirective::Other(n) => {
+                assert_eq!(n, "not-kira");
+            }
+            _ => panic!("Expected a Value::LanguageDirective with other"),
+        }
+    }
+
+    #[test]
+    fn test_lang_equality() {
+        assert_eq!(lang_kira![1, 0], lang_kira![1, 0]);
+        assert_eq!(lang_other!("not-kira"), lang_other!("not-kira"));
+        assert_ne!(lang_kira![1, 0], lang_kira![1, 1]);
+        assert_ne!(lang_kira![1, 0], lang_other!("not-kira"));
+        assert_ne!(lang_other!("not-kira"), lang_other!("something-else"));
     }
 
     #[test]
@@ -683,9 +800,9 @@ mod tests {
     fn test_read_lang() {
         let s = "#lang kira 1.0 #lang\nnot-kira #lang Kira 1.0  \n  #lang ( #lang kira 1.a #Lang kira 1.0\n#lang kira 1.01";
         let mut i = LispParser::new(s.chars().peekable());
-        assert_eq!(a2v!(i.next().unwrap().unwrap()), v_lang_kira![1, 0]);
-        assert_eq!(a2v!(i.next().unwrap().unwrap()), v_lang_other!("not-kira"));
-        assert_eq!(a2v!(i.next().unwrap().unwrap()), v_lang_other!("Kira"));
+        assert_eq!(a2l!(i.next().unwrap().unwrap()), lang_kira![1, 0]);
+        assert_eq!(a2l!(i.next().unwrap().unwrap()), lang_other!("not-kira"));
+        assert_eq!(a2l!(i.next().unwrap().unwrap()), lang_other!("Kira"));
         assert_eq!(a2v!(i.next().unwrap().unwrap()), v_uqsym!("1.0"));
         assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
         assert_eq!(i.next().unwrap().unwrap_err(), e_parse_error!());
