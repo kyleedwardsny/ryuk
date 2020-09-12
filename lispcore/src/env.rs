@@ -130,9 +130,7 @@ pub trait Environment {
                             let t = v.value_type();
                             TryCompilationResult::Compiled(CompilationResult {
                                 result: Box::new(LiteralEvaluator::new(v)),
-                                return_type: ValueType::Some(BTreeSet::from_iter(std::iter::once(
-                                    t,
-                                ))),
+                                return_type: ValueType::from(t),
                             })
                         }
                     }
@@ -202,11 +200,11 @@ fn backquote_comma_splice_push(
     if bq.depth > 0 {
         CompilationResult {
             result: Box::new(BackquoteCommaSplicePushEvaluator::new(bcs, result.result)),
-            return_type: ValueType::Some(BTreeSet::from_iter(std::iter::once(match bcs {
+            return_type: ValueType::from(match bcs {
                 BackquoteCommaSplice::Backquote => ValueTypeSome::Backquote(result.return_type),
                 BackquoteCommaSplice::Comma => ValueTypeSome::Comma(result.return_type),
                 BackquoteCommaSplice::Splice => ValueTypeSome::Splice(result.return_type),
-            }))),
+            }),
         }
     } else {
         result
@@ -249,7 +247,7 @@ fn compile_backquote(
             Value::List(l) => {
                 let bq = bq.list_item();
                 let mut params = Vec::new();
-                let mut list_type = ValueType::Some(BTreeSet::new());
+                let mut list_type = ValueType::new();
                 for item in l {
                     match item {
                         Value::Backquote(ValueBackquote(v)) => {
@@ -301,14 +299,12 @@ fn compile_backquote(
                 }
                 CompilationResult {
                     result: Box::new(ConcatenateListsEvaluator::new(params)),
-                    return_type: ValueType::Some(BTreeSet::from_iter(std::iter::once(
-                        ValueTypeSome::List(list_type),
-                    ))),
+                    return_type: ValueType::from(ValueTypeSome::List(list_type)),
                 }
             }
             _ => CompilationResult {
                 result: Box::new(LiteralEvaluator::new(v.clone())),
-                return_type: ValueType::Some(BTreeSet::from_iter(std::iter::once(v.value_type()))),
+                return_type: ValueType::from(v.value_type()),
             },
         })
     }
@@ -321,6 +317,10 @@ pub enum ValueType {
 }
 
 impl ValueType {
+    pub fn new() -> Self {
+        Self::Some(BTreeSet::new())
+    }
+
     pub fn append(&mut self, other: &mut ValueType) {
         match self {
             ValueType::Any => (),
@@ -407,6 +407,21 @@ impl ValueType {
     }
 }
 
+impl From<ValueTypeSome> for ValueType {
+    fn from(value: ValueTypeSome) -> Self {
+        Self::from_iter(std::iter::once(value))
+    }
+}
+
+impl FromIterator<ValueTypeSome> for ValueType {
+    fn from_iter<T>(iter: T) -> Self
+    where
+        T: IntoIterator<Item = ValueTypeSome>,
+    {
+        Self::Some(BTreeSet::from_iter(iter))
+    }
+}
+
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum ValueTypeSome {
     List(ValueType),
@@ -436,24 +451,18 @@ impl ValueTypeSome {
 impl Value {
     pub fn value_type(&self) -> ValueTypeSome {
         match self {
-            Value::List(l) => ValueTypeSome::List(ValueType::Some(BTreeSet::from_iter(
+            Value::List(l) => ValueTypeSome::List(ValueType::from_iter(
                 l.clone().map(|item| item.value_type()),
-            ))),
+            )),
             Value::UnqualifiedSymbol(_) => ValueTypeSome::UnqualifiedSymbol,
             Value::QualifiedSymbol(_) => ValueTypeSome::QualifiedSymbol,
             Value::Bool(_) => ValueTypeSome::Bool,
             Value::String(_) => ValueTypeSome::String,
             Value::Semver(_) => ValueTypeSome::Semver,
             Value::Function(_) => ValueTypeSome::Function,
-            Value::Backquote(b) => ValueTypeSome::Backquote(ValueType::Some(BTreeSet::from_iter(
-                std::iter::once(b.0.value_type()),
-            ))),
-            Value::Comma(c) => ValueTypeSome::Comma(ValueType::Some(BTreeSet::from_iter(
-                std::iter::once(c.0.value_type()),
-            ))),
-            Value::Splice(s) => ValueTypeSome::Splice(ValueType::Some(BTreeSet::from_iter(
-                std::iter::once(s.0.value_type()),
-            ))),
+            Value::Backquote(b) => ValueTypeSome::Backquote(ValueType::from(b.0.value_type())),
+            Value::Comma(c) => ValueTypeSome::Comma(ValueType::from(c.0.value_type())),
+            Value::Splice(s) => ValueTypeSome::Splice(ValueType::from(s.0.value_type())),
         }
     }
 }
@@ -726,14 +735,37 @@ mod tests {
     }
 
     #[test]
+    fn test_value_type_new() {
+        assert_eq!(ValueType::new(), ValueType::Some(BTreeSet::new()));
+    }
+
+    #[test]
+    fn test_value_type_from() {
+        assert_eq!(
+            ValueType::from(ValueTypeSome::Bool),
+            ValueType::Some(BTreeSet::from_iter(std::iter::once(ValueTypeSome::Bool)))
+        );
+        assert_eq!(
+            ValueType::from(ValueTypeSome::String),
+            ValueType::Some(BTreeSet::from_iter(std::iter::once(ValueTypeSome::String)))
+        );
+    }
+
+    #[test]
+    fn test_value_type_from_iterator() {
+        assert_eq!(
+            ValueType::from_iter(vec![ValueTypeSome::String, ValueTypeSome::Bool]),
+            ValueType::Some(BTreeSet::from_iter(vec![
+                ValueTypeSome::String,
+                ValueTypeSome::Bool
+            ]))
+        );
+    }
+
+    #[test]
     fn test_append_value_type() {
-        let mut some1 = ValueType::Some(BTreeSet::from_iter(vec![
-            ValueTypeSome::Bool,
-            ValueTypeSome::String,
-        ]));
-        let mut some2 = ValueType::Some(BTreeSet::from_iter(std::iter::once(ValueTypeSome::List(
-            ValueType::Any,
-        ))));
+        let mut some1 = ValueType::from_iter(vec![ValueTypeSome::Bool, ValueTypeSome::String]);
+        let mut some2 = ValueType::from(ValueTypeSome::List(ValueType::Any));
         let mut any1 = ValueType::Any;
         let mut any2 = ValueType::Any;
 
@@ -745,11 +777,11 @@ mod tests {
         some1.append(&mut some2);
         assert_eq!(
             some1,
-            ValueType::Some(BTreeSet::from_iter(vec![
+            ValueType::from_iter(vec![
                 ValueTypeSome::Bool,
                 ValueTypeSome::String,
                 ValueTypeSome::List(ValueType::Any)
-            ]))
+            ])
         );
         some1.append(&mut any1);
         assert_eq!(some1, ValueType::Any);
@@ -757,20 +789,16 @@ mod tests {
 
     #[test]
     fn test_contains_value_type() {
-        let some1 = ValueType::Some(BTreeSet::from_iter(vec![
-            ValueTypeSome::List(ValueType::Some(BTreeSet::from_iter(vec![
+        let some1 = ValueType::from_iter(vec![
+            ValueTypeSome::List(ValueType::from_iter(vec![
                 ValueTypeSome::String,
                 ValueTypeSome::Bool,
-            ]))),
-            ValueTypeSome::Backquote(ValueType::Some(BTreeSet::from_iter(std::iter::once(
-                ValueTypeSome::String,
-            )))),
-            ValueTypeSome::Comma(ValueType::Some(BTreeSet::from_iter(std::iter::once(
-                ValueTypeSome::String,
-            )))),
+            ])),
+            ValueTypeSome::Backquote(ValueType::from(ValueTypeSome::String)),
+            ValueTypeSome::Comma(ValueType::from(ValueTypeSome::String)),
             ValueTypeSome::Splice(ValueType::Any),
             ValueTypeSome::String,
-        ]));
+        ]);
 
         let any1 = ValueType::Any;
 
@@ -778,44 +806,33 @@ mod tests {
         assert!(any1.contains(&any1));
         assert!(!some1.contains(&any1));
 
-        let some2 = ValueType::Some(BTreeSet::from_iter(vec![
-            ValueTypeSome::List(ValueType::Some(BTreeSet::from_iter(std::iter::once(
-                ValueTypeSome::String,
-            )))),
-            ValueTypeSome::List(ValueType::Some(BTreeSet::from_iter(std::iter::once(
-                ValueTypeSome::Bool,
-            )))),
-            ValueTypeSome::Backquote(ValueType::Some(BTreeSet::from_iter(std::iter::once(
-                ValueTypeSome::String,
-            )))),
-            ValueTypeSome::Comma(ValueType::Some(BTreeSet::from_iter(std::iter::once(
-                ValueTypeSome::String,
-            )))),
-            ValueTypeSome::Splice(ValueType::Some(BTreeSet::from_iter(vec![
+        let some2 = ValueType::from_iter(vec![
+            ValueTypeSome::List(ValueType::from(ValueTypeSome::String)),
+            ValueTypeSome::List(ValueType::from(ValueTypeSome::Bool)),
+            ValueTypeSome::Backquote(ValueType::from(ValueTypeSome::String)),
+            ValueTypeSome::Comma(ValueType::from(ValueTypeSome::String)),
+            ValueTypeSome::Splice(ValueType::from_iter(vec![
                 ValueTypeSome::String,
                 ValueTypeSome::Bool,
-            ]))),
+            ])),
             ValueTypeSome::String,
-        ]));
+        ]);
         assert!(some1.contains(&some2));
 
-        let some2 = ValueType::Some(BTreeSet::from_iter(vec![
+        let some2 = ValueType::from_iter(vec![
             ValueTypeSome::List(ValueType::Any),
             ValueTypeSome::Backquote(ValueType::Any),
             ValueTypeSome::Comma(ValueType::Any),
             ValueTypeSome::Splice(ValueType::Any),
             ValueTypeSome::String,
-        ]));
+        ]);
         assert!(!some1.contains(&some2));
         assert!(some2.contains(&some1));
 
         assert!(ValueTypeSome::String.contains(&ValueTypeSome::String));
         assert!(!ValueTypeSome::String.contains(&ValueTypeSome::Bool));
-        assert!(
-            ValueTypeSome::List(ValueType::Any).contains(&ValueTypeSome::List(ValueType::Some(
-                BTreeSet::from_iter(std::iter::once(ValueTypeSome::Bool))
-            )))
-        );
+        assert!(ValueTypeSome::List(ValueType::Any)
+            .contains(&ValueTypeSome::List(ValueType::from(ValueTypeSome::Bool))));
     }
 
     #[test]
@@ -827,15 +844,15 @@ mod tests {
                 v_list!(v_uqsym!("uqsym"), v_bool!(true), v_qsym!("p", "qsym"))
             )
             .value_type(),
-            ValueTypeSome::List(ValueType::Some(BTreeSet::from_iter(vec![
+            ValueTypeSome::List(ValueType::from_iter(vec![
                 ValueTypeSome::Bool,
                 ValueTypeSome::String,
-                ValueTypeSome::List(ValueType::Some(BTreeSet::from_iter(vec![
+                ValueTypeSome::List(ValueType::from_iter(vec![
                     ValueTypeSome::UnqualifiedSymbol,
                     ValueTypeSome::QualifiedSymbol,
                     ValueTypeSome::Bool,
-                ]))),
-            ])))
+                ])),
+            ]))
         );
         assert_eq!(
             v_uqsym!("uqsym").value_type(),
@@ -854,21 +871,15 @@ mod tests {
         );
         assert_eq!(
             v_bq!(v_qsym!("p", "f1")).value_type(),
-            ValueTypeSome::Backquote(ValueType::Some(BTreeSet::from_iter(std::iter::once(
-                ValueTypeSome::QualifiedSymbol
-            ))))
+            ValueTypeSome::Backquote(ValueType::from(ValueTypeSome::QualifiedSymbol))
         );
         assert_eq!(
             v_comma!(v_qsym!("p", "f1")).value_type(),
-            ValueTypeSome::Comma(ValueType::Some(BTreeSet::from_iter(std::iter::once(
-                ValueTypeSome::QualifiedSymbol
-            ))))
+            ValueTypeSome::Comma(ValueType::from(ValueTypeSome::QualifiedSymbol))
         );
         assert_eq!(
             v_splice!(v_qsym!("p", "f1")).value_type(),
-            ValueTypeSome::Splice(ValueType::Some(BTreeSet::from_iter(std::iter::once(
-                ValueTypeSome::QualifiedSymbol
-            ))))
+            ValueTypeSome::Splice(ValueType::from(ValueTypeSome::QualifiedSymbol))
         );
     }
 
@@ -877,16 +888,14 @@ mod tests {
     fn simplemacro1() -> Result<TryCompilationResult> {
         Result::Ok(TryCompilationResult::Compiled(CompilationResult {
             result: Box::new(LiteralEvaluator::new(v_str!("Hello world!"))),
-            return_type: ValueType::Some(BTreeSet::from_iter(std::iter::once(
-                ValueTypeSome::String,
-            ))),
+            return_type: ValueType::from(ValueTypeSome::String),
         }))
     }
 
     fn simplemacro2() -> Result<TryCompilationResult> {
         Result::Ok(TryCompilationResult::Compiled(CompilationResult {
             result: Box::new(LiteralEvaluator::new(v_bool!(true))),
-            return_type: ValueType::Some(BTreeSet::from_iter(std::iter::once(ValueTypeSome::Bool))),
+            return_type: ValueType::from(ValueTypeSome::Bool),
         }))
     }
 
@@ -936,22 +945,12 @@ mod tests {
 
         fn compile_variable(&self, name: &ValueQualifiedSymbol) -> Option<ValueType> {
             match (&*name.package, &*name.name) {
-                ("pvar", "var1") => Option::Some(ValueType::Some(BTreeSet::from_iter(
-                    std::iter::once(ValueTypeSome::String),
-                ))),
-                ("pvar", "var2") => Option::Some(ValueType::Some(BTreeSet::from_iter(
-                    std::iter::once(ValueTypeSome::Bool),
-                ))),
-                ("pvar", "var3") => Option::Some(ValueType::Some(BTreeSet::from_iter(
-                    std::iter::once(ValueTypeSome::QualifiedSymbol),
-                ))),
-                ("pvar", "var4") => Option::Some(ValueType::Some(BTreeSet::from_iter(
-                    std::iter::once(ValueTypeSome::UnqualifiedSymbol),
-                ))),
-                ("pvar", "var5") => Option::Some(ValueType::Some(BTreeSet::from_iter(
-                    std::iter::once(ValueTypeSome::List(ValueType::Some(BTreeSet::from_iter(
-                        std::iter::once(ValueTypeSome::QualifiedSymbol),
-                    )))),
+                ("pvar", "var1") => Option::Some(ValueType::from(ValueTypeSome::String)),
+                ("pvar", "var2") => Option::Some(ValueType::from(ValueTypeSome::Bool)),
+                ("pvar", "var3") => Option::Some(ValueType::from(ValueTypeSome::QualifiedSymbol)),
+                ("pvar", "var4") => Option::Some(ValueType::from(ValueTypeSome::UnqualifiedSymbol)),
+                ("pvar", "var5") => Option::Some(ValueType::from(ValueTypeSome::List(
+                    ValueType::from(ValueTypeSome::QualifiedSymbol),
                 ))),
                 _ => Option::None,
             }
@@ -1124,27 +1123,25 @@ mod tests {
             env,
             v_list!(),
             v_list!(),
-            ValueType::Some(BTreeSet::from_iter(std::iter::once(ValueTypeSome::List(
-                ValueType::Some(BTreeSet::new()),
-            )))),
+            ValueType::from(ValueTypeSome::List(ValueType::new())),
         );
         test_compile_and_evaluate(
             env,
             v_bool!(true),
             v_bool!(true),
-            ValueType::Some(BTreeSet::from_iter(std::iter::once(ValueTypeSome::Bool))),
+            ValueType::from(ValueTypeSome::Bool),
         );
         test_compile_and_evaluate(
             env,
             v_str!("Hello world!"),
             v_str!("Hello world!"),
-            ValueType::Some(BTreeSet::from_iter(std::iter::once(ValueTypeSome::String))),
+            ValueType::from(ValueTypeSome::String),
         );
         test_compile_and_evaluate(
             env,
             v_v![1, 0],
             v_v![1, 0],
-            ValueType::Some(BTreeSet::from_iter(std::iter::once(ValueTypeSome::Semver))),
+            ValueType::from(ValueTypeSome::Semver),
         );
     }
 
@@ -1157,13 +1154,13 @@ mod tests {
             env,
             v_uqsym!("var1"),
             v_str!("str"),
-            ValueType::Some(BTreeSet::from_iter(std::iter::once(ValueTypeSome::String))),
+            ValueType::from(ValueTypeSome::String),
         );
         test_compile_and_evaluate(
             env,
             v_uqsym!("var2"),
             v_bool!(true),
-            ValueType::Some(BTreeSet::from_iter(std::iter::once(ValueTypeSome::Bool))),
+            ValueType::from(ValueTypeSome::Bool),
         );
         assert_eq!(
             env.compile(v_uqsym!("undef")).unwrap_err(),
@@ -1174,13 +1171,13 @@ mod tests {
             env,
             v_qsym!("pvar", "var1"),
             v_str!("str"),
-            ValueType::Some(BTreeSet::from_iter(std::iter::once(ValueTypeSome::String))),
+            ValueType::from(ValueTypeSome::String),
         );
         test_compile_and_evaluate(
             env,
             v_qsym!("pvar", "var2"),
             v_bool!(true),
-            ValueType::Some(BTreeSet::from_iter(std::iter::once(ValueTypeSome::Bool))),
+            ValueType::from(ValueTypeSome::Bool),
         );
         assert_eq!(
             env.compile(v_qsym!("pvar", "undef")).unwrap_err(),
@@ -1197,13 +1194,13 @@ mod tests {
             env,
             v_list!(v_uqsym!("simplemacro1")),
             v_str!("Hello world!"),
-            ValueType::Some(BTreeSet::from_iter(std::iter::once(ValueTypeSome::String))),
+            ValueType::from(ValueTypeSome::String),
         );
         test_compile_and_evaluate(
             env,
             v_list!(v_uqsym!("simplemacro2")),
             v_bool!(true),
-            ValueType::Some(BTreeSet::from_iter(std::iter::once(ValueTypeSome::Bool))),
+            ValueType::from(ValueTypeSome::Bool),
         );
         assert_eq!(
             env.compile(v_list!(v_uqsym!("simplemacro3"))).unwrap_err(),
@@ -1214,13 +1211,13 @@ mod tests {
             env,
             v_list!(v_qsym!("p", "simplemacro1")),
             v_str!("Hello world!"),
-            ValueType::Some(BTreeSet::from_iter(std::iter::once(ValueTypeSome::String))),
+            ValueType::from(ValueTypeSome::String),
         );
         test_compile_and_evaluate(
             env,
             v_list!(v_qsym!("p", "simplemacro2")),
             v_bool!(true),
-            ValueType::Some(BTreeSet::from_iter(std::iter::once(ValueTypeSome::Bool))),
+            ValueType::from(ValueTypeSome::Bool),
         );
         assert_eq!(
             env.compile(v_list!(v_qsym!("p", "simplemacro3")))
@@ -1238,13 +1235,13 @@ mod tests {
             env,
             v_list!(v_uqsym!("simplefunc1"), v_str!("Hello world!")),
             v_str!("Hello world!"),
-            ValueType::Some(BTreeSet::from_iter(std::iter::once(ValueTypeSome::String))),
+            ValueType::from(ValueTypeSome::String),
         );
         test_compile_and_evaluate(
             env,
             v_list!(v_uqsym!("simplefunc1"), v_bool!(true)),
             v_bool!(true),
-            ValueType::Some(BTreeSet::from_iter(std::iter::once(ValueTypeSome::Bool))),
+            ValueType::from(ValueTypeSome::Bool),
         );
         assert_eq!(
             env.compile(v_list!(v_uqsym!("simplefunc1"))).unwrap_err(),
@@ -1255,13 +1252,13 @@ mod tests {
             env,
             v_list!(v_qsym!("p", "simplefunc1"), v_str!("Hello world!")),
             v_str!("Hello world!"),
-            ValueType::Some(BTreeSet::from_iter(std::iter::once(ValueTypeSome::String))),
+            ValueType::from(ValueTypeSome::String),
         );
         test_compile_and_evaluate(
             env,
             v_list!(v_qsym!("p", "simplefunc1"), v_bool!(true)),
             v_bool!(true),
-            ValueType::Some(BTreeSet::from_iter(std::iter::once(ValueTypeSome::Bool))),
+            ValueType::from(ValueTypeSome::Bool),
         );
         assert_eq!(
             env.compile(v_list!(v_qsym!("p", "simplefunc1")))
@@ -1279,39 +1276,29 @@ mod tests {
             env,
             v_bq!(v_uqsym!("a")),
             v_uqsym!("a"),
-            ValueType::Some(BTreeSet::from_iter(std::iter::once(
-                ValueTypeSome::UnqualifiedSymbol,
-            ))),
+            ValueType::from(ValueTypeSome::UnqualifiedSymbol),
         );
         test_compile_and_evaluate(
             env,
             v_bq!(v_comma!(v_qsym!("pvar", "var3"))),
             v_qsym!("pvar", "var4"),
-            ValueType::Some(BTreeSet::from_iter(std::iter::once(
-                ValueTypeSome::QualifiedSymbol,
-            ))),
+            ValueType::from(ValueTypeSome::QualifiedSymbol),
         );
         test_compile_and_evaluate(
             env,
             v_bq!(v_bq!(v_comma!(v_qsym!("pvar", "var3")))),
             v_bq!(v_comma!(v_qsym!("pvar", "var3"))),
-            ValueType::Some(BTreeSet::from_iter(std::iter::once(
-                ValueTypeSome::Backquote(ValueType::Some(BTreeSet::from_iter(std::iter::once(
-                    ValueTypeSome::Comma(ValueType::Some(BTreeSet::from_iter(std::iter::once(
-                        ValueTypeSome::QualifiedSymbol,
-                    )))),
-                )))),
+            ValueType::from(ValueTypeSome::Backquote(ValueType::from(
+                ValueTypeSome::Comma(ValueType::from(ValueTypeSome::QualifiedSymbol)),
             ))),
         );
         test_compile_and_evaluate(
             env,
             v_bq!(v_list!(v_splice!(v_qsym!("pvar", "var5")))),
             v_list!(v_qsym!("p", "simplefunc2")),
-            ValueType::Some(BTreeSet::from_iter(std::iter::once(ValueTypeSome::List(
-                ValueType::Some(BTreeSet::from_iter(std::iter::once(
-                    ValueTypeSome::QualifiedSymbol,
-                ))),
-            )))),
+            ValueType::from(ValueTypeSome::List(ValueType::from(
+                ValueTypeSome::QualifiedSymbol,
+            ))),
         );
         assert_eq!(
             env.compile(v_bq!(v_list!(v_splice!(v_qsym!("pvar", "var4")))))
@@ -1322,46 +1309,32 @@ mod tests {
             env,
             v_bq!(v_list!(v_bq!(v_qsym!("pvar", "var5")))),
             v_list!(v_bq!(v_qsym!("pvar", "var5"))),
-            ValueType::Some(BTreeSet::from_iter(std::iter::once(ValueTypeSome::List(
-                ValueType::Some(BTreeSet::from_iter(std::iter::once(
-                    ValueTypeSome::Backquote(ValueType::Some(BTreeSet::from_iter(
-                        std::iter::once(ValueTypeSome::QualifiedSymbol),
-                    ))),
-                ))),
-            )))),
+            ValueType::from(ValueTypeSome::List(ValueType::from(
+                ValueTypeSome::Backquote(ValueType::from(ValueTypeSome::QualifiedSymbol)),
+            ))),
         );
         test_compile_and_evaluate(
             env,
             v_bq!(v_list!(v_comma!(v_qsym!("pvar", "var5")))),
             v_list!(v_list!(v_qsym!("p", "simplefunc2"))),
-            ValueType::Some(BTreeSet::from_iter(std::iter::once(ValueTypeSome::List(
-                ValueType::Some(BTreeSet::from_iter(std::iter::once(ValueTypeSome::List(
-                    ValueType::Some(BTreeSet::from_iter(std::iter::once(
-                        ValueTypeSome::QualifiedSymbol,
-                    ))),
-                )))),
+            ValueType::from(ValueTypeSome::List(ValueType::from(ValueTypeSome::List(
+                ValueType::from(ValueTypeSome::QualifiedSymbol),
             )))),
         );
         test_compile_and_evaluate(
             env,
             v_bq!(v_list!(v_qsym!("pvar", "var5"))),
             v_list!(v_qsym!("pvar", "var5")),
-            ValueType::Some(BTreeSet::from_iter(std::iter::once(ValueTypeSome::List(
-                ValueType::Some(BTreeSet::from_iter(std::iter::once(
-                    ValueTypeSome::QualifiedSymbol,
-                ))),
-            )))),
+            ValueType::from(ValueTypeSome::List(ValueType::from(
+                ValueTypeSome::QualifiedSymbol,
+            ))),
         );
         test_compile_and_evaluate(
             env,
             v_bq!(v_list!(v_list!(v_splice!(v_qsym!("pvar", "var5"))))),
             v_list!(v_list!(v_qsym!("p", "simplefunc2"))),
-            ValueType::Some(BTreeSet::from_iter(std::iter::once(ValueTypeSome::List(
-                ValueType::Some(BTreeSet::from_iter(std::iter::once(ValueTypeSome::List(
-                    ValueType::Some(BTreeSet::from_iter(std::iter::once(
-                        ValueTypeSome::QualifiedSymbol,
-                    ))),
-                )))),
+            ValueType::from(ValueTypeSome::List(ValueType::from(ValueTypeSome::List(
+                ValueType::from(ValueTypeSome::QualifiedSymbol),
             )))),
         );
     }
@@ -1417,10 +1390,7 @@ mod tests {
         let mut comp: CompilationResult = env
             .compile(v_list!(v_uqsym!("side-effect"), v_str!("a"), v_bool!(true)))
             .unwrap();
-        assert_eq!(
-            comp.return_type,
-            ValueType::Some(BTreeSet::from_iter(std::iter::once(ValueTypeSome::Bool)))
-        );
+        assert_eq!(comp.return_type, ValueType::from(ValueTypeSome::Bool));
         assert_eq!(
             *env.comp_side_effects.borrow(),
             HashSet::from_iter(std::iter::once("a".to_string()))
@@ -1444,10 +1414,7 @@ mod tests {
                 v_str!("str")
             ))
             .unwrap();
-        assert_eq!(
-            comp.return_type,
-            ValueType::Some(BTreeSet::from_iter(std::iter::once(ValueTypeSome::String)))
-        );
+        assert_eq!(comp.return_type, ValueType::from(ValueTypeSome::String));
         assert_eq!(
             *env.comp_side_effects.borrow(),
             HashSet::from_iter(vec!["a".to_string(), "b".to_string()])

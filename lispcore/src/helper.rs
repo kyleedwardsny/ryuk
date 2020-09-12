@@ -217,7 +217,6 @@ impl MacroParameterConsumer for OptionalCompiledMacroParameterConsumer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::BTreeSet;
 
     struct SimpleEnvironment;
 
@@ -282,14 +281,12 @@ mod tests {
 
         let helper = MacroParameterHelper::new()
             .literal::<ValueString>()
-            .compiled(ValueType::Some(BTreeSet::from_iter(vec![
+            .compiled(ValueType::from_iter(vec![
                 ValueTypeSome::Bool,
                 ValueTypeSome::UnqualifiedSymbol,
-            ])))
+            ]))
             .optional_literal::<ValueBool>()
-            .optional_compiled(ValueType::Some(BTreeSet::from_iter(std::iter::once(
-                ValueTypeSome::String,
-            ))));
+            .optional_compiled(ValueType::from(ValueTypeSome::String));
 
         let (s1, b1, b2, s2) = helper
             .consume_parameters(
@@ -303,14 +300,11 @@ mod tests {
             )
             .unwrap();
         assert_eq!(s1, str!("str1"));
-        assert_eq!(
-            b1.return_type,
-            ValueType::Some(BTreeSet::from_iter(std::iter::once(ValueTypeSome::Bool)))
-        );
+        assert_eq!(b1.return_type, ValueType::from(ValueTypeSome::Bool));
         assert_eq!(b2.unwrap(), bool!(false));
         assert_eq!(
             s2.unwrap().return_type,
-            ValueType::Some(BTreeSet::from_iter(std::iter::once(ValueTypeSome::String)))
+            ValueType::from(ValueTypeSome::String)
         );
 
         assert_eq!(
@@ -336,10 +330,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(s1, str!("str1"));
-        assert_eq!(
-            b1.return_type,
-            ValueType::Some(BTreeSet::from_iter(std::iter::once(ValueTypeSome::Bool)))
-        );
+        assert_eq!(b1.return_type, ValueType::from(ValueTypeSome::Bool));
         assert_eq!(b2.unwrap(), bool!(false));
         assert!(s2.is_none());
 
@@ -347,10 +338,7 @@ mod tests {
             .consume_parameters(env, &mut list!(v_str!("str1"), v_bool!(true)))
             .unwrap();
         assert_eq!(s1, str!("str1"));
-        assert_eq!(
-            b1.return_type,
-            ValueType::Some(BTreeSet::from_iter(std::iter::once(ValueTypeSome::Bool)))
-        );
+        assert_eq!(b1.return_type, ValueType::from(ValueTypeSome::Bool));
         assert!(b2.is_none());
         assert!(s2.is_none());
 
@@ -447,24 +435,24 @@ mod tests {
         let mut env = SimpleEnvironment;
         let env = &mut env as &mut dyn Environment;
 
-        let con = CompiledMacroParameterConsumer::new(ValueType::Some(BTreeSet::from_iter(vec![
+        let con = CompiledMacroParameterConsumer::new(ValueType::from_iter(vec![
             ValueTypeSome::String,
             ValueTypeSome::Bool,
-        ])));
+        ]));
         let mut l = list!(v_str!("str"), v_bool!(true), v_list!());
 
         assert_eq!(
             MacroParameterConsumer::consume_parameter(&con, env, &mut l)
                 .unwrap()
                 .return_type,
-            ValueType::Some(BTreeSet::from_iter(std::iter::once(ValueTypeSome::String)))
+            ValueType::from(ValueTypeSome::String)
         );
         assert_eq!(l, list!(v_bool!(true), v_list!()));
         assert_eq!(
             MacroParameterConsumer::consume_parameter(&con, env, &mut l)
                 .unwrap()
                 .return_type,
-            ValueType::Some(BTreeSet::from_iter(std::iter::once(ValueTypeSome::Bool)))
+            ValueType::from(ValueTypeSome::Bool)
         );
         assert_eq!(l, list!(v_list!()));
         assert_eq!(
@@ -486,9 +474,10 @@ mod tests {
         let mut env = SimpleEnvironment;
         let env = &mut env as &mut dyn Environment;
 
-        let con = OptionalCompiledMacroParameterConsumer::new(ValueType::Some(
-            BTreeSet::from_iter(vec![ValueTypeSome::String, ValueTypeSome::Bool]),
-        ));
+        let con = OptionalCompiledMacroParameterConsumer::new(ValueType::from_iter(vec![
+            ValueTypeSome::String,
+            ValueTypeSome::Bool,
+        ]));
         let mut l = list!(v_str!("str"), v_bool!(true), v_list!());
 
         assert_eq!(
@@ -496,7 +485,7 @@ mod tests {
                 .unwrap()
                 .unwrap()
                 .return_type,
-            ValueType::Some(BTreeSet::from_iter(std::iter::once(ValueTypeSome::String)))
+            ValueType::from(ValueTypeSome::String)
         );
         assert_eq!(l, list!(v_bool!(true), v_list!()));
         assert_eq!(
@@ -504,7 +493,7 @@ mod tests {
                 .unwrap()
                 .unwrap()
                 .return_type,
-            ValueType::Some(BTreeSet::from_iter(std::iter::once(ValueTypeSome::Bool)))
+            ValueType::from(ValueTypeSome::Bool)
         );
         assert_eq!(l, list!(v_list!()));
         assert_eq!(

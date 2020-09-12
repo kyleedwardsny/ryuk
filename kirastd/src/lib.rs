@@ -35,21 +35,15 @@ impl Evaluator for IfEvaluator {
 }
 
 pub fn compile_if(env: &mut dyn Environment, mut params: ValueList) -> Result<CompilationResult> {
-    use std::iter::FromIterator;
-
     let helper = MacroParameterHelper::new()
-        .compiled(ValueType::Some(BTreeSet::from_iter(std::iter::once(
-            ValueTypeSome::Bool,
-        ))))
+        .compiled(ValueType::from(ValueTypeSome::Bool))
         .compiled(ValueType::Any)
         .optional_compiled(ValueType::Any);
 
     let (test, then, els) = helper.consume_parameters(env, &mut params)?;
     let mut els = els.unwrap_or_else(|| CompilationResult {
         result: Box::new(LiteralEvaluator::new(Value::List(ValueList(Option::None)))),
-        return_type: ValueType::Some(BTreeSet::from_iter(std::iter::once(ValueTypeSome::List(
-            ValueType::Some(BTreeSet::new()),
-        )))),
+        return_type: ValueType::from(ValueTypeSome::List(ValueType::Some(BTreeSet::new()))),
     });
 
     let mut return_type = then.return_type;
@@ -65,12 +59,10 @@ pub fn compile_quote(
     env: &mut dyn Environment,
     mut params: ValueList,
 ) -> Result<CompilationResult> {
-    use std::iter::FromIterator;
-
     let helper = MacroParameterHelper::new().literal::<Value>();
 
     let (literal,) = helper.consume_parameters(env, &mut params)?;
-    let return_type = ValueType::Some(BTreeSet::from_iter(std::iter::once(literal.value_type())));
+    let return_type = ValueType::from(literal.value_type());
 
     Result::Ok(CompilationResult {
         result: Box::new(LiteralEvaluator::new(literal)),
@@ -194,42 +186,35 @@ mod tests {
     #[test]
     fn test_compile_and_evaluate_if() {
         use std::iter::FromIterator;
-
         let mut env = SimpleEnvironment;
         let env = &mut env as &mut dyn Environment;
 
         let mut comp = compile_if(env, list!(v_bool!(true), v_str!("yes"), v_str!("no"))).unwrap();
         assert_eq!(comp.result.evaluate(env).unwrap(), v_str!("yes"));
-        assert_eq!(
-            comp.return_type,
-            ValueType::Some(BTreeSet::from_iter(std::iter::once(ValueTypeSome::String)))
-        );
+        assert_eq!(comp.return_type, ValueType::from(ValueTypeSome::String));
 
         let mut comp = compile_if(env, list!(v_bool!(false), v_str!("yes"), v_str!("no"))).unwrap();
         assert_eq!(comp.result.evaluate(env).unwrap(), v_str!("no"));
-        assert_eq!(
-            comp.return_type,
-            ValueType::Some(BTreeSet::from_iter(std::iter::once(ValueTypeSome::String)))
-        );
+        assert_eq!(comp.return_type, ValueType::from(ValueTypeSome::String));
 
         let mut comp = compile_if(env, list!(v_bool!(true), v_str!("yes"))).unwrap();
         assert_eq!(comp.result.evaluate(env).unwrap(), v_str!("yes"));
         assert_eq!(
             comp.return_type,
-            ValueType::Some(BTreeSet::from_iter(vec![
+            ValueType::from_iter(vec![
                 ValueTypeSome::List(ValueType::Some(BTreeSet::new())),
                 ValueTypeSome::String
-            ]))
+            ])
         );
 
         let mut comp = compile_if(env, list!(v_bool!(false), v_str!("yes"))).unwrap();
         assert_eq!(comp.result.evaluate(env).unwrap(), v_list!());
         assert_eq!(
             comp.return_type,
-            ValueType::Some(BTreeSet::from_iter(vec![
+            ValueType::from_iter(vec![
                 ValueTypeSome::List(ValueType::Some(BTreeSet::new())),
                 ValueTypeSome::String
-            ]))
+            ])
         );
 
         assert_eq!(compile_if(env, list!()).unwrap_err(), e_program_error!());
