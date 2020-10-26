@@ -250,45 +250,32 @@ fn compile_backquote(
                 let mut list_type = ValueType::new();
                 for item in l {
                     match item {
-                        Value::Backquote(ValueBackquote(v)) => {
-                            let bq = bq.backquote();
-                            let mut result = backquote_comma_splice_push(
-                                compile_backquote(env, (*v).clone(), bq)?,
-                                bq,
-                                BackquoteCommaSplice::Backquote,
-                            );
-                            params.push(ListItem::Item(result.result));
-                            list_type.append(&mut result.return_type);
-                        }
-                        Value::Comma(ValueComma(v)) => {
-                            let bq = bq.comma();
-                            let mut result = backquote_comma_splice_push(
-                                compile_backquote(env, (*v).clone(), bq)?,
-                                bq,
-                                BackquoteCommaSplice::Backquote,
-                            );
-                            params.push(ListItem::Item(result.result));
-                            list_type.append(&mut result.return_type);
-                        }
                         Value::Splice(ValueSplice(v)) => {
                             let bq = bq.splice();
-                            let result = backquote_comma_splice_push(
+                            let mut result = backquote_comma_splice_push(
                                 compile_backquote(env, (*v).clone(), bq)?,
                                 bq,
                                 BackquoteCommaSplice::Splice,
                             );
-                            match result.return_type {
-                                ValueType::Some(types) => {
-                                    for t in types {
-                                        match t {
-                                            ValueTypeSome::List(mut v) => list_type.append(&mut v),
-                                            _ => return Result::Err(e_type_error!()),
+                            if bq.depth == 0 {
+                                match result.return_type {
+                                    ValueType::Some(types) => {
+                                        for t in types {
+                                            match t {
+                                                ValueTypeSome::List(mut v) => {
+                                                    list_type.append(&mut v)
+                                                }
+                                                _ => return Result::Err(e_type_error!()),
+                                            }
                                         }
                                     }
+                                    ValueType::Any => return Result::Err(e_type_error!()),
                                 }
-                                ValueType::Any => return Result::Err(e_type_error!()),
+                                params.push(ListItem::List(result.result));
+                            } else {
+                                list_type.append(&mut result.return_type);
+                                params.push(ListItem::Item(result.result));
                             }
-                            params.push(ListItem::List(result.result));
                         }
                         _ => {
                             let mut result = compile_backquote(env, item, bq)?;
@@ -1369,6 +1356,36 @@ mod tests {
             ValueType::from(ValueTypeSome::List(ValueType::from(ValueTypeSome::List(
                 ValueType::from(ValueTypeSome::QualifiedSymbol),
             )))),
+        );
+        test_compile_and_evaluate(
+            env,
+            v_bq!(v_bq!(v_list!(v_bq!(v_qsym!("pvar", "var5"))))),
+            v_bq!(v_list!(v_bq!(v_qsym!("pvar", "var5")))),
+            ValueType::from(ValueTypeSome::Backquote(ValueType::from(
+                ValueTypeSome::List(ValueType::from(ValueTypeSome::Backquote(ValueType::from(
+                    ValueTypeSome::QualifiedSymbol,
+                )))),
+            ))),
+        );
+        test_compile_and_evaluate(
+            env,
+            v_bq!(v_bq!(v_list!(v_comma!(v_qsym!("pvar", "var5"))))),
+            v_bq!(v_list!(v_comma!(v_qsym!("pvar", "var5")))),
+            ValueType::from(ValueTypeSome::Backquote(ValueType::from(
+                ValueTypeSome::List(ValueType::from(ValueTypeSome::Comma(ValueType::from(
+                    ValueTypeSome::QualifiedSymbol,
+                )))),
+            ))),
+        );
+        test_compile_and_evaluate(
+            env,
+            v_bq!(v_bq!(v_list!(v_splice!(v_qsym!("pvar", "var5"))))),
+            v_bq!(v_list!(v_splice!(v_qsym!("pvar", "var5")))),
+            ValueType::from(ValueTypeSome::Backquote(ValueType::from(
+                ValueTypeSome::List(ValueType::from(ValueTypeSome::Splice(ValueType::from(
+                    ValueTypeSome::QualifiedSymbol,
+                )))),
+            ))),
         );
     }
 
