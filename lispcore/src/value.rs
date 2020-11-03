@@ -125,6 +125,22 @@ impl Hash for ValueQualifiedSymbol {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ValueAbsSymbol {
+    pub namespace: Vec<String>,
+    pub name: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RelSymbolUp;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ValueRelSymbol {
+    pub up: Vec<RelSymbolUp>,
+    pub namespace: Vec<String>,
+    pub name: String,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ValueBool(pub bool);
 
@@ -466,6 +482,68 @@ macro_rules! v_qsym {
 }
 
 #[macro_export]
+macro_rules! asymref {
+    ($namespace:expr, $name:expr) => {
+        $crate::value::ValueAbsSymbol {
+            namespace: $namespace,
+            name: $name,
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! _asym_impl {
+    ([$($taken:literal),*], $last:literal) => {
+        $crate::asymref!(vec![$($taken.into()),*], $last.into())
+    };
+    ([$($taken:literal),*], $next:literal $(,$remaining:literal)*) => {
+        $crate::_asym_impl!([$($taken,)* $next], $($remaining),*)
+    };
+}
+
+#[macro_export]
+macro_rules! asym {
+    ($(/$ns:literal)*) => {
+        $crate::_asym_impl!([], $($ns),*)
+    }
+}
+
+#[macro_export]
+macro_rules! rsymref {
+    ($up:expr, $namespace:expr, $name:expr) => {
+        $crate::value::ValueRelSymbol {
+            up: $up,
+            namespace: $namespace,
+            name: $name,
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! _rsym_up_impl {
+    (__) => {
+        $crate::value::RelSymbolUp
+    };
+}
+
+#[macro_export]
+macro_rules! _rsym_impl {
+    ([$($u:ident),*], [$($taken:literal),*], $last:literal) => {
+        $crate::rsymref!(vec![$($crate::_rsym_up_impl!($u)),*], vec![$($taken.into()),*], $last.into())
+    };
+    ([$($u:ident),*], [$($taken:literal),*], $next:literal $(,$remaining:literal)*) => {
+        $crate::_rsym_impl!([$($u),*], [$($taken,)* $next], $($remaining),*)
+    };
+}
+
+#[macro_export]
+macro_rules! rsym {
+    ($($u:ident/)* $next:literal $(/$remaining:literal)*) => {
+        $crate::_rsym_impl!([$($u),*], [], $next $(,$remaining)*)
+    }
+}
+
+#[macro_export]
 macro_rules! bool {
     ($b:expr) => {
         $crate::value::ValueBool($b)
@@ -625,6 +703,61 @@ mod tests {
                 }
                 _ => panic!("Expected a Value::UnqualifiedSymbol"),
             }
+        }
+
+        #[test]
+        fn test_asymref_macro() {
+            let asym: super::ValueAbsSymbol = asymref!(
+                vec!["ns1".to_string(), "ns2".to_string()],
+                "name".to_string()
+            );
+            assert_eq!(asym.namespace, vec!["ns1", "ns2"]);
+            assert_eq!(asym.name, "name");
+        }
+
+        #[test]
+        fn test_asym_macro() {
+            let asym1: super::ValueAbsSymbol = asym!(/"name1");
+            assert_eq!(asym1.namespace, Vec::<&'static str>::new());
+            assert_eq!(asym1.name, "name1");
+            let asym2: super::ValueAbsSymbol = asym!(/"ns1"/"name2");
+            assert_eq!(asym2.namespace, vec!["ns1"]);
+            assert_eq!(asym2.name, "name2");
+            let asym3: super::ValueAbsSymbol = asym!(/"ns2"/"ns3"/"name3");
+            assert_eq!(asym3.namespace, vec!["ns2", "ns3"]);
+            assert_eq!(asym3.name, "name3");
+        }
+
+        #[test]
+        fn test_rsymref_macro() {
+            let rsym: super::ValueRelSymbol = rsymref!(
+                vec![super::RelSymbolUp, super::RelSymbolUp],
+                vec!["ns1".to_string(), "ns2".to_string()],
+                "name".to_string()
+            );
+            assert_eq!(rsym.up, vec![super::RelSymbolUp, super::RelSymbolUp]);
+            assert_eq!(rsym.namespace, vec!["ns1", "ns2"]);
+            assert_eq!(rsym.name, "name");
+        }
+
+        #[test]
+        fn test_rsym_macro() {
+            let rsym1: super::ValueRelSymbol = rsym!("name1");
+            assert_eq!(rsym1.up, Vec::<super::RelSymbolUp>::new());
+            assert_eq!(rsym1.namespace, Vec::<&'static str>::new());
+            assert_eq!(rsym1.name, "name1");
+            let rsym2: super::ValueRelSymbol = rsym!(__ / __ / "name2");
+            assert_eq!(rsym2.up, vec![super::RelSymbolUp, super::RelSymbolUp]);
+            assert_eq!(rsym2.namespace, Vec::<&'static str>::new());
+            assert_eq!(rsym2.name, "name2");
+            let rsym3: super::ValueRelSymbol = rsym!("ns2" / "ns3" / "name3");
+            assert_eq!(rsym3.up, Vec::<super::RelSymbolUp>::new());
+            assert_eq!(rsym3.namespace, vec!["ns2", "ns3"]);
+            assert_eq!(rsym3.name, "name3");
+            let rsym4: super::ValueRelSymbol = rsym!(__ / "ns4" / "name4");
+            assert_eq!(rsym4.up, vec![super::RelSymbolUp]);
+            assert_eq!(rsym4.namespace, vec!["ns4"]);
+            assert_eq!(rsym4.name, "name4");
         }
 
         #[test]
