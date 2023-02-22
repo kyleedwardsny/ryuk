@@ -6,5 +6,16 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[dependencies]
+proc-macro2 = { version = "1.0.51", optional = true }
+quote = { version = "1.0.22", optional = true }
+syn = { version = "1.0.107", optional = true }
+
+[features]
+default = []
+macros = ["dep:proc-macro2", "dep:quote", "dep:syn"]
+
 [dev-dependencies]
 more-asserts = "0.2"
+ryuk-lispmacros = { path = "../lispmacros" }
+serial_test = "0.4.0"

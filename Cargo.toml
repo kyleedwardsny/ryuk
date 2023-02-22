@@ -3,5 +3,6 @@
 members = [
     "kirastd",
     "lispcore",
+    "lispmacros",
     "lispparser",
 ]
