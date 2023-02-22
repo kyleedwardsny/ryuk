@@ -632,8 +632,6 @@ mod tests {
         }
 
         fn compile_side_effect(&mut self, mut params: ValueList) -> Result<CompilationResult> {
-            use std::convert::TryInto;
-
             let side_effect: ValueString = match params.next() {
                 Option::Some(s) => s,
                 Option::None => return Result::Err(e_program_error!()),

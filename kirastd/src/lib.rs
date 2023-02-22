@@ -23,8 +23,6 @@ impl IfEvaluator {
 
 impl Evaluator for IfEvaluator {
     fn evaluate(&mut self, env: &mut dyn Environment) -> Result<Value> {
-        use std::convert::TryInto;
-
         let b: ValueBool = self.test.evaluate(env)?.try_into().unwrap();
         if b.0 {
             self.then.evaluate(env)
